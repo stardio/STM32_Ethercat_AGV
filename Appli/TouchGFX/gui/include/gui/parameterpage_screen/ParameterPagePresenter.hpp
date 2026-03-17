@@ -27,6 +27,11 @@ public:
 
     virtual ~ParameterPagePresenter() {}
 
+    void notifySetParameterValue(uint8_t index, int32_t value);
+    int32_t notifyGetParameterValue(uint8_t index);
+    bool notifySaveParameterPageToUiFlash();
+    bool notifyLoadParameterPageFromUiFlash();
+
 private:
     ParameterPagePresenter();
 

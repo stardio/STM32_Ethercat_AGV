@@ -1,6 +1,7 @@
 #include <gui/mainpage_screen/MainPageView.hpp>
 #include <gui/mainpage_screen/MainPagePresenter.hpp>
 #include <gui/common/NumberFormat.hpp>
+#include <images/BitmapDatabase.hpp>
 #include <stdint.h>
 
 MainPageView::MainPageView()
@@ -8,10 +9,7 @@ MainPageView::MainPageView()
       runUiState(0U),
       runAppliedState(0U),
       runDebounceCount(0U),
-      runUpdatePending(0U),
-      runClickGuardTicks(0U),
-      runFeedbackLast(0U),
-      runFeedbackStableCount(0U)
+            saveButtonCallback(this, &MainPageView::onSaveButtonPressed)
 {
 
 }
@@ -20,8 +18,10 @@ void MainPageView::setupScreen()
 {
     MainPageViewBase::setupScreen();
 
-    JogSpeedSlider.setValue(10);
-    jogStepCounts = 1000;
+    jogStepCounts = presenter->notifyGetJogStepCounts();
+    int sliderVal = jogStepCounts / 100;
+    if (sliderVal < 1) sliderVal = 1;
+    JogSpeedSlider.setValue(sliderVal);
 
     gui::configureNumericOverlay(numericTexts[0], CurrentPosition, numericBuffers[0]);
     gui::configureNumericOverlay(numericTexts[1], CurrentPosition_1, numericBuffers[1]);
@@ -33,14 +33,21 @@ void MainPageView::setupScreen()
     gui::formatUnsignedWithCommas(0, numericBuffers[1], gui::kNumericBufferSize);
     gui::formatUnsignedWithCommas(0, numericBuffers[2], gui::kNumericBufferSize);
 
-    runUiState = 0U;
-    runAppliedState = 0U;
+    const uint8_t savedRun = presenter->notifyGetRunEnable();
+    runUiState = savedRun;
+    runAppliedState = savedRun;
     runDebounceCount = 0U;
-    runUpdatePending = 0U;
-    runClickGuardTicks = 0U;
-    runFeedbackLast = 0U;
-    runFeedbackStableCount = 0U;
-    ServoON.forceState(false);
+    ServoON.forceState(savedRun != 0U);
+
+    saveButton.setXY(523, 410);
+    saveButton.setBitmaps(
+        touchgfx::Bitmap(BITMAP_ALTERNATE_THEME_IMAGES_WIDGETS_BUTTON_REGULAR_HEIGHT_50_TINY_ROUNDED_ACTION_ID),
+        touchgfx::Bitmap(BITMAP_ALTERNATE_THEME_IMAGES_WIDGETS_BUTTON_REGULAR_HEIGHT_50_TINY_ROUNDED_PRESSED_ID),
+        touchgfx::Bitmap(BITMAP_ICON_THEME_IMAGES_ACTION_DONE_50_50_E8F6FB_SVG_ID),
+        touchgfx::Bitmap(BITMAP_ICON_THEME_IMAGES_ACTION_DONE_50_50_E8F6FB_SVG_ID));
+    saveButton.setIconXY(30, 0);
+    saveButton.setAction(saveButtonCallback);
+    add(saveButton);
 }
 
 void MainPageView::tearDownScreen()
@@ -50,28 +57,22 @@ void MainPageView::tearDownScreen()
 
 void MainPageView::handleTickEvent()
 {
-    if (runClickGuardTicks > 0U)
+    const uint8_t currentRunUi = ServoON.getState() ? 1U : 0U;
+
+    if (currentRunUi != runUiState)
     {
-        runClickGuardTicks--;
+        runUiState = currentRunUi;
+        runDebounceCount = 0U;
+    }
+    else if (runDebounceCount < 20U)
+    {
+        runDebounceCount++;
     }
 
-    if (runUpdatePending != 0U)
+    if ((runDebounceCount >= 5U) && (runAppliedState != runUiState))
     {
-        if (runDebounceCount < 20U)
-        {
-            runDebounceCount++;
-        }
-
-        if (runDebounceCount >= 5U)
-        {
-            if (runAppliedState != runUiState)
-            {
-                runAppliedState = runUiState;
-                presenter->notifySetRunEnable(runAppliedState);
-            }
-            runUpdatePending = 0U;
-            runDebounceCount = 0U;
-        }
+        runAppliedState = runUiState;
+        presenter->notifySetRunEnable(runAppliedState);
     }
 
     /* Hold-to-jog: send delta every tick while button is physically held */
@@ -87,17 +88,14 @@ void MainPageView::handleTickEvent()
     MainPageViewBase::handleTickEvent();
 }
 
+void MainPageView::handleClickEvent(const touchgfx::ClickEvent& evt)
+{
+    MainPageViewBase::handleClickEvent(evt);
+}
+
 void MainPageView::function1()
 {
-    if (runClickGuardTicks > 0U)
-    {
-        return;
-    }
-
-    runUiState = ServoON.getState() ? 1U : 0U;
-    runDebounceCount = 0U;
-    runUpdatePending = 1U;
-    runClickGuardTicks = 8U;
+    /* RUN is applied via debounced polling in handleTickEvent(). */
 }
 
 void MainPageView::function2()
@@ -121,6 +119,17 @@ void MainPageView::function4(int value)
     {
         jogStepCounts = 10;
     }
+    presenter->notifySetJogStepCounts(jogStepCounts);
+}
+
+void MainPageView::onSaveButtonPressed(const touchgfx::AbstractButton& src)
+{
+    if (&src != &saveButton)
+    {
+        return;
+    }
+
+    presenter->notifyCommitPersistentState();
 }
 
 void MainPageView::function5()
@@ -148,21 +157,14 @@ void MainPageView::updateMotionData(int32_t position, int32_t speed, int16_t tor
 void MainPageView::updateRunEnable(uint8_t enabled)
 {
     const uint8_t runFeedback = (enabled != 0U) ? 1U : 0U;
-    if (runFeedback != runFeedbackLast)
-    {
-        runFeedbackLast = runFeedback;
-        runFeedbackStableCount = 0U;
-    }
-    else if (runFeedbackStableCount < 20U)
-    {
-        runFeedbackStableCount++;
-    }
 
-    // Sync UI only when no local toggle transition is in progress and feedback is stable.
-    if ((runUpdatePending == 0U) && (runUiState == runAppliedState) && (runFeedbackStableCount >= 5U) && (runAppliedState != runFeedback))
+    /* Only resync the toggle when there is no local UI transition in progress.
+     * This avoids fighting the ToggleButton's own click/release state machine. */
+    if ((runDebounceCount >= 5U) && (runAppliedState == runUiState) && (runAppliedState != runFeedback))
     {
         runUiState = runFeedback;
         runAppliedState = runFeedback;
+        runDebounceCount = 0U;
         ServoON.forceState(runFeedback != 0U);
     }
 }

@@ -27,6 +27,7 @@
 /* USER CODE BEGIN Includes */
 #include <stdio.h>
 #include <string.h>
+#include "settings_persistence.h"
 #include "stm32h7rsxx_hal_eth.h"
 #include "soem/soem.h"
 #include "osal.h"
@@ -237,6 +238,7 @@ int main(void)
   HAL_Init();
 
   /* USER CODE BEGIN Init */
+  SettingsPersistence_Init();
 
   /* USER CODE END Init */
 

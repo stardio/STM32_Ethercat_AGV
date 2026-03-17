@@ -191,7 +191,8 @@ if ($LASTEXITCODE -ne 0) {
     throw "Build failed."
 }
 
-$binPath = Join-Path $buildDir "Appli\$Target.bin"
+$targetSubdir = if ($Target -like "*Boot*") { "Boot" } else { "Appli" }
+$binPath = Join-Path $buildDir (Join-Path $targetSubdir "$Target.bin")
 if (Test-Path $binPath) {
     $bin = Get-Item $binPath
     Write-Host "[build] bin: $($bin.FullName) ($([Math]::Round($bin.Length / 1MB, 2)) MB)"

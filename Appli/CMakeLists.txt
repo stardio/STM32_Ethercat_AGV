@@ -10,6 +10,8 @@ set(APPLI_SOURCES
     Core/Src/stm32h7rsxx_it.c
     Core/Src/system_stm32h7rsxx.c
     Core/Src/freertos.c
+    Core/Src/settings_persistence.c
+    Core/Src/ui_flash_storage.c
     Core/Src/soem_port.c
     ${CMAKE_SOURCE_DIR}/gcc/startup_stm32h7s7l8hxh_appli.s
     ${CMAKE_SOURCE_DIR}/gcc/syscalls.c
@@ -47,6 +49,15 @@ set(HAL_SOURCES
     ${CMAKE_SOURCE_DIR}/Drivers/STM32H7RSxx_HAL_Driver/Src/stm32h7rsxx_hal_tim_ex.c
     ${CMAKE_SOURCE_DIR}/Drivers/STM32H7RSxx_HAL_Driver/Src/stm32h7rsxx_hal_uart.c
     ${CMAKE_SOURCE_DIR}/Drivers/STM32H7RSxx_HAL_Driver/Src/stm32h7rsxx_hal_uart_ex.c
+    ${CMAKE_SOURCE_DIR}/Drivers/STM32H7RSxx_HAL_Driver/Src/stm32h7rsxx_hal_xspi.c
+)
+
+# External memory manager (NOR SFDP + XSPI SAL)
+set(EXTMEM_SOURCES
+    ${CMAKE_SOURCE_DIR}/Middlewares/ST/STM32_ExtMem_Manager/stm32_extmem.c
+    ${CMAKE_SOURCE_DIR}/Middlewares/ST/STM32_ExtMem_Manager/nor_sfdp/stm32_sfdp_driver.c
+    ${CMAKE_SOURCE_DIR}/Middlewares/ST/STM32_ExtMem_Manager/nor_sfdp/stm32_sfdp_data.c
+    ${CMAKE_SOURCE_DIR}/Middlewares/ST/STM32_ExtMem_Manager/sal/stm32_sal_xspi.c
 )
 
 # FreeRTOS sources
@@ -87,6 +98,7 @@ file(GLOB_RECURSE TOUCHGFX_APP_SOURCES
 add_executable(${PROJECT_NAME}
     ${APPLI_SOURCES}
     ${HAL_SOURCES}
+    ${EXTMEM_SOURCES}
     ${FREERTOS_SOURCES}
     ${SOEM_SOURCES}
     ${LAN8742_SOURCES}
@@ -117,6 +129,9 @@ target_include_directories(${PROJECT_NAME} PRIVATE
     ${CMAKE_SOURCE_DIR}/Middlewares/ST/touchgfx/os
     ${CMAKE_SOURCE_DIR}/Middlewares/ST/touchgfx_components/gpu2d/TouchGFXNema/include
     ${CMAKE_SOURCE_DIR}/Middlewares/ST/touchgfx_components/gpu2d/NemaGFX/include
+    ${CMAKE_SOURCE_DIR}/Middlewares/ST/STM32_ExtMem_Manager
+    ${CMAKE_SOURCE_DIR}/Middlewares/ST/STM32_ExtMem_Manager/nor_sfdp
+    ${CMAKE_SOURCE_DIR}/Middlewares/ST/STM32_ExtMem_Manager/sal
     # SOEM includes
     ${SOEM_DIR}/include
     ${SOEM_DIR}/osal

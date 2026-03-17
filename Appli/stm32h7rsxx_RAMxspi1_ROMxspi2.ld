@@ -108,6 +108,14 @@ SECTIONS
     *(.sram_ahb*)
     . = ALIGN(32);
   } >SRAMAHB
+
+  .bkpsram (NOLOAD) :
+  {
+    . = ALIGN(4);
+    *(.bkpsram)
+    *(.bkpsram*)
+    . = ALIGN(4);
+  } >BKPSRAM
   
     FontFlashSection :
   {

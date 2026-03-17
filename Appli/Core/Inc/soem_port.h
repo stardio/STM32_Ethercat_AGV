@@ -30,6 +30,14 @@ uint8_t  SOEM_GetRunEnable(void);
 void     SOEM_SetRunEnable(uint8_t enable);
 void     SOEM_SetTargetPositionDelta(int32_t delta);
 void     SOEM_SetTargetPositionAbs(int32_t pos);
+void     SOEM_SetProfileVelocity(int32_t velocity);
+void     SOEM_SetTorqueLimitPercent(uint16_t percent);
+void     SOEM_SetProfileAcceleration(int32_t acceleration);
+void     SOEM_SetProfileDeceleration(int32_t deceleration);
+void     SOEM_SetSoftwareLimitPlus(int32_t limitPlus);
+void     SOEM_SetSoftwareLimitMinus(int32_t limitMinus);
+void     SOEM_SetUnitScale(int32_t scale);
+void     SOEM_SetHomeOffset(int32_t offset);
 void     SOEM_SetHomePosition(void);
 
 #else
@@ -48,6 +56,14 @@ static inline uint8_t  SOEM_GetRunEnable(void)      { return 0; }
 static inline void     SOEM_SetRunEnable(uint8_t enable) { (void)enable; }
 static inline void     SOEM_SetTargetPositionDelta(int32_t delta) { (void)delta; }
 static inline void     SOEM_SetTargetPositionAbs(int32_t pos)     { (void)pos; }
+static inline void     SOEM_SetProfileVelocity(int32_t velocity) { (void)velocity; }
+static inline void     SOEM_SetTorqueLimitPercent(uint16_t percent) { (void)percent; }
+static inline void     SOEM_SetProfileAcceleration(int32_t acceleration) { (void)acceleration; }
+static inline void     SOEM_SetProfileDeceleration(int32_t deceleration) { (void)deceleration; }
+static inline void     SOEM_SetSoftwareLimitPlus(int32_t limitPlus) { (void)limitPlus; }
+static inline void     SOEM_SetSoftwareLimitMinus(int32_t limitMinus) { (void)limitMinus; }
+static inline void     SOEM_SetUnitScale(int32_t scale) { (void)scale; }
+static inline void     SOEM_SetHomeOffset(int32_t offset) { (void)offset; }
 static inline void     SOEM_SetHomePosition(void)                  {}
 #endif
 

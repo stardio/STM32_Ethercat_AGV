@@ -56,7 +56,8 @@ _Min_Heap_Size = 0x1000;      /* required amount of heap  */
 _Min_Stack_Size = 0x1000; /* required amount of stack */
 
 __FLASH_BEGIN  = 0x08000000;
-__FLASH_SIZE   = 0x00010000;
+__SETTINGS_FLASH_SIZE = 0x00002000;
+__FLASH_SIZE   = 0x00010000 - __SETTINGS_FLASH_SIZE;
 
 
 __RAM_BEGIN    = 0x24000000;

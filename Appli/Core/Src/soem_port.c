@@ -5,6 +5,7 @@
 #include "soem/ec_main.h"
 #include "soem/ec_type.h"
 #include "stm32h7rsxx.h"  /* For SCB_CleanDCache_by_Addr, __DSB, __ISB */
+#include <limits.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -14,8 +15,21 @@
 #define SOEM_IFNAME "st_eth"
 #endif
 
+#ifndef SOEM_ENABLE_PERIODIC_PDO_DEBUG
+#define SOEM_ENABLE_PERIODIC_PDO_DEBUG 0
+#endif
+
+#ifndef SOEM_ENABLE_CMD_DEBUG_LOG
+#define SOEM_ENABLE_CMD_DEBUG_LOG 0
+#endif
+
+#ifndef SOEM_TARGET_REACHED_TOLERANCE_HW
+#define SOEM_TARGET_REACHED_TOLERANCE_HW 5
+#endif
+
 /* Forward declaration */
 static void soem_log(const char *msg);
+static int32_t soem_clamp_hw_position(int32_t hwPos);
 
 ecx_contextt soem_context;
 /* Keep IOmap in AXI SRAM non-cacheable region (RAM_CMD) for ETH DMA coherency.
@@ -46,6 +60,7 @@ static soem_txpdo_t *soem_txpdo = NULL;
 static uint16 soem_last_statusword = 0xFFFFU;
 static uint16 soem_last_controlword = 0xFFFFU;
 static int32 soem_target_position = 0;
+static int32 soem_target_position_output = 0;
 static uint8 soem_last_state = 0xFFU;
 
 /* Volatile shadow copies for safe UI access (TouchGFX) */
@@ -55,11 +70,80 @@ static volatile int16_t  soem_shadow_torque   = 0;
 static volatile uint16_t soem_shadow_statusword = 0;
 static volatile uint8_t  soem_shadow_pdo_ready  = 0;
 static volatile uint8_t  soem_shadow_run_enable = 0;
+static volatile int32_t  soem_profile_velocity = 0;
+static volatile uint16_t soem_torque_limit_percent = 0;
+static volatile uint8_t  soem_profile_velocity_pending = 0U;
+static volatile uint8_t  soem_torque_limit_pending = 0U;
+static volatile int32_t  soem_profile_acceleration = 0;
+static volatile int32_t  soem_profile_deceleration = 0;
+static volatile uint8_t  soem_profile_acceleration_pending = 0U;
+static volatile uint8_t  soem_profile_deceleration_pending = 0U;
+static volatile int32_t  soem_limit_plus_user = INT32_MAX;
+static volatile int32_t  soem_limit_minus_user = INT32_MIN;
+static volatile int32_t  soem_limit_plus_hw = INT32_MAX;
+static volatile int32_t  soem_limit_minus_hw = INT32_MIN;
+static volatile uint8_t  soem_software_limits_pending = 0U;
+static volatile uint8_t  soem_software_limits_enabled = 0U;
+static volatile uint8_t  soem_software_limits_blocked = 0U;
+static volatile int32_t  soem_unit_scale = 1;
+static volatile uint8_t  soem_unit_scale_pending = 0U;
+static volatile uint8_t  soem_home_offset_pending = 0U;
 
 /* Home offset: set by SOEM_SetHomePosition().
  * All position reads are relative to this origin.
  * All target writes are translated back to absolute hardware counts. */
 static volatile int32_t  soem_home_offset = 0;
+
+static void soem_latch_target_to_actual(const char *reason)
+{
+  soem_target_position = soem_clamp_hw_position((int32_t)soem_shadow_position);
+  soem_target_position_output = soem_target_position;
+  if ((reason != NULL) && (reason[0] != '\0'))
+  {
+    soem_log(reason);
+  }
+}
+
+static void soem_log_fault_diagnostics(uint16 statusword)
+{
+  char line[96];
+  uint16 faultCode = 0U;
+  uint8 faultReg = 0U;
+  int okCode = ecx_SDOread(&soem_context, 1, 0x603F, 0, FALSE, (int[]){ (int)sizeof(faultCode) }, &faultCode, EC_TIMEOUTRXM);
+  int okReg = ecx_SDOread(&soem_context, 1, 0x1001, 0, FALSE, (int[]){ (int)sizeof(faultReg) }, &faultReg, EC_TIMEOUTRXM);
+
+  if (okCode > 0)
+  {
+    (void)snprintf(line, sizeof(line), "CIA402: fault code=0x%04X status=0x%04X", faultCode, statusword);
+    soem_log(line);
+  }
+  else
+  {
+    (void)snprintf(line, sizeof(line), "CIA402: fault code read failed status=0x%04X", statusword);
+    soem_log(line);
+  }
+
+  if (okReg > 0)
+  {
+    (void)snprintf(line, sizeof(line), "CIA402: fault register=0x%02X", faultReg);
+    soem_log(line);
+  }
+
+  (void)snprintf(line, sizeof(line), "CIA402: actual=%ld target=%ld hwLimits=[%ld,%ld]",
+                 (long)soem_shadow_position,
+                 (long)soem_target_position,
+                 (long)soem_limit_minus_hw,
+                 (long)soem_limit_plus_hw);
+  soem_log(line);
+
+  (void)snprintf(line, sizeof(line), "CIA402: userLimits=[%ld,%ld] unit=%ld home=%ld limits=%s",
+                 (long)soem_limit_minus_user,
+                 (long)soem_limit_plus_user,
+                 (long)soem_unit_scale,
+                 (long)soem_home_offset,
+                 (soem_software_limits_enabled != 0U) ? "on" : "off");
+  soem_log(line);
+}
 
 /* SOEM_PortPoll is called every ~100 ms in main task. */
 #define SOEM_CIA402_HOLD_CYCLES 5U      /* ~500 ms */
@@ -80,6 +164,7 @@ static soem_cia402_stage_t soem_cia402_stage = SOEM_CIA402_STAGE_SEND_SHUTDOWN;
 static uint16 soem_cia402_hold_counter = 0U;
 static uint16 soem_cia402_timeout_counter = 0U;
 static uint16 soem_last_sdo_statusword = 0xFFFFU;
+static uint8 soem_fault_active = 0U;
 
 /* Manual 1st PDO mapping: RxPDO=0x1600, TxPDO=0x1A00 */
 #define SOEM_RXPDO_ASSIGN_INDEX 0x1600U
@@ -258,6 +343,370 @@ static void soem_log_cia402_state(uint8 state)
   }
 }
 
+static int32_t soem_saturated_user_to_hw(int32_t userPos)
+{
+  int32_t scale = (soem_unit_scale > 0) ? soem_unit_scale : 1;
+  int64_t hw = (int64_t)userPos * (int64_t)scale + (int64_t)soem_home_offset;
+  if (hw > (int64_t)INT32_MAX)
+  {
+    hw = (int64_t)INT32_MAX;
+  }
+  else if (hw < (int64_t)INT32_MIN)
+  {
+    hw = (int64_t)INT32_MIN;
+  }
+  return (int32_t)hw;
+}
+
+static int32_t soem_hw_to_user(int32_t hwPos)
+{
+  int32_t scale = (soem_unit_scale > 0) ? soem_unit_scale : 1;
+  int64_t user = ((int64_t)hwPos - (int64_t)soem_home_offset) / (int64_t)scale;
+  if (user > (int64_t)INT32_MAX)
+  {
+    user = (int64_t)INT32_MAX;
+  }
+  else if (user < (int64_t)INT32_MIN)
+  {
+    user = (int64_t)INT32_MIN;
+  }
+  return (int32_t)user;
+}
+
+static int32_t soem_clamp_user_position(int32_t userPos)
+{
+  if (soem_software_limits_enabled == 0U)
+  {
+    return userPos;
+  }
+
+  if (userPos > soem_limit_plus_user)
+  {
+    return soem_limit_plus_user;
+  }
+  if (userPos < soem_limit_minus_user)
+  {
+    return soem_limit_minus_user;
+  }
+  return userPos;
+}
+
+static int32_t soem_clamp_hw_position(int32_t hwPos)
+{
+  if (soem_software_limits_enabled == 0U)
+  {
+    return hwPos;
+  }
+
+  if (hwPos > soem_limit_plus_hw)
+  {
+    return soem_limit_plus_hw;
+  }
+  if (hwPos < soem_limit_minus_hw)
+  {
+    return soem_limit_minus_hw;
+  }
+  return hwPos;
+}
+
+static int32_t soem_get_target_step_hw_per_cycle(void)
+{
+  int64_t velocityUser = (int64_t)((soem_profile_velocity < 0) ? -soem_profile_velocity : soem_profile_velocity);
+  int64_t scale = (int64_t)((soem_unit_scale > 0) ? soem_unit_scale : 1);
+  int64_t velocityHwPerSec = velocityUser * scale;
+  int64_t stepHwPerCycle = velocityHwPerSec / 1000LL; /* 1 ms cycle */
+
+  if (stepHwPerCycle < 1LL)
+  {
+    stepHwPerCycle = 1LL;
+  }
+  else if (stepHwPerCycle > (int64_t)INT32_MAX)
+  {
+    stepHwPerCycle = (int64_t)INT32_MAX;
+  }
+
+  return (int32_t)stepHwPerCycle;
+}
+
+static void soem_update_target_position_output(void)
+{
+  int32_t command = soem_target_position;
+  int32_t output = soem_target_position_output;
+
+  int64_t errorToActual = (int64_t)command - (int64_t)soem_shadow_position;
+  if (errorToActual < 0)
+  {
+    errorToActual = -errorToActual;
+  }
+
+  if (errorToActual <= (int64_t)SOEM_TARGET_REACHED_TOLERANCE_HW)
+  {
+    soem_target_position = (int32_t)soem_shadow_position;
+    soem_target_position_output = (int32_t)soem_shadow_position;
+    return;
+  }
+
+  if (output == command)
+  {
+    return;
+  }
+
+  const int32_t step = soem_get_target_step_hw_per_cycle();
+  const int64_t diff = (int64_t)command - (int64_t)output;
+
+  if (diff > (int64_t)step)
+  {
+    output += step;
+  }
+  else if (diff < -(int64_t)step)
+  {
+    output -= step;
+  }
+  else
+  {
+    output = command;
+  }
+
+  soem_target_position_output = soem_clamp_hw_position(output);
+}
+
+static void soem_refresh_hw_limits(void)
+{
+  /* Treat zero-width or inverted ranges as disabled.
+   * This avoids immediate servo faults when uninitialized UI parameters save
+   * Limit+ = 0 and Limit- = 0, which would otherwise force the allowed range
+   * to a single point at the origin. */
+  if ((soem_limit_plus_user <= soem_limit_minus_user) ||
+      ((soem_limit_plus_user == 0) && (soem_limit_minus_user == 0)))
+  {
+    soem_limit_plus_hw = INT32_MAX;
+    soem_limit_minus_hw = INT32_MIN;
+    soem_software_limits_enabled = 0U;
+    soem_software_limits_blocked = 0U;
+  }
+  else
+  {
+    soem_software_limits_enabled = 1U;
+    soem_software_limits_blocked = 0U;
+    if (soem_limit_plus_user >= (INT32_MAX / 2))
+    {
+      soem_limit_plus_hw = INT32_MAX;
+    }
+    else
+    {
+      soem_limit_plus_hw = soem_saturated_user_to_hw(soem_limit_plus_user);
+    }
+
+    if (soem_limit_minus_user <= (INT32_MIN / 2))
+    {
+      soem_limit_minus_hw = INT32_MIN;
+    }
+    else
+    {
+      soem_limit_minus_hw = soem_saturated_user_to_hw(soem_limit_minus_user);
+    }
+  }
+
+  if (soem_limit_minus_hw > soem_limit_plus_hw)
+  {
+    int32_t tmp = soem_limit_minus_hw;
+    soem_limit_minus_hw = soem_limit_plus_hw;
+    soem_limit_plus_hw = tmp;
+  }
+
+  if (soem_software_limits_enabled != 0U)
+  {
+    const int32_t actualHw = (int32_t)soem_shadow_position;
+    const int32_t targetHw = soem_target_position;
+
+    if ((actualHw < soem_limit_minus_hw) || (actualHw > soem_limit_plus_hw) ||
+        (targetHw < soem_limit_minus_hw) || (targetHw > soem_limit_plus_hw))
+    {
+      soem_limit_plus_hw = INT32_MAX;
+      soem_limit_minus_hw = INT32_MIN;
+      soem_software_limits_enabled = 0U;
+      soem_software_limits_blocked = 1U;
+    }
+  }
+
+  soem_target_position = soem_clamp_hw_position(soem_target_position);
+  soem_target_position_output = soem_clamp_hw_position(soem_target_position_output);
+}
+
+static void soem_apply_pending_motion_settings(void)
+{
+  if ((soem_profile_velocity_pending == 0U) &&
+      (soem_torque_limit_pending == 0U) &&
+      (soem_profile_acceleration_pending == 0U) &&
+      (soem_profile_deceleration_pending == 0U) &&
+      (soem_software_limits_pending == 0U) &&
+      (soem_unit_scale_pending == 0U) &&
+      (soem_home_offset_pending == 0U))
+  {
+    return;
+  }
+
+  if (soem_context.slavecount < 1)
+  {
+    return;
+  }
+
+  /* Avoid blocking SDO writes while in Operation Enabled.
+   * Some drives fault when mailbox writes occur during active CSP motion. */
+  if (soem_cia402_stage == SOEM_CIA402_STAGE_OPERATION_ENABLED)
+  {
+    return;
+  }
+
+  if (soem_profile_velocity_pending != 0U)
+  {
+    uint32 velocity = (uint32)soem_profile_velocity;
+    int wkc = ecx_SDOwrite(&soem_context, 1, 0x6081, 0, FALSE, sizeof(velocity), &velocity, EC_TIMEOUTRXM);
+    if (wkc > 0)
+    {
+      soem_profile_velocity_pending = 0U;
+      soem_log("SOEM: profile velocity applied");
+    }
+    else
+    {
+      soem_profile_velocity_pending = 0U;
+      soem_log("SOEM: profile velocity apply failed");
+    }
+  }
+
+  if (soem_torque_limit_pending != 0U)
+  {
+    /* 0x6072 is per-mille (1000 = 100.0%). */
+    uint16 torquePermille = (uint16)(soem_torque_limit_percent * 10U);
+    int wkc = ecx_SDOwrite(&soem_context, 1, 0x6072, 0, FALSE, sizeof(torquePermille), &torquePermille, EC_TIMEOUTRXM);
+    if (wkc > 0)
+    {
+      soem_torque_limit_pending = 0U;
+      soem_log("SOEM: torque limit applied");
+    }
+    else
+    {
+      soem_torque_limit_pending = 0U;
+      soem_log("SOEM: torque limit apply failed");
+    }
+  }
+
+  if (soem_profile_acceleration_pending != 0U)
+  {
+    uint32 acceleration = (uint32)soem_profile_acceleration;
+    int wkc = ecx_SDOwrite(&soem_context, 1, 0x6083, 0, FALSE, sizeof(acceleration), &acceleration, EC_TIMEOUTRXM);
+    if (wkc > 0)
+    {
+      soem_profile_acceleration_pending = 0U;
+      soem_log("SOEM: profile acceleration applied");
+    }
+    else
+    {
+      soem_profile_acceleration_pending = 0U;
+      soem_log("SOEM: profile acceleration apply failed");
+    }
+  }
+
+  if (soem_profile_deceleration_pending != 0U)
+  {
+    uint32 deceleration = (uint32)soem_profile_deceleration;
+    int wkc = ecx_SDOwrite(&soem_context, 1, 0x6084, 0, FALSE, sizeof(deceleration), &deceleration, EC_TIMEOUTRXM);
+    if (wkc > 0)
+    {
+      soem_profile_deceleration_pending = 0U;
+      soem_log("SOEM: profile deceleration applied");
+    }
+    else
+    {
+      soem_profile_deceleration_pending = 0U;
+      soem_log("SOEM: profile deceleration apply failed");
+    }
+  }
+
+  if (soem_software_limits_pending != 0U)
+  {
+    if (soem_software_limits_enabled == 0U)
+    {
+      /* Explicitly clear drive-side stale software limits (0x607D)
+       * when limits are disabled in the UI/model. Otherwise previously
+       * written narrow limits may remain active in the drive and trigger
+       * immediate fault on large ABS/INC commands. */
+      int32_t minLimit = INT32_MIN;
+      int32_t maxLimit = INT32_MAX;
+      int wkcMin = ecx_SDOwrite(&soem_context, 1, 0x607D, 1, FALSE, sizeof(minLimit), &minLimit, EC_TIMEOUTRXM);
+      int wkcMax = ecx_SDOwrite(&soem_context, 1, 0x607D, 2, FALSE, sizeof(maxLimit), &maxLimit, EC_TIMEOUTRXM);
+
+      soem_software_limits_pending = 0U;
+      if ((wkcMin > 0) && (wkcMax > 0))
+      {
+        if (soem_software_limits_blocked != 0U)
+        {
+          soem_log("SOEM: software limits disabled and cleared in drive (current actual/target outside configured range)");
+        }
+        else
+        {
+          soem_log("SOEM: software limits disabled and cleared in drive (invalid or zero-width range)");
+        }
+      }
+      else
+      {
+        soem_log("SOEM: software limits clear failed");
+      }
+    }
+    else
+    {
+      int32_t minLimit = soem_limit_minus_hw;
+      int32_t maxLimit = soem_limit_plus_hw;
+      int wkcMin = ecx_SDOwrite(&soem_context, 1, 0x607D, 1, FALSE, sizeof(minLimit), &minLimit, EC_TIMEOUTRXM);
+      int wkcMax = ecx_SDOwrite(&soem_context, 1, 0x607D, 2, FALSE, sizeof(maxLimit), &maxLimit, EC_TIMEOUTRXM);
+      if ((wkcMin > 0) && (wkcMax > 0))
+      {
+        soem_software_limits_pending = 0U;
+        soem_log("SOEM: software limits applied");
+      }
+      else
+      {
+        soem_software_limits_pending = 0U;
+        soem_log("SOEM: software limits apply failed");
+      }
+    }
+  }
+
+  if (soem_unit_scale_pending != 0U)
+  {
+    uint32 feedConst = (uint32)((soem_unit_scale > 0) ? soem_unit_scale : 1);
+    uint32 shaftRevs = 1U;
+    int wkcFeed = ecx_SDOwrite(&soem_context, 1, 0x6092, 1, FALSE, sizeof(feedConst), &feedConst, EC_TIMEOUTRXM);
+    int wkcRevs = ecx_SDOwrite(&soem_context, 1, 0x6092, 2, FALSE, sizeof(shaftRevs), &shaftRevs, EC_TIMEOUTRXM);
+    if ((wkcFeed > 0) && (wkcRevs > 0))
+    {
+      soem_unit_scale_pending = 0U;
+      soem_log("SOEM: unit scale applied");
+    }
+    else
+    {
+      soem_unit_scale_pending = 0U;
+      soem_log("SOEM: unit scale apply failed");
+    }
+  }
+
+  if (soem_home_offset_pending != 0U)
+  {
+    int32_t homeOffset = soem_home_offset;
+    int wkc = ecx_SDOwrite(&soem_context, 1, 0x607C, 0, FALSE, sizeof(homeOffset), &homeOffset, EC_TIMEOUTRXM);
+    if (wkc > 0)
+    {
+      soem_home_offset_pending = 0U;
+      soem_log("SOEM: home offset applied");
+    }
+    else
+    {
+      soem_home_offset_pending = 0U;
+      soem_log("SOEM: home offset apply failed");
+    }
+  }
+}
+
 static void soem_update_pdo_pointers(void)
 {
   ec_groupt *grp = soem_context.grouplist + soem_group;
@@ -308,6 +757,8 @@ static void soem_cia402_step(uint16 statusword)
   uint16 effective_statusword = statusword;
   uint16 controlword = soem_last_controlword;
 
+  soem_update_target_position_output();
+
   /* If PDO statusword is still zero, skip CiA402 processing —
    * the slave hasn't started sending TxPDO yet.  Do NOT use SDO
    * fallback here because SDO frames inside the cyclic PDO loop
@@ -322,7 +773,7 @@ static void soem_cia402_step(uint16 statusword)
     }
     /* Keep sending controlword=0 (no action) while waiting. */
     soem_rxpdo->controlword = 0U;
-    soem_rxpdo->target_position = soem_target_position;
+    soem_rxpdo->target_position = soem_target_position_output;
     return;
   }
 
@@ -346,13 +797,24 @@ static void soem_cia402_step(uint16 statusword)
     }
 
     soem_rxpdo->controlword = controlword;
-    soem_rxpdo->target_position = soem_target_position;
+    soem_rxpdo->target_position = soem_target_position_output;
     return;
   }
 
   /* Fault bit set: send fault reset first. */
   if ((effective_statusword & 0x0008U) != 0U)
   {
+    if (soem_fault_active == 0U)
+    {
+      soem_fault_active = 1U;
+      soem_log_fault_diagnostics(effective_statusword);
+    }
+
+    /* Before clearing the fault, align CSP target to the current actual position.
+     * If RUN stays logically ON during recovery, a stale target can immediately
+     * retrigger a following/position fault after Operation Enabled is restored. */
+    soem_latch_target_to_actual("CIA402: fault recovery -> latch target to actual");
+
     controlword = 0x0080U;
     soem_cia402_stage = SOEM_CIA402_STAGE_SEND_SHUTDOWN;
     soem_cia402_hold_counter = 0U;
@@ -361,6 +823,8 @@ static void soem_cia402_step(uint16 statusword)
   }
   else
   {
+    soem_fault_active = 0U;
+
     switch (soem_cia402_stage)
     {
       case SOEM_CIA402_STAGE_SEND_SHUTDOWN:
@@ -476,7 +940,7 @@ static void soem_cia402_step(uint16 statusword)
   }
 
   soem_rxpdo->controlword = controlword;
-  soem_rxpdo->target_position = soem_target_position;
+  soem_rxpdo->target_position = soem_target_position_output;
 }
 
 void SOEM_PortSetLog(void (*log_fn)(const char *msg))
@@ -769,7 +1233,9 @@ void SOEM_PortPoll(void)
 
   if (soem_pdo_ready != 0U)
   {
+  #if SOEM_ENABLE_PERIODIC_PDO_DEBUG
     static uint32 pdo_debug_counter = 0;
+  #endif
     uint16 statusword = soem_txpdo->statusword;
 
     /* Update shadow copies for UI access */
@@ -794,6 +1260,7 @@ void SOEM_PortPoll(void)
       }
     }
 
+#if SOEM_ENABLE_PERIODIC_PDO_DEBUG
     /* Debug: periodic statusword check every 5000 cycles (~5s) */
     pdo_debug_counter++;
     if ((pdo_debug_counter % 5000U) == 0U)
@@ -802,18 +1269,20 @@ void SOEM_PortPoll(void)
       ec_groupt *grp = soem_context.grouplist + soem_group;
       uint8 *inp = (uint8 *)grp->inputs;
       int ilen = (grp->Ibytes > 20) ? 20 : (int)grp->Ibytes;
-      /* Hexdump first 20 bytes of raw TxPDO (input) data */
       int pos = snprintf(line, sizeof(line), "IN[%d]:", ilen);
       for (int i = 0; i < ilen && pos < 120; i++)
       {
         pos += snprintf(line + pos, sizeof(line) - (size_t)pos, " %02X", inp[i]);
       }
       soem_log(line);
-      (void)snprintf(line, sizeof(line), "PDO: SW=0x%04X CTL=0x%04X stg=%u cnt=%lu", 
-                     statusword, soem_rxpdo->controlword, 
+      (void)snprintf(line, sizeof(line), "PDO: SW=0x%04X CTL=0x%04X stg=%u cnt=%lu",
+                     statusword, soem_rxpdo->controlword,
                      (unsigned)soem_cia402_stage, (unsigned long)pdo_debug_counter);
       soem_log(line);
     }
+#endif
+
+    soem_apply_pending_motion_settings();
 
     soem_cia402_step(statusword);
   }
@@ -821,7 +1290,7 @@ void SOEM_PortPoll(void)
 
 /* ─── UI accessors (callable from TouchGFX task) ─────────────────────────── */
 
-int32_t SOEM_GetPositionActual(void)  { return (int32_t)soem_shadow_position - (int32_t)soem_home_offset; }
+int32_t SOEM_GetPositionActual(void)  { return soem_hw_to_user((int32_t)soem_shadow_position); }
 int32_t SOEM_GetVelocityActual(void)  { return (int32_t)soem_shadow_velocity; }
 int16_t SOEM_GetTorqueActual(void)    { return (int16_t)soem_shadow_torque;   }
 uint16_t SOEM_GetStatusword(void)     { return (uint16_t)soem_shadow_statusword; }
@@ -837,8 +1306,7 @@ void SOEM_SetRunEnable(uint8_t enable)
     {
       /* Latch target to current actual position before enabling operation.
        * This prevents immediate following-error faults caused by stale target=0. */
-      soem_target_position = (int32_t)soem_shadow_position;
-      soem_log("CIA402: RUN ON -> latch target to actual");
+      soem_latch_target_to_actual("CIA402: RUN ON -> latch target to actual");
     }
 
     soem_shadow_run_enable = requested;
@@ -848,13 +1316,121 @@ void SOEM_SetRunEnable(uint8_t enable)
 
 void SOEM_SetTargetPositionDelta(int32_t delta)
 {
-  soem_target_position += delta;
+  int64_t nextUser = (int64_t)soem_hw_to_user(soem_target_position) + (int64_t)delta;
+  if (nextUser > (int64_t)INT32_MAX)
+  {
+    nextUser = (int64_t)INT32_MAX;
+  }
+  else if (nextUser < (int64_t)INT32_MIN)
+  {
+    nextUser = (int64_t)INT32_MIN;
+  }
+
+  soem_target_position = soem_saturated_user_to_hw(soem_clamp_user_position((int32_t)nextUser));
+  soem_target_position = soem_clamp_hw_position(soem_target_position);
 }
 
 void SOEM_SetTargetPositionAbs(int32_t pos)
 {
-  /* Translate from user-space (offset-relative) to hardware absolute. */
-  soem_target_position = pos + (int32_t)soem_home_offset;
+#if SOEM_ENABLE_CMD_DEBUG_LOG
+  char line[96];
+#endif
+  int32_t requestedUser = pos;
+  soem_target_position = soem_saturated_user_to_hw(soem_clamp_user_position(pos));
+  soem_target_position = soem_clamp_hw_position(soem_target_position);
+#if SOEM_ENABLE_CMD_DEBUG_LOG
+  (void)snprintf(line, sizeof(line), "CMD: set abs user=%ld hw=%ld out=%ld actual=%ld",
+                 (long)requestedUser,
+                 (long)soem_target_position,
+                 (long)soem_target_position_output,
+                 (long)soem_shadow_position);
+  soem_log(line);
+#else
+  (void)requestedUser;
+#endif
+}
+
+void SOEM_SetProfileVelocity(int32_t velocity)
+{
+  if (velocity < 0)
+  {
+    velocity = -velocity;
+  }
+  soem_profile_velocity = velocity;
+  soem_profile_velocity_pending = 1U;
+}
+
+void SOEM_SetTorqueLimitPercent(uint16_t percent)
+{
+  if (percent > 100U)
+  {
+    percent = 100U;
+  }
+  soem_torque_limit_percent = percent;
+  soem_torque_limit_pending = 1U;
+}
+
+void SOEM_SetProfileAcceleration(int32_t acceleration)
+{
+  if (acceleration < 0)
+  {
+    acceleration = -acceleration;
+  }
+  soem_profile_acceleration = acceleration;
+  soem_profile_acceleration_pending = 1U;
+}
+
+void SOEM_SetProfileDeceleration(int32_t deceleration)
+{
+  if (deceleration < 0)
+  {
+    deceleration = -deceleration;
+  }
+  soem_profile_deceleration = deceleration;
+  soem_profile_deceleration_pending = 1U;
+}
+
+void SOEM_SetSoftwareLimitPlus(int32_t limitPlus)
+{
+  soem_limit_plus_user = limitPlus;
+  soem_refresh_hw_limits();
+  soem_software_limits_pending = 1U;
+}
+
+void SOEM_SetSoftwareLimitMinus(int32_t limitMinus)
+{
+  soem_limit_minus_user = limitMinus;
+  soem_refresh_hw_limits();
+  soem_software_limits_pending = 1U;
+}
+
+void SOEM_SetUnitScale(int32_t scale)
+{
+  if (scale <= 0)
+  {
+    scale = 1;
+  }
+  soem_unit_scale = scale;
+  soem_refresh_hw_limits();
+  soem_unit_scale_pending = 1U;
+}
+
+void SOEM_SetHomeOffset(int32_t offset)
+{
+  int32_t scale = (soem_unit_scale > 0) ? soem_unit_scale : 1;
+  int64_t hwOffset = (int64_t)offset * (int64_t)scale;
+  if (hwOffset > (int64_t)INT32_MAX)
+  {
+    hwOffset = (int64_t)INT32_MAX;
+  }
+  else if (hwOffset < (int64_t)INT32_MIN)
+  {
+    hwOffset = (int64_t)INT32_MIN;
+  }
+
+  soem_home_offset = (int32_t)hwOffset;
+  soem_refresh_hw_limits();
+  soem_home_offset_pending = 1U;
 }
 
 void SOEM_SetHomePosition(void)
@@ -863,8 +1439,10 @@ void SOEM_SetHomePosition(void)
    * After this call, GetPositionActual() returns 0 and all subsequent
    * SetTargetPositionAbs() calls are relative to this new origin. */
   soem_home_offset = soem_shadow_position;
+  soem_refresh_hw_limits();
+  soem_home_offset_pending = 1U;
   /* Also reset the motion target to 0 in hardware space = stay put. */
-  soem_target_position = (int32_t)soem_shadow_position;
+  soem_target_position = soem_clamp_hw_position((int32_t)soem_shadow_position);
   soem_log("HOME: origin set to current position");
 }
 

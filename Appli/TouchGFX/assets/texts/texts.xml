@@ -6,6 +6,144 @@
   <Texts>
     <TextGroup Id="Group1" />
     <TextGroup Id="Unsorted">
+      <Text Id="__SingleUse_BZRO" Alignment="Center" TypographyId="Default">
+        <Translation Language="GB">Read</Translation>
+      </Text>
+      <Text Id="__SingleUse_5JGX" Alignment="Center" TypographyId="Default">
+        <Translation Language="GB">Read</Translation>
+      </Text>
+      <Text Id="__SingleUse_6HBL" Alignment="Center" TypographyId="Default">
+        <Translation Language="GB">Read</Translation>
+      </Text>
+      <Text Id="__SingleUse_T8XR" Alignment="Center" TypographyId="Default">
+        <Translation Language="GB">Save</Translation>
+      </Text>
+      <Text Id="__SingleUse_0UWN" Alignment="Center" TypographyId="Default">
+        <Translation Language="GB">Save</Translation>
+      </Text>
+      <Text Id="__SingleUse_PMT1" Alignment="Center" TypographyId="Default">
+        <Translation Language="GB">Save</Translation>
+      </Text>
+      <Text Id="__SingleUse_GLTT" Alignment="Left" TypographyId="Default">
+        <Translation Language="GB">puls</Translation>
+      </Text>
+      <Text Id="__SingleUse_IIOY" Alignment="Left" TypographyId="Default">
+        <Translation Language="GB">puls</Translation>
+      </Text>
+      <Text Id="__SingleUse_ZR2U" Alignment="Left" TypographyId="Default">
+        <Translation Language="GB">puls</Translation>
+      </Text>
+      <Text Id="__SingleUse_48IX" Alignment="Left" TypographyId="Default">
+        <Translation Language="GB">puls</Translation>
+      </Text>
+      <Text Id="__SingleUse_5RF7" Alignment="Left" TypographyId="Default">
+        <Translation Language="GB">puls</Translation>
+      </Text>
+      <Text Id="__SingleUse_SIIP" Alignment="Left" TypographyId="Default">
+        <Translation Language="GB">puls</Translation>
+      </Text>
+      <Text Id="__SingleUse_AJWG" Alignment="Left" TypographyId="Default">
+        <Translation Language="GB">puls</Translation>
+      </Text>
+      <Text Id="__SingleUse_RP2M" Alignment="Right" TypographyId="Default">
+        <Translation Language="GB"></Translation>
+      </Text>
+      <Text Id="__SingleUse_RMLQ" Alignment="Right" TypographyId="Default">
+        <Translation Language="GB"></Translation>
+      </Text>
+      <Text Id="__SingleUse_Q8MI" Alignment="Right" TypographyId="Default">
+        <Translation Language="GB"></Translation>
+      </Text>
+      <Text Id="__SingleUse_UY7J" Alignment="Right" TypographyId="Default">
+        <Translation Language="GB"></Translation>
+      </Text>
+      <Text Id="__SingleUse_L0TE" Alignment="Right" TypographyId="Default">
+        <Translation Language="GB"></Translation>
+      </Text>
+      <Text Id="__SingleUse_H7YX" Alignment="Right" TypographyId="Default">
+        <Translation Language="GB"></Translation>
+      </Text>
+      <Text Id="__SingleUse_CU5D" Alignment="Right" TypographyId="Default">
+        <Translation Language="GB"></Translation>
+      </Text>
+      <Text Id="__SingleUse_E1B9" Alignment="Left" TypographyId="Default">
+        <Translation Language="GB">Dec Time</Translation>
+      </Text>
+      <Text Id="__SingleUse_KJF2" Alignment="Left" TypographyId="Default">
+        <Translation Language="GB">Home Offset</Translation>
+      </Text>
+      <Text Id="__SingleUse_FHCJ" Alignment="Left" TypographyId="Default">
+        <Translation Language="GB">Unit Scale</Translation>
+      </Text>
+      <Text Id="__SingleUse_K4P6" Alignment="Left" TypographyId="Default">
+        <Translation Language="GB">LimitN</Translation>
+      </Text>
+      <Text Id="__SingleUse_2E1R" Alignment="Left" TypographyId="Default">
+        <Translation Language="GB">LimitP</Translation>
+      </Text>
+      <Text Id="__SingleUse_DCPR" Alignment="Left" TypographyId="Default">
+        <Translation Language="GB">Acc Time</Translation>
+      </Text>
+      <Text Id="__SingleUse_XGU1" Alignment="Left" TypographyId="Default">
+        <Translation Language="GB">Jog Speed</Translation>
+      </Text>
+      <Text Id="__SingleUse_HWIJ" Alignment="Center" TypographyId="Default">
+        <Translation Language="GB">ABS&#10;INC</Translation>
+      </Text>
+      <Text Id="__SingleUse_W05R" Alignment="Left" TypographyId="Default">
+        <Translation Language="GB">1Cycle</Translation>
+      </Text>
+      <Text Id="__SingleUse_3OO0" Alignment="Left" TypographyId="Default">
+        <Translation Language="GB">JOG</Translation>
+      </Text>
+      <Text Id="__SingleUse_LRT6" Alignment="Left" TypographyId="Default">
+        <Translation Language="GB">puls</Translation>
+      </Text>
+      <Text Id="__SingleUse_U32I" Alignment="Left" TypographyId="Default">
+        <Translation Language="GB">puls</Translation>
+      </Text>
+      <Text Id="__SingleUse_ZEIH" Alignment="Left" TypographyId="Default">
+        <Translation Language="GB">%</Translation>
+      </Text>
+      <Text Id="__SingleUse_UET7" Alignment="Right" TypographyId="Default">
+        <Translation Language="GB"></Translation>
+      </Text>
+      <Text Id="__SingleUse_RG0Y" Alignment="Right" TypographyId="Default">
+        <Translation Language="GB"></Translation>
+      </Text>
+      <Text Id="__SingleUse_0LFD" Alignment="Right" TypographyId="Default">
+        <Translation Language="GB"></Translation>
+      </Text>
+      <Text Id="__SingleUse_69HG" Alignment="Left" TypographyId="Default">
+        <Translation Language="GB">Speed</Translation>
+      </Text>
+      <Text Id="__SingleUse_KKHW" Alignment="Left" TypographyId="Default">
+        <Translation Language="GB">Torque</Translation>
+      </Text>
+      <Text Id="__SingleUse_BHHO" Alignment="Left" TypographyId="Default">
+        <Translation Language="GB">Position</Translation>
+      </Text>
+      <Text Id="__SingleUse_KPZ6" Alignment="Center" TypographyId="Default">
+        <Translation Language="GB">STOP</Translation>
+      </Text>
+      <Text Id="__SingleUse_3H4B" Alignment="Center" TypographyId="Default">
+        <Translation Language="GB">Manual START</Translation>
+      </Text>
+      <Text Id="__SingleUse_LLCC" Alignment="Left" TypographyId="Default">
+        <Translation Language="GB">puls</Translation>
+      </Text>
+      <Text Id="__SingleUse_UWA1" Alignment="Left" TypographyId="Default">
+        <Translation Language="GB">Current Speed</Translation>
+      </Text>
+      <Text Id="__SingleUse_RYY9" Alignment="Right" TypographyId="Default">
+        <Translation Language="GB"></Translation>
+      </Text>
+      <Text Id="__SingleUse_T2N2" Alignment="Center" TypographyId="Large">
+        <Translation Language="GB">Del</Translation>
+      </Text>
+      <Text Id="__SingleUse_JRX2" Alignment="Center" TypographyId="Large">
+        <Translation Language="GB">.</Translation>
+      </Text>
       <Text Id="__SingleUse_TABD" Alignment="Left" TypographyId="Default">
         <Translation Language="GB">%</Translation>
       </Text>
@@ -19,7 +157,7 @@
         <Translation Language="GB"></Translation>
       </Text>
       <Text Id="__SingleUse_HHHT" Alignment="Left" TypographyId="Default">
-        <Translation Language="GB">Dely</Translation>
+        <Translation Language="GB">Dwell Time</Translation>
       </Text>
       <Text Id="__SingleUse_RO9P" Alignment="Left" TypographyId="Default">
         <Translation Language="GB">%</Translation>
@@ -208,7 +346,7 @@
         <Translation Language="GB">-</Translation>
       </Text>
       <Text Id="__SingleUse_VQ1Y" Alignment="Center" TypographyId="Large">
-        <Translation Language="GB">E</Translation>
+        <Translation Language="GB">Ent</Translation>
       </Text>
       <Text Id="__SingleUse_BBZP" Alignment="Center" TypographyId="Large">
         <Translation Language="GB">0</Translation>
@@ -239,9 +377,6 @@
       </Text>
       <Text Id="__SingleUse_YUXF" Alignment="Center" TypographyId="Large">
         <Translation Language="GB">4</Translation>
-      </Text>
-      <Text Id="__SingleUse_T1Q3" Alignment="Center" TypographyId="Default">
-        <Translation Language="GB">Home</Translation>
       </Text>
       <Text Id="__SingleUse_29R2" Alignment="Center" TypographyId="Default">
         <Translation Language="GB">STOP</Translation>

@@ -14,12 +14,42 @@ public:
     virtual void setupScreen();
     virtual void tearDownScreen();
     virtual void handleTickEvent();
+    virtual void handleClickEvent(const touchgfx::ClickEvent& evt);
     void updateMotionData(int32_t position, int32_t speed, int16_t torque);
 protected:
-    touchgfx::TextAreaWithOneWildcard numericTexts[8];
-    touchgfx::Unicode::UnicodeChar numericBuffers[8][gui::kNumericBufferSize];
+    enum
+    {
+        kTargetFieldCount = 9,
+        kAllInputFieldCount = 10,
+        kNoActiveField = -1
+    };
+
+    // Current-value readback overlays: [0]=Position, [1]=Speed, [2]=Torque
+    touchgfx::TextAreaWithOneWildcard numericTexts[3];
+    touchgfx::Unicode::UnicodeChar numericBuffers[3][gui::kNumericBufferSize];
+
+    // Target-value input overlays: [0-2]=Position1-3, [3-5]=Speed1-3, [6-8]=Torque1-3
+    touchgfx::TextAreaWithOneWildcard targetTexts[kTargetFieldCount];
+    touchgfx::Unicode::UnicodeChar targetBuffers[kTargetFieldCount][gui::kNumericBufferSize];
+
+    // Delay time overlay
     touchgfx::TextAreaWithOneWildcard delayText;
     touchgfx::Unicode::UnicodeChar delayBuffer[gui::kNumericBufferSize];
+
+    int8_t activeInputField;
+    bool suppressKeyboardEcho;
+    char fieldInputValues[kAllInputFieldCount][KeyBoard::MAX_BUF];
+
+    touchgfx::Callback<ProgramPageView, const char*> keyboardEnterCallback;
+    touchgfx::Callback<ProgramPageView, const char*> keyboardChangedCallback;
+
+    void showKeyboardForField(int8_t fieldIndex);
+    void hideKeyboard();
+    void updateFieldText(int8_t fieldIndex, const char* text);
+    void applyFieldText(int8_t fieldIndex, const char* text);
+    void onKeyboardEnter(const char* text);
+    void onKeyboardBufferChanged(const char* text);
+    int32_t parseSigned32(const char* text) const;
 };
 
 #endif // PROGRAMPAGEVIEW_HPP

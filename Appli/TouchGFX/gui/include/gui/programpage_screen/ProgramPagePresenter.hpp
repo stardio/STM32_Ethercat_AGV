@@ -18,6 +18,10 @@ public:
     virtual ~ProgramPagePresenter() {}
 
     virtual void onMotionDataUpdated(int32_t position, int32_t speed, int16_t torque);
+    void notifySetProgramValue(uint8_t index, int32_t value);
+    int32_t notifyGetProgramValue(uint8_t index);
+    bool notifySaveProgramPageToUiFlash();
+    bool notifyLoadProgramPageFromUiFlash();
 
 private:
     ProgramPagePresenter();

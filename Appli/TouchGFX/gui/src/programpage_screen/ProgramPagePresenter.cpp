@@ -18,3 +18,23 @@ void ProgramPagePresenter::onMotionDataUpdated(int32_t position, int32_t speed, 
 {
     view.updateMotionData(position, speed, torque);
 }
+
+void ProgramPagePresenter::notifySetProgramValue(uint8_t index, int32_t value)
+{
+    model->setProgramValue(index, value);
+}
+
+int32_t ProgramPagePresenter::notifyGetProgramValue(uint8_t index)
+{
+    return model->getProgramValue(index);
+}
+
+bool ProgramPagePresenter::notifySaveProgramPageToUiFlash()
+{
+    return model->saveProgramPageToUiFlash();
+}
+
+bool ProgramPagePresenter::notifyLoadProgramPageFromUiFlash()
+{
+    return model->loadProgramPageFromUiFlash();
+}

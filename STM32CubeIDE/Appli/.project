@@ -536,6 +536,11 @@
 			<locationURI>PARENT-2-PROJECT_LOC/Appli/TouchGFX/generated/images/src/__generated/image_alternate_theme_images_widgets_button_regular_height_50_small_round_normal.cpp</locationURI>
 		</link>
 		<link>
+			<name>Application/User/generated/image_alternate_theme_images_widgets_button_regular_height_50_small_rounded_normal.cpp</name>
+			<type>1</type>
+			<locationURI>PARENT-2-PROJECT_LOC/Appli/TouchGFX/generated/images/src/__generated/image_alternate_theme_images_widgets_button_regular_height_50_small_rounded_normal.cpp</locationURI>
+		</link>
+		<link>
 			<name>Application/User/generated/image_alternate_theme_images_widgets_button_regular_height_50_tiny_round_action.cpp</name>
 			<type>1</type>
 			<locationURI>PARENT-2-PROJECT_LOC/Appli/TouchGFX/generated/images/src/__generated/image_alternate_theme_images_widgets_button_regular_height_50_tiny_round_action.cpp</locationURI>
@@ -546,54 +551,14 @@
 			<locationURI>PARENT-2-PROJECT_LOC/Appli/TouchGFX/generated/images/src/__generated/image_alternate_theme_images_widgets_button_regular_height_50_tiny_round_active.cpp</locationURI>
 		</link>
 		<link>
-			<name>Application/User/generated/image_alternate_theme_images_widgets_button_regular_height_50_tiny_rounded_action.cpp</name>
-			<type>1</type>
-			<locationURI>PARENT-2-PROJECT_LOC/Appli/TouchGFX/generated/images/src/__generated/image_alternate_theme_images_widgets_button_regular_height_50_tiny_rounded_action.cpp</locationURI>
-		</link>
-		<link>
-			<name>Application/User/generated/image_alternate_theme_images_widgets_button_regular_height_50_tiny_rounded_pressed.cpp</name>
-			<type>1</type>
-			<locationURI>PARENT-2-PROJECT_LOC/Appli/TouchGFX/generated/images/src/__generated/image_alternate_theme_images_widgets_button_regular_height_50_tiny_rounded_pressed.cpp</locationURI>
-		</link>
-		<link>
-			<name>Application/User/generated/image_alternate_theme_images_widgets_slider_horizontal_thick_filler_medium.cpp</name>
-			<type>1</type>
-			<locationURI>PARENT-2-PROJECT_LOC/Appli/TouchGFX/generated/images/src/__generated/image_alternate_theme_images_widgets_slider_horizontal_thick_filler_medium.cpp</locationURI>
-		</link>
-		<link>
-			<name>Application/User/generated/image_alternate_theme_images_widgets_slider_horizontal_thick_rounded_active.cpp</name>
-			<type>1</type>
-			<locationURI>PARENT-2-PROJECT_LOC/Appli/TouchGFX/generated/images/src/__generated/image_alternate_theme_images_widgets_slider_horizontal_thick_rounded_active.cpp</locationURI>
-		</link>
-		<link>
-			<name>Application/User/generated/image_alternate_theme_images_widgets_slider_horizontal_thick_track_medium.cpp</name>
-			<type>1</type>
-			<locationURI>PARENT-2-PROJECT_LOC/Appli/TouchGFX/generated/images/src/__generated/image_alternate_theme_images_widgets_slider_horizontal_thick_track_medium.cpp</locationURI>
-		</link>
-		<link>
 			<name>Application/User/generated/image_alternate_theme_images_widgets_togglebutton_large_rounded_text_off_normal.cpp</name>
 			<type>1</type>
 			<locationURI>PARENT-2-PROJECT_LOC/Appli/TouchGFX/generated/images/src/__generated/image_alternate_theme_images_widgets_togglebutton_large_rounded_text_off_normal.cpp</locationURI>
 		</link>
 		<link>
-			<name>Application/User/generated/image_alternate_theme_images_widgets_togglebutton_large_rounded_text_on_action.cpp</name>
+			<name>Application/User/generated/image_alternate_theme_images_widgets_togglebutton_large_rounded_text_on_active.cpp</name>
 			<type>1</type>
-			<locationURI>PARENT-2-PROJECT_LOC/Appli/TouchGFX/generated/images/src/__generated/image_alternate_theme_images_widgets_togglebutton_large_rounded_text_on_action.cpp</locationURI>
-		</link>
-		<link>
-			<name>Application/User/generated/image_icon_theme_images_action_done_50_50_E8F6FB.svg.cpp</name>
-			<type>1</type>
-			<locationURI>PARENT-2-PROJECT_LOC/Appli/TouchGFX/generated/images/src/__generated/image_icon_theme_images_action_done_50_50_E8F6FB.svg.cpp</locationURI>
-		</link>
-		<link>
-			<name>Application/User/generated/image_icon_theme_images_av_fast_forward_50_50_E8F6FB.svg.cpp</name>
-			<type>1</type>
-			<locationURI>PARENT-2-PROJECT_LOC/Appli/TouchGFX/generated/images/src/__generated/image_icon_theme_images_av_fast_forward_50_50_E8F6FB.svg.cpp</locationURI>
-		</link>
-		<link>
-			<name>Application/User/generated/image_icon_theme_images_av_fast_rewind_50_50_E8F6FB.svg.cpp</name>
-			<type>1</type>
-			<locationURI>PARENT-2-PROJECT_LOC/Appli/TouchGFX/generated/images/src/__generated/image_icon_theme_images_av_fast_rewind_50_50_E8F6FB.svg.cpp</locationURI>
+			<locationURI>PARENT-2-PROJECT_LOC/Appli/TouchGFX/generated/images/src/__generated/image_alternate_theme_images_widgets_togglebutton_large_rounded_text_on_active.cpp</locationURI>
 		</link>
 		<link>
 			<name>Application/User/generated/image_BSlogo.cpp</name>

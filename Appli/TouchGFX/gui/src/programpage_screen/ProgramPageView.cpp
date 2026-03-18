@@ -11,7 +11,8 @@ ProgramPageView::ProgramPageView()
         : activeInputField(kNoActiveField),
             suppressKeyboardEcho(false),
             keyboardEnterCallback(this, &ProgramPageView::onKeyboardEnter),
-            keyboardChangedCallback(this, &ProgramPageView::onKeyboardBufferChanged)
+            keyboardChangedCallback(this, &ProgramPageView::onKeyboardBufferChanged),
+            pageButtonCallback(this, &ProgramPageView::onPageButtonPressed)
 {
         for (uint8_t i = 0U; i < kAllInputFieldCount; i++)
         {
@@ -62,6 +63,8 @@ void ProgramPageView::setupScreen()
 
     keyBoard1.setEnterCallback(keyboardEnterCallback);
     keyBoard1.setBufferChangedCallback(keyboardChangedCallback);
+    Main_button_1_2.setAction(pageButtonCallback);
+    Main_button_1_2_1.setAction(pageButtonCallback);
     remove(keyBoard1);
     add(keyBoard1);
     keyBoard1.setVisible(false);
@@ -109,36 +112,6 @@ void ProgramPageView::handleClickEvent(const touchgfx::ClickEvent& evt)
     const bool inKeyboard = keyBoard1.isVisible() && inRect(keyBoard1);
     if (inKeyboard)
     {
-        return;
-    }
-
-    if (inRect(Main_button_1_2))
-    {
-        if (activeInputField != kNoActiveField)
-        {
-            applyFieldText(activeInputField, fieldInputValues[activeInputField]);
-            hideKeyboard();
-        }
-        (void)presenter->notifySaveProgramPageToUiFlash();
-        return;
-    }
-
-    if (inRect(Main_button_1_2_1))
-    {
-        if (activeInputField != kNoActiveField)
-        {
-            hideKeyboard();
-        }
-
-        if (presenter->notifyLoadProgramPageFromUiFlash())
-        {
-            for (uint8_t i = 0U; i < kAllInputFieldCount; i++)
-            {
-                const int32_t loadedValue = presenter->notifyGetProgramValue(i);
-                (void)snprintf(fieldInputValues[i], KeyBoard::MAX_BUF, "%ld", static_cast<long>(loadedValue));
-                updateFieldText(static_cast<int8_t>(i), fieldInputValues[i]);
-            }
-        }
         return;
     }
 
@@ -210,6 +183,38 @@ void ProgramPageView::hideKeyboard()
     keyBoard1.setVisible(false);
     keyBoard1.invalidate();
     activeInputField = kNoActiveField;
+}
+
+void ProgramPageView::onPageButtonPressed(const touchgfx::AbstractButton& src)
+{
+    if (&src == &Main_button_1_2)
+    {
+        if (activeInputField != kNoActiveField)
+        {
+            applyFieldText(activeInputField, fieldInputValues[activeInputField]);
+            hideKeyboard();
+        }
+        (void)presenter->notifySaveProgramPageToUiFlash();
+        return;
+    }
+
+    if (&src == &Main_button_1_2_1)
+    {
+        if (activeInputField != kNoActiveField)
+        {
+            hideKeyboard();
+        }
+
+        if (presenter->notifyLoadProgramPageFromUiFlash())
+        {
+            for (uint8_t i = 0U; i < kAllInputFieldCount; i++)
+            {
+                const int32_t loadedValue = presenter->notifyGetProgramValue(i);
+                (void)snprintf(fieldInputValues[i], KeyBoard::MAX_BUF, "%ld", static_cast<long>(loadedValue));
+                updateFieldText(static_cast<int8_t>(i), fieldInputValues[i]);
+            }
+        }
+    }
 }
 
 void ProgramPageView::applyFieldText(int8_t fieldIndex, const char* text)

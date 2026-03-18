@@ -29,27 +29,7 @@ void MainPagePresenter::notifySetRunEnable(uint8_t enable)
     model->setRunEnable(enable);
 }
 
-void MainPagePresenter::notifySetJogStepCounts(int32_t counts)
-{
-    model->setJogStepCounts(counts);
-}
-
-void MainPagePresenter::notifyCommitPersistentState()
-{
-    model->commitPersistentState();
-}
-
-int32_t MainPagePresenter::notifyGetJogStepCounts()
-{
-    return model->getJogStepCounts();
-}
-
 uint8_t MainPagePresenter::notifyGetRunEnable()
 {
     return model->getRunEnable();
-}
-
-void MainPagePresenter::notifySendPositionDelta(int32_t delta)
-{
-    model->sendPositionDelta(delta);
 }

@@ -264,9 +264,29 @@ Model::Model()
 
     if (restoredPersistentState == false)
     {
-        if (loadParameterPageFromUiFlash() == false)
+        const bool parameterLoaded = loadParameterPageFromUiFlash();
+        const bool manualLoaded = loadManualPageFromUiFlash();
+        const bool programLoaded = loadProgramPageFromUiFlash();
+
+        if (parameterLoaded == false)
         {
             initializeParameterFlashDefaults();
+        }
+
+        if (manualLoaded == false)
+        {
+            manualCyclePosition_ = 0;
+            manualCycleSpeed_ = 0;
+            manualCycleTorque_ = 0;
+            manualCycleAbsMode_ = 1U;
+        }
+
+        if (programLoaded == false)
+        {
+            for (uint8_t i = 0U; i < kProgramValueCount; i++)
+            {
+                programValues_[i] = 0;
+            }
         }
     }
 }

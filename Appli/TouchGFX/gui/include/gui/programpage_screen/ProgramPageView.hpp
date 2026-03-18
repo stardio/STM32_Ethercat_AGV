@@ -42,9 +42,11 @@ protected:
 
     touchgfx::Callback<ProgramPageView, const char*> keyboardEnterCallback;
     touchgfx::Callback<ProgramPageView, const char*> keyboardChangedCallback;
+    touchgfx::Callback<ProgramPageView, const touchgfx::AbstractButton&> pageButtonCallback;
 
     void showKeyboardForField(int8_t fieldIndex);
     void hideKeyboard();
+    void onPageButtonPressed(const touchgfx::AbstractButton& src);
     void updateFieldText(int8_t fieldIndex, const char* text);
     void applyFieldText(int8_t fieldIndex, const char* text);
     void onKeyboardEnter(const char* text);

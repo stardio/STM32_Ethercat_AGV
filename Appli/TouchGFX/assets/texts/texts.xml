@@ -396,14 +396,8 @@
       <Text Id="__SingleUse_MJ3V" Alignment="Center" TypographyId="Default">
         <Translation Language="GB">Main</Translation>
       </Text>
-      <Text Id="__SingleUse_HFU1" Alignment="Left" TypographyId="Default">
-        <Translation Language="GB">JOG peed</Translation>
-      </Text>
-      <Text Id="__SingleUse_3L1T" Alignment="Left" TypographyId="Default">
-        <Translation Language="GB">JOG</Translation>
-      </Text>
       <Text Id="__SingleUse_I5SG" Alignment="Left" TypographyId="Default">
-        <Translation Language="GB">RUN</Translation>
+        <Translation Language="GB">RUN Switch</Translation>
       </Text>
       <Text Id="__SingleUse_9FLE" Alignment="Left" TypographyId="Default">
         <Translation Language="GB">Torque</Translation>

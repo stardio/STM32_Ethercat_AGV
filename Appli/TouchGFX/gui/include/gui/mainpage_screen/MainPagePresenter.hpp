@@ -23,10 +23,6 @@ public:
 
     // View → Model 커맨드
     void notifySetRunEnable(uint8_t enable);
-    void notifySendPositionDelta(int32_t delta);
-    void notifySetJogStepCounts(int32_t counts);
-    void notifyCommitPersistentState();
-    int32_t notifyGetJogStepCounts();
     uint8_t notifyGetRunEnable();
 
 private:

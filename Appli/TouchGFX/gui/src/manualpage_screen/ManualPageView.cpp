@@ -15,7 +15,8 @@ ManualPageView::ManualPageView()
       suppressKeyboardEcho(false),
       lastActualPosition(0),
       keyboardEnterCallback(this, &ManualPageView::onKeyboardEnter),
-      keyboardChangedCallback(this, &ManualPageView::onKeyboardBufferChanged)
+    keyboardChangedCallback(this, &ManualPageView::onKeyboardBufferChanged),
+    pageButtonCallback(this, &ManualPageView::onPageButtonPressed)
 {
     for (uint8_t i = 0U; i < kOneCycleFieldCount; i++)
     {
@@ -67,6 +68,8 @@ void ManualPageView::setupScreen()
 
     keyBoard1.setEnterCallback(keyboardEnterCallback);
     keyBoard1.setBufferChangedCallback(keyboardChangedCallback);
+    Main_button_1.setAction(pageButtonCallback);
+    Main_button_1_1.setAction(pageButtonCallback);
     remove(keyBoard1);
     add(keyBoard1);
     keyBoard1.setVisible(false);
@@ -116,45 +119,6 @@ void ManualPageView::handleClickEvent(const touchgfx::ClickEvent& evt)
 
     if (keyBoard1.isVisible() && inRect(keyBoard1))
     {
-        return;
-    }
-
-    if (inRect(Main_button_1))
-    {
-        if (activeCycleField != kNoActiveField)
-        {
-            applyCycleFieldText(activeCycleField, cycleInputValues[activeCycleField]);
-            hideKeyboard();
-        }
-        (void)presenter->notifySaveManualPageToUiFlash();
-        return;
-    }
-
-    if (inRect(Main_button_1_1))
-    {
-        if (activeCycleField != kNoActiveField)
-        {
-            hideKeyboard();
-        }
-
-        if (presenter->notifyLoadManualPageFromUiFlash())
-        {
-            cycleValues[kOneCycleFieldPosition] = presenter->notifyGetManualCyclePosition();
-            cycleValues[kOneCycleFieldSpeed] = presenter->notifyGetManualCycleSpeed();
-            cycleValues[kOneCycleFieldTorque] = presenter->notifyGetManualCycleTorque();
-            cycleAbsMode = presenter->notifyGetManualCycleAbsMode();
-            if (cycleAbsMode > 1U)
-            {
-                cycleAbsMode = 1U;
-            }
-
-            for (uint8_t i = 0U; i < kOneCycleFieldCount; i++)
-            {
-                (void)snprintf(cycleInputValues[i], KeyBoard::MAX_BUF, "%ld", static_cast<long>(cycleValues[i]));
-                updateCycleFieldText(static_cast<int8_t>(i), cycleInputValues[i]);
-            }
-            applyAbsIncVisual();
-        }
         return;
     }
 
@@ -257,6 +221,47 @@ void ManualPageView::function4()
 void ManualPageView::function5()
 {
     /* JogREV: handled by hold-to-jog in handleTickEvent */
+}
+
+void ManualPageView::onPageButtonPressed(const touchgfx::AbstractButton& src)
+{
+    if (&src == &Main_button_1)
+    {
+        if (activeCycleField != kNoActiveField)
+        {
+            applyCycleFieldText(activeCycleField, cycleInputValues[activeCycleField]);
+            hideKeyboard();
+        }
+        (void)presenter->notifySaveManualPageToUiFlash();
+        return;
+    }
+
+    if (&src == &Main_button_1_1)
+    {
+        if (activeCycleField != kNoActiveField)
+        {
+            hideKeyboard();
+        }
+
+        if (presenter->notifyLoadManualPageFromUiFlash())
+        {
+            cycleValues[kOneCycleFieldPosition] = presenter->notifyGetManualCyclePosition();
+            cycleValues[kOneCycleFieldSpeed] = presenter->notifyGetManualCycleSpeed();
+            cycleValues[kOneCycleFieldTorque] = presenter->notifyGetManualCycleTorque();
+            cycleAbsMode = presenter->notifyGetManualCycleAbsMode();
+            if (cycleAbsMode > 1U)
+            {
+                cycleAbsMode = 1U;
+            }
+
+            for (uint8_t i = 0U; i < kOneCycleFieldCount; i++)
+            {
+                (void)snprintf(cycleInputValues[i], KeyBoard::MAX_BUF, "%ld", static_cast<long>(cycleValues[i]));
+                updateCycleFieldText(static_cast<int8_t>(i), cycleInputValues[i]);
+            }
+            applyAbsIncVisual();
+        }
+    }
 }
 
 void ManualPageView::updateMotionData(int32_t position, int32_t speed, int16_t torque)

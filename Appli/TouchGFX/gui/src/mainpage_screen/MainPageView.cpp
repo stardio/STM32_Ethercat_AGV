@@ -1,15 +1,12 @@
 #include <gui/mainpage_screen/MainPageView.hpp>
 #include <gui/mainpage_screen/MainPagePresenter.hpp>
 #include <gui/common/NumberFormat.hpp>
-#include <images/BitmapDatabase.hpp>
 #include <stdint.h>
 
 MainPageView::MainPageView()
-    : jogStepCounts(1000),
-      runUiState(0U),
+        : runUiState(0U),
       runAppliedState(0U),
-      runDebounceCount(0U),
-            saveButtonCallback(this, &MainPageView::onSaveButtonPressed)
+            runDebounceCount(0U)
 {
 
 }
@@ -17,11 +14,6 @@ MainPageView::MainPageView()
 void MainPageView::setupScreen()
 {
     MainPageViewBase::setupScreen();
-
-    jogStepCounts = presenter->notifyGetJogStepCounts();
-    int sliderVal = jogStepCounts / 100;
-    if (sliderVal < 1) sliderVal = 1;
-    JogSpeedSlider.setValue(sliderVal);
 
     gui::configureNumericOverlay(numericTexts[0], CurrentPosition, numericBuffers[0]);
     gui::configureNumericOverlay(numericTexts[1], CurrentPosition_1, numericBuffers[1]);
@@ -38,16 +30,6 @@ void MainPageView::setupScreen()
     runAppliedState = savedRun;
     runDebounceCount = 0U;
     ServoON.forceState(savedRun != 0U);
-
-    saveButton.setXY(523, 410);
-    saveButton.setBitmaps(
-        touchgfx::Bitmap(BITMAP_ALTERNATE_THEME_IMAGES_WIDGETS_BUTTON_REGULAR_HEIGHT_50_TINY_ROUNDED_ACTION_ID),
-        touchgfx::Bitmap(BITMAP_ALTERNATE_THEME_IMAGES_WIDGETS_BUTTON_REGULAR_HEIGHT_50_TINY_ROUNDED_PRESSED_ID),
-        touchgfx::Bitmap(BITMAP_ICON_THEME_IMAGES_ACTION_DONE_50_50_E8F6FB_SVG_ID),
-        touchgfx::Bitmap(BITMAP_ICON_THEME_IMAGES_ACTION_DONE_50_50_E8F6FB_SVG_ID));
-    saveButton.setIconXY(30, 0);
-    saveButton.setAction(saveButtonCallback);
-    add(saveButton);
 }
 
 void MainPageView::tearDownScreen()
@@ -75,16 +57,6 @@ void MainPageView::handleTickEvent()
         presenter->notifySetRunEnable(runAppliedState);
     }
 
-    /* Hold-to-jog: send delta every tick while button is physically held */
-    if (JogREVbutton.getPressedState())
-    {
-        presenter->notifySendPositionDelta(-jogStepCounts);
-    }
-    else if (JogFWDbutton.getPressedState())
-    {
-        presenter->notifySendPositionDelta(jogStepCounts);
-    }
-
     MainPageViewBase::handleTickEvent();
 }
 
@@ -96,52 +68,6 @@ void MainPageView::handleClickEvent(const touchgfx::ClickEvent& evt)
 void MainPageView::function1()
 {
     /* RUN is applied via debounced polling in handleTickEvent(). */
-}
-
-void MainPageView::function2()
-{
-    /* JogREV: handled by hold-to-jog in handleTickEvent */
-}
-
-void MainPageView::function3()
-{
-    /* JogFWD: handled by hold-to-jog in handleTickEvent */
-}
-
-void MainPageView::function4(int value)
-{
-    if (value < 0)
-    {
-        value = 0;
-    }
-    jogStepCounts = value * 100;
-    if (jogStepCounts <= 0)
-    {
-        jogStepCounts = 10;
-    }
-    presenter->notifySetJogStepCounts(jogStepCounts);
-}
-
-void MainPageView::onSaveButtonPressed(const touchgfx::AbstractButton& src)
-{
-    if (&src != &saveButton)
-    {
-        return;
-    }
-
-    presenter->notifyCommitPersistentState();
-}
-
-void MainPageView::function5()
-{
-}
-
-void MainPageView::function6()
-{
-}
-
-void MainPageView::function7()
-{
 }
 
 void MainPageView::updateMotionData(int32_t position, int32_t speed, int16_t torque)

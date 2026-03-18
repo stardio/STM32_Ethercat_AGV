@@ -52,12 +52,14 @@ protected:
 
     touchgfx::Callback<ManualPageView, const char*> keyboardEnterCallback;
     touchgfx::Callback<ManualPageView, const char*> keyboardChangedCallback;
+    touchgfx::Callback<ManualPageView, const touchgfx::AbstractButton&> pageButtonCallback;
 
     void showKeyboardForCycleField(int8_t fieldIndex);
     void hideKeyboard();
     void updateCycleFieldText(int8_t fieldIndex, const char* text);
     void applyCycleFieldText(int8_t fieldIndex, const char* text);
     void applyAbsIncVisual();
+    void onPageButtonPressed(const touchgfx::AbstractButton& src);
     void onKeyboardEnter(const char* text);
     void onKeyboardBufferChanged(const char* text);
     int32_t parseSigned32(const char* text) const;

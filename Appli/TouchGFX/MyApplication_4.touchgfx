@@ -19,12 +19,12 @@
           {
             "Type": "ButtonWithLabel",
             "Name": "ProgModeButton",
-            "X": 25,
-            "Y": 352,
-            "Width": 240,
+            "X": 213,
+            "Y": 430,
+            "Width": 175,
             "Height": 50,
-            "Pressed": "__generated\\alternate_theme_images_widgets_button_regular_height_50_medium_rounded_pressed.png",
-            "Released": "__generated\\alternate_theme_images_widgets_button_regular_height_50_medium_rounded_normal.png",
+            "Pressed": "__generated\\alternate_theme_images_widgets_button_regular_height_50_small_rounded_normal.png",
+            "Released": "__generated\\alternate_theme_images_widgets_button_regular_height_50_small_rounded_normal.png",
             "TextId": "__SingleUse_39QC",
             "ReleasedColor": {
               "Red": 255,
@@ -36,18 +36,17 @@
               "Green": 255,
               "Blue": 255
             },
-            "TextRotation": "0",
-            "Preset": "alternate_theme\\presets\\button\\regular\\height_50\\medium_rounded_normal.json"
+            "TextRotation": "0"
           },
           {
             "Type": "ButtonWithLabel",
             "Name": "HomeModeButton",
-            "X": 274,
-            "Y": 352,
-            "Width": 240,
+            "X": 409,
+            "Y": 430,
+            "Width": 175,
             "Height": 50,
-            "Pressed": "__generated\\alternate_theme_images_widgets_button_regular_height_50_medium_rounded_pressed.png",
-            "Released": "__generated\\alternate_theme_images_widgets_button_regular_height_50_medium_rounded_normal.png",
+            "Pressed": "__generated\\alternate_theme_images_widgets_button_regular_height_50_small_rounded_normal.png",
+            "Released": "__generated\\alternate_theme_images_widgets_button_regular_height_50_small_rounded_normal.png",
             "TextId": "__SingleUse_7USM",
             "ReleasedColor": {
               "Red": 255,
@@ -59,18 +58,17 @@
               "Green": 255,
               "Blue": 255
             },
-            "TextRotation": "0",
-            "Preset": "alternate_theme\\presets\\button\\regular\\height_50\\medium_rounded_normal.json"
+            "TextRotation": "0"
           },
           {
             "Type": "ButtonWithLabel",
             "Name": "ParaModeButton",
-            "X": 274,
-            "Y": 410,
-            "Width": 240,
+            "X": 607,
+            "Y": 430,
+            "Width": 175,
             "Height": 50,
-            "Pressed": "__generated\\alternate_theme_images_widgets_button_regular_height_50_medium_rounded_pressed.png",
-            "Released": "__generated\\alternate_theme_images_widgets_button_regular_height_50_medium_rounded_normal.png",
+            "Pressed": "__generated\\alternate_theme_images_widgets_button_regular_height_50_small_rounded_normal.png",
+            "Released": "__generated\\alternate_theme_images_widgets_button_regular_height_50_small_rounded_normal.png",
             "TextId": "__SingleUse_FRNC",
             "ReleasedColor": {
               "Red": 255,
@@ -82,18 +80,17 @@
               "Green": 255,
               "Blue": 255
             },
-            "TextRotation": "0",
-            "Preset": "alternate_theme\\presets\\button\\regular\\height_50\\medium_rounded_normal.json"
+            "TextRotation": "0"
           },
           {
             "Type": "ButtonWithLabel",
             "Name": "ManualModeButton",
-            "X": 25,
-            "Y": 410,
-            "Width": 240,
+            "X": 16,
+            "Y": 430,
+            "Width": 175,
             "Height": 50,
-            "Pressed": "__generated\\alternate_theme_images_widgets_button_regular_height_50_medium_rounded_pressed.png",
-            "Released": "__generated\\alternate_theme_images_widgets_button_regular_height_50_medium_rounded_normal.png",
+            "Pressed": "__generated\\alternate_theme_images_widgets_button_regular_height_50_small_rounded_normal.png",
+            "Released": "__generated\\alternate_theme_images_widgets_button_regular_height_50_small_rounded_normal.png",
             "TextId": "__SingleUse_SY5A",
             "ReleasedColor": {
               "Red": 255,
@@ -105,14 +102,13 @@
               "Green": 255,
               "Blue": 255
             },
-            "TextRotation": "0",
-            "Preset": "alternate_theme\\presets\\button\\regular\\height_50\\medium_rounded_normal.json"
+            "TextRotation": "0"
           },
           {
             "Type": "TextArea",
             "Name": "textArea1",
-            "X": 16,
-            "Y": 108,
+            "X": 50,
+            "Y": 165,
             "Width": 77,
             "Height": 24,
             "TextId": "__SingleUse_CI6S",
@@ -127,8 +123,8 @@
           {
             "Type": "TextArea",
             "Name": "textArea1_4",
-            "X": 260,
-            "Y": 108,
+            "X": 294,
+            "Y": 165,
             "Width": 40,
             "Height": 24,
             "TextId": "__SingleUse_B7MG",
@@ -175,8 +171,8 @@
           {
             "Type": "TextArea",
             "Name": "textArea1_4_1",
-            "X": 260,
-            "Y": 171,
+            "X": 294,
+            "Y": 228,
             "Width": 40,
             "Height": 24,
             "TextId": "__SingleUse_XV8Q",
@@ -191,8 +187,8 @@
           {
             "Type": "TextArea",
             "Name": "textArea1_4_1_1",
-            "X": 260,
-            "Y": 234,
+            "X": 294,
+            "Y": 291,
             "Width": 22,
             "Height": 24,
             "TextId": "__SingleUse_M5MK",
@@ -207,9 +203,9 @@
           {
             "Type": "TextArea",
             "Name": "textArea1_3",
-            "X": 385,
-            "Y": 113,
-            "Width": 44,
+            "X": 581,
+            "Y": 111,
+            "Width": 117,
             "Height": 24,
             "TextId": "__SingleUse_I5SG",
             "TextRotation": "0",
@@ -222,41 +218,9 @@
           },
           {
             "Type": "TextArea",
-            "Name": "textArea1_3_1",
-            "X": 385,
-            "Y": 195,
-            "Width": 41,
-            "Height": 24,
-            "TextId": "__SingleUse_3L1T",
-            "TextRotation": "0",
-            "Color": {
-              "Red": 77,
-              "Green": 237,
-              "Blue": 19
-            },
-            "AutoSize": true
-          },
-          {
-            "Type": "TextArea",
-            "Name": "textArea1_3_1_1",
-            "X": 514,
-            "Y": 258,
-            "Width": 96,
-            "Height": 24,
-            "TextId": "__SingleUse_HFU1",
-            "TextRotation": "0",
-            "Color": {
-              "Red": 77,
-              "Green": 237,
-              "Blue": 19
-            },
-            "AutoSize": true
-          },
-          {
-            "Type": "TextArea",
             "Name": "textArea1_1",
-            "X": 16,
-            "Y": 172,
+            "X": 50,
+            "Y": 229,
             "Width": 62,
             "Height": 24,
             "TextId": "__SingleUse_MMAA",
@@ -271,8 +235,8 @@
           {
             "Type": "TextArea",
             "Name": "textArea1_2",
-            "X": 16,
-            "Y": 234,
+            "X": 50,
+            "Y": 291,
             "Width": 68,
             "Height": 24,
             "TextId": "__SingleUse_9FLE",
@@ -287,67 +251,19 @@
           {
             "Type": "ToggleButton",
             "Name": "ServoON",
-            "X": 494,
-            "Y": 95,
+            "X": 554,
+            "Y": 147,
             "Width": 170,
             "Height": 60,
-            "Pressed": "__generated\\alternate_theme_images_widgets_togglebutton_large_rounded_text_on_action.png",
+            "Pressed": "__generated\\alternate_theme_images_widgets_togglebutton_large_rounded_text_on_active.png",
             "Released": "__generated\\alternate_theme_images_widgets_togglebutton_large_rounded_text_off_normal.png",
-            "Preset": "alternate_theme\\presets\\togglebutton\\large\\rounded_action_text.json"
-          },
-          {
-            "Type": "ButtonWithIcon",
-            "Name": "JogREVbutton",
-            "X": 469,
-            "Y": 184,
-            "Width": 110,
-            "Height": 50,
-            "Pressed": "__generated\\alternate_theme_images_widgets_button_regular_height_50_tiny_rounded_pressed.png",
-            "Released": "__generated\\alternate_theme_images_widgets_button_regular_height_50_tiny_rounded_action.png",
-            "IconPressed": "__generated\\icon_theme_images_action_done_50_50_E8F6FB.svg.png",
-            "IconReleased": "__generated\\icon_theme_images_av_fast_rewind_50_50_E8F6FB.svg.png",
-            "IconX": 30,
-            "IconHeight": 50,
-            "IconWidth": 50,
-            "Preset": "alternate_theme\\presets\\button\\regular\\height_50\\tiny_rounded_action.json"
-          },
-          {
-            "Type": "ButtonWithIcon",
-            "Name": "JogFWDbutton",
-            "X": 584,
-            "Y": 184,
-            "Width": 110,
-            "Height": 50,
-            "Pressed": "__generated\\alternate_theme_images_widgets_button_regular_height_50_tiny_rounded_pressed.png",
-            "Released": "__generated\\alternate_theme_images_widgets_button_regular_height_50_tiny_rounded_action.png",
-            "IconPressed": "__generated\\icon_theme_images_action_done_50_50_E8F6FB.svg.png",
-            "IconReleased": "__generated\\icon_theme_images_av_fast_forward_50_50_E8F6FB.svg.png",
-            "IconX": 30,
-            "IconHeight": 50,
-            "IconWidth": 50,
-            "Preset": "alternate_theme\\presets\\button\\regular\\height_50\\tiny_rounded_action.json"
-          },
-          {
-            "Type": "Slider",
-            "Name": "JogSpeedSlider",
-            "X": 398,
-            "Y": 291,
-            "Width": 332,
-            "Height": 32,
-            "IsHorizontalSlider": true,
-            "BackgroundUnselected": "__generated\\alternate_theme_images_widgets_slider_horizontal_thick_track_medium.png",
-            "BackgroundSelected": "__generated\\alternate_theme_images_widgets_slider_horizontal_thick_filler_medium.png",
-            "Indicator": "__generated\\alternate_theme_images_widgets_slider_horizontal_thick_rounded_active.png",
-            "BackgroundX": 16,
-            "BackgroundY": 11,
-            "IndicatorMax": 300,
-            "ValueMax": 100
+            "Preset": "alternate_theme\\presets\\togglebutton\\large\\rounded_active_text.json"
           },
           {
             "Type": "TextArea",
             "Name": "CurrentPosition",
-            "X": 99,
-            "Y": 108,
+            "X": 133,
+            "Y": 165,
             "Width": 155,
             "Height": 24,
             "TextId": "__SingleUse_B55G",
@@ -356,8 +272,8 @@
           {
             "Type": "TextArea",
             "Name": "CurrentPosition_1",
-            "X": 99,
-            "Y": 172,
+            "X": 133,
+            "Y": 229,
             "Width": 155,
             "Height": 23,
             "TextId": "__SingleUse_Y3FK",
@@ -366,8 +282,8 @@
           {
             "Type": "TextArea",
             "Name": "CurrentPosition_1_1",
-            "X": 99,
-            "Y": 234,
+            "X": 133,
+            "Y": 291,
             "Width": 155,
             "Height": 24,
             "TextId": "__SingleUse_US21",
@@ -398,8 +314,7 @@
           {
             "InteractionName": "Interaction2",
             "Trigger": {
-              "Type": "TriggerClicked",
-              "TriggerComponent": "JogREVbutton"
+              "Type": "TriggerClicked"
             },
             "Action": {
               "Type": "ActionCustom",
@@ -409,8 +324,7 @@
           {
             "InteractionName": "Interaction3",
             "Trigger": {
-              "Type": "TriggerClicked",
-              "TriggerComponent": "JogFWDbutton"
+              "Type": "TriggerClicked"
             },
             "Action": {
               "Type": "ActionCustom",
@@ -420,8 +334,7 @@
           {
             "InteractionName": "Interaction4",
             "Trigger": {
-              "Type": "TriggerSliderValueChanged",
-              "TriggerComponent": "JogSpeedSlider"
+              "Type": "TriggerSliderValueChanged"
             },
             "Action": {
               "Type": "ActionCustom",

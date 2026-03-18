@@ -1,18 +1,10 @@
 #include "ui_flash_storage.h"
 
+#include <stddef.h>
+#include <stdint.h>
 #include <string.h>
 
 #include "main.h"
-#include "stm32_extmem.h"
-#include "stm32_extmem_conf.h"
-
-#define UI_FLASH_REGION_START       (0x70F00000UL)
-#define UI_FLASH_REGION_END         (0x70FFFFFFUL)
-#define UI_FLASH_SLOT_SIZE          (0x00001000UL)
-
-#define UI_FLASH_PROGRAM_ADDR       (UI_FLASH_REGION_START + 0x0000UL)
-#define UI_FLASH_MANUAL_ADDR        (UI_FLASH_REGION_START + 0x1000UL)
-#define UI_FLASH_PARAMETER_ADDR     (UI_FLASH_REGION_START + 0x2000UL)
 
 #define UI_PARAM_FLASH_SECTOR       (FLASH_SECTOR_NB - 1U)
 #define UI_PARAM_FLASH_ADDR         (FLASH_BASE + (UI_PARAM_FLASH_SECTOR * FLASH_SECTOR_SIZE))
@@ -37,11 +29,13 @@ typedef struct
     uint8_t payload[64];
 } UiFlashRecord;
 
-/* HAL handle consumed by EXTMEM (declared extern in stm32_extmem_conf.h). */
-XSPI_HandleTypeDef hxspi2;
-
-static uint8_t uiFlashInitialized = 0U;
-static uint32_t uiFlashMapBase = 0U;
+typedef struct
+{
+    /* Keep Parameter first for backward compatibility with legacy single-record layout. */
+    UiFlashRecord parameter;
+    UiFlashRecord manual;
+    UiFlashRecord program;
+} UiFlashInternalLayout;
 
 static uint32_t UiFlash_Crc32(const uint8_t* data, uint32_t length)
 {
@@ -58,81 +52,6 @@ static uint32_t UiFlash_Crc32(const uint8_t* data, uint32_t length)
     }
 
     return ~crc;
-}
-
-static void UiFlash_InitHandle(void)
-{
-    memset(&hxspi2, 0, sizeof(hxspi2));
-
-    hxspi2.Instance = XSPI2;
-    hxspi2.Init.FifoThresholdByte = 4U;
-    hxspi2.Init.MemoryMode = HAL_XSPI_SINGLE_MEM;
-    hxspi2.Init.MemoryType = HAL_XSPI_MEMTYPE_MACRONIX;
-    hxspi2.Init.MemorySize = HAL_XSPI_SIZE_1GB;
-    hxspi2.Init.ChipSelectHighTimeCycle = 2U;
-    hxspi2.Init.FreeRunningClock = HAL_XSPI_FREERUNCLK_DISABLE;
-    hxspi2.Init.ClockMode = HAL_XSPI_CLOCK_MODE_0;
-    hxspi2.Init.WrapSize = HAL_XSPI_WRAP_NOT_SUPPORTED;
-    hxspi2.Init.ClockPrescaler = 0U;
-    hxspi2.Init.SampleShifting = HAL_XSPI_SAMPLE_SHIFT_NONE;
-    hxspi2.Init.ChipSelectBoundary = HAL_XSPI_BONDARYOF_NONE;
-    hxspi2.Init.MaxTran = 0U;
-    hxspi2.Init.Refresh = 0U;
-    hxspi2.Init.MemorySelect = HAL_XSPI_CSSEL_NCS1;
-}
-
-static uint8_t UiFlash_EnsureInitialized(void)
-{
-    if (uiFlashInitialized != 0U)
-    {
-        return 1U;
-    }
-
-    UiFlash_InitHandle();
-
-    memset(extmem_list_config, 0, sizeof(extmem_list_config));
-    extmem_list_config[EXTMEMORY_1].MemType = EXTMEM_NOR_SFDP;
-    extmem_list_config[EXTMEMORY_1].Handle = (void*)&hxspi2;
-    extmem_list_config[EXTMEMORY_1].ConfigType = EXTMEM_LINK_CONFIG_8LINES;
-
-    if (EXTMEM_Init(EXTMEMORY_1, HAL_RCCEx_GetPeriphCLKFreq(RCC_PERIPHCLK_XSPI2)) != EXTMEM_OK)
-    {
-        return 0U;
-    }
-
-    if (EXTMEM_GetMapAddress(EXTMEMORY_1, &uiFlashMapBase) != EXTMEM_OK)
-    {
-        return 0U;
-    }
-
-    if (EXTMEM_MemoryMappedMode(EXTMEMORY_1, EXTMEM_ENABLE) != EXTMEM_OK)
-    {
-        return 0U;
-    }
-
-    uiFlashInitialized = 1U;
-    return 1U;
-}
-
-static uint8_t UiFlash_AddressToOffset(uint32_t absoluteAddress, uint32_t* offset)
-{
-    if (offset == 0)
-    {
-        return 0U;
-    }
-
-    if ((absoluteAddress < UI_FLASH_REGION_START) || (absoluteAddress > UI_FLASH_REGION_END))
-    {
-        return 0U;
-    }
-
-    if (absoluteAddress < uiFlashMapBase)
-    {
-        return 0U;
-    }
-
-    *offset = absoluteAddress - uiFlashMapBase;
-    return 1U;
 }
 
 static uint8_t UiFlash_BuildRecord(UiFlashPageId pageId,
@@ -224,19 +143,35 @@ static void UiFlash_RestoreInterruptState(uint32_t primask)
     }
 }
 
-static uint8_t UiFlash_SaveParameterRecordInternal(const UiFlashRecord* record)
+static void UiFlash_ReadLayout(UiFlashInternalLayout* layout)
+{
+    if (layout == 0)
+    {
+        return;
+    }
+
+    UiFlash_InvalidateDCacheForRange((const void*)UI_PARAM_FLASH_ADDR, sizeof(UiFlashInternalLayout));
+    memcpy(layout, (const void*)UI_PARAM_FLASH_ADDR, sizeof(UiFlashInternalLayout));
+}
+
+static uint8_t UiFlash_WriteLayout(const UiFlashInternalLayout* layout)
 {
     uint32_t primask;
     uint32_t sectorError = 0U;
     FLASH_EraseInitTypeDef eraseInit;
     HAL_StatusTypeDef status;
 
-    if (record == 0)
+    if (layout == 0)
     {
         return 0U;
     }
 
-    if ((sizeof(UiFlashRecord) % 16U) != 0U)
+    if (((uint32_t)sizeof(UiFlashInternalLayout) % 16U) != 0U)
+    {
+        return 0U;
+    }
+
+    if ((uint32_t)sizeof(UiFlashInternalLayout) > FLASH_SECTOR_SIZE)
     {
         return 0U;
     }
@@ -264,11 +199,11 @@ static uint8_t UiFlash_SaveParameterRecordInternal(const UiFlashRecord* record)
         return 0U;
     }
 
-    for (uint32_t offset = 0U; offset < sizeof(UiFlashRecord); offset += 16U)
+    for (uint32_t offset = 0U; offset < sizeof(UiFlashInternalLayout); offset += 16U)
     {
         status = HAL_FLASH_Program(FLASH_TYPEPROGRAM_QUADWORD,
                                    UI_PARAM_FLASH_ADDR + offset,
-                                   (uint32_t)((const uint8_t*)record + offset));
+                                   (uint32_t)((const uint8_t*)layout + offset));
         if (status != HAL_OK)
         {
             (void)HAL_FLASH_Lock();
@@ -285,9 +220,9 @@ static uint8_t UiFlash_SaveParameterRecordInternal(const UiFlashRecord* record)
         return 0U;
     }
 
-    UiFlash_InvalidateDCacheForRange((const void*)UI_PARAM_FLASH_ADDR, sizeof(UiFlashRecord));
+    UiFlash_InvalidateDCacheForRange((const void*)UI_PARAM_FLASH_ADDR, sizeof(UiFlashInternalLayout));
 
-    if (memcmp((const void*)UI_PARAM_FLASH_ADDR, record, sizeof(UiFlashRecord)) != 0)
+    if (memcmp((const void*)UI_PARAM_FLASH_ADDR, layout, sizeof(UiFlashInternalLayout)) != 0)
     {
         return 0U;
     }
@@ -295,79 +230,101 @@ static uint8_t UiFlash_SaveParameterRecordInternal(const UiFlashRecord* record)
     return 1U;
 }
 
-static uint8_t UiFlash_LoadParameterRecordInternal(void* payload, uint32_t payloadSize)
+static UiFlashRecord* UiFlash_GetRecordMutable(UiFlashInternalLayout* layout, UiFlashPageId page)
 {
-    const UiFlashRecord* record = (const UiFlashRecord*)UI_PARAM_FLASH_ADDR;
+    if (layout == 0)
+    {
+        return 0;
+    }
+
+    if (page == UI_FLASH_PAGE_PARAMETER)
+    {
+        return &layout->parameter;
+    }
+    if (page == UI_FLASH_PAGE_MANUAL)
+    {
+        return &layout->manual;
+    }
+    if (page == UI_FLASH_PAGE_PROGRAM)
+    {
+        return &layout->program;
+    }
+
+    return 0;
+}
+
+static const UiFlashRecord* UiFlash_GetRecordConst(const UiFlashInternalLayout* layout, UiFlashPageId page)
+{
+    if (layout == 0)
+    {
+        return 0;
+    }
+
+    if (page == UI_FLASH_PAGE_PARAMETER)
+    {
+        return &layout->parameter;
+    }
+    if (page == UI_FLASH_PAGE_MANUAL)
+    {
+        return &layout->manual;
+    }
+    if (page == UI_FLASH_PAGE_PROGRAM)
+    {
+        return &layout->program;
+    }
+
+    return 0;
+}
+
+static uint8_t UiFlash_SaveRecord(UiFlashPageId page, const UiFlashRecord* record)
+{
+    UiFlashInternalLayout layout;
+    UiFlashRecord* slot = 0;
+
+    if (record == 0)
+    {
+        return 0U;
+    }
+
+    memset(&layout, 0xFF, sizeof(layout));
+    UiFlash_ReadLayout(&layout);
+
+    slot = UiFlash_GetRecordMutable(&layout, page);
+    if (slot == 0)
+    {
+        return 0U;
+    }
+
+    *slot = *record;
+    return UiFlash_WriteLayout(&layout);
+}
+
+static uint8_t UiFlash_LoadRecord(UiFlashPageId page,
+                                  void* payload,
+                                  uint32_t payloadSize)
+{
+    UiFlashInternalLayout layout;
+    const UiFlashRecord* slot = 0;
 
     if (payload == 0)
     {
         return 0U;
     }
 
-    UiFlash_InvalidateDCacheForRange(record, sizeof(UiFlashRecord));
+    UiFlash_ReadLayout(&layout);
 
-    if (UiFlash_ValidateRecord(record, UI_FLASH_PAGE_PARAMETER, payloadSize) == 0U)
+    slot = UiFlash_GetRecordConst(&layout, page);
+    if (slot == 0)
     {
         return 0U;
     }
 
-    memcpy(payload, record->payload, payloadSize);
-    return 1U;
-}
-
-static uint8_t UiFlash_SaveRecord(uint32_t absoluteAddress, const UiFlashRecord* record)
-{
-    if ((record == 0) || (UiFlash_EnsureInitialized() == 0U))
+    if (UiFlash_ValidateRecord(slot, page, payloadSize) == 0U)
     {
         return 0U;
     }
 
-    uint32_t offset = 0U;
-    if (UiFlash_AddressToOffset(absoluteAddress, &offset) == 0U)
-    {
-        return 0U;
-    }
-
-    if (EXTMEM_EraseSector(EXTMEMORY_1, offset, UI_FLASH_SLOT_SIZE) != EXTMEM_OK)
-    {
-        return 0U;
-    }
-
-    if (EXTMEM_WriteInMappedMode(EXTMEMORY_1,
-                                 absoluteAddress,
-                                 (const uint8_t* const)record,
-                                 sizeof(UiFlashRecord)) != EXTMEM_OK)
-    {
-        return 0U;
-    }
-
-    const UiFlashRecord* verify = (const UiFlashRecord*)absoluteAddress;
-    if (memcmp(verify, record, sizeof(UiFlashRecord)) != 0)
-    {
-        return 0U;
-    }
-
-    return 1U;
-}
-
-static uint8_t UiFlash_LoadRecord(uint32_t absoluteAddress,
-                                  UiFlashPageId expectedPage,
-                                  void* payload,
-                                  uint32_t payloadSize)
-{
-    if ((payload == 0) || (UiFlash_EnsureInitialized() == 0U))
-    {
-        return 0U;
-    }
-
-    const UiFlashRecord* record = (const UiFlashRecord*)absoluteAddress;
-
-    if (UiFlash_ValidateRecord(record, expectedPage, payloadSize) == 0U)
-    {
-        return 0U;
-    }
-
-    memcpy(payload, record->payload, payloadSize);
+    memcpy(payload, slot->payload, payloadSize);
     return 1U;
 }
 
@@ -381,13 +338,12 @@ uint8_t UiFlashStorage_SaveProgram(const UiFlashProgramData* data)
         return 0U;
     }
 
-    return UiFlash_SaveRecord(UI_FLASH_PROGRAM_ADDR, &record);
+    return UiFlash_SaveRecord(UI_FLASH_PAGE_PROGRAM, &record);
 }
 
 uint8_t UiFlashStorage_LoadProgram(UiFlashProgramData* data)
 {
-    return UiFlash_LoadRecord(UI_FLASH_PROGRAM_ADDR,
-                              UI_FLASH_PAGE_PROGRAM,
+    return UiFlash_LoadRecord(UI_FLASH_PAGE_PROGRAM,
                               data,
                               sizeof(UiFlashProgramData));
 }
@@ -402,20 +358,19 @@ uint8_t UiFlashStorage_SaveManual(const UiFlashManualData* data)
         return 0U;
     }
 
-    return UiFlash_SaveRecord(UI_FLASH_MANUAL_ADDR, &record);
+    return UiFlash_SaveRecord(UI_FLASH_PAGE_MANUAL, &record);
 }
 
 uint8_t UiFlashStorage_LoadManual(UiFlashManualData* data)
 {
-    return UiFlash_LoadRecord(UI_FLASH_MANUAL_ADDR,
-                              UI_FLASH_PAGE_MANUAL,
+    return UiFlash_LoadRecord(UI_FLASH_PAGE_MANUAL,
                               data,
                               sizeof(UiFlashManualData));
 }
 
 uint8_t UiFlashStorage_SaveParameter(const UiFlashParameterData* data)
 {
-    UiFlashRecord record __attribute__((aligned(16)));
+    UiFlashRecord record;
 
     if ((data == 0) ||
         (UiFlash_BuildRecord(UI_FLASH_PAGE_PARAMETER, data, sizeof(UiFlashParameterData), &record) == 0U))
@@ -423,10 +378,12 @@ uint8_t UiFlashStorage_SaveParameter(const UiFlashParameterData* data)
         return 0U;
     }
 
-    return UiFlash_SaveParameterRecordInternal(&record);
+    return UiFlash_SaveRecord(UI_FLASH_PAGE_PARAMETER, &record);
 }
 
 uint8_t UiFlashStorage_LoadParameter(UiFlashParameterData* data)
 {
-    return UiFlash_LoadParameterRecordInternal(data, sizeof(UiFlashParameterData));
+    return UiFlash_LoadRecord(UI_FLASH_PAGE_PARAMETER,
+                              data,
+                              sizeof(UiFlashParameterData));
 }

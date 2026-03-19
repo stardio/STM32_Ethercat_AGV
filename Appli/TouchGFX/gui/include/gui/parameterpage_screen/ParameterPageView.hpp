@@ -24,6 +24,7 @@ protected:
         kFieldLimitMinus,
         kFieldUnitScale,
         kFieldHomeOffset,
+        kFieldPositionGain,
         kFieldCount,
         kNoActiveField = -1
     };

@@ -7,8 +7,8 @@
 extern "C" {
 #endif
 
-#define UI_FLASH_PROGRAM_VALUE_COUNT    10U
-#define UI_FLASH_PARAMETER_VALUE_COUNT  7U
+#define UI_FLASH_PROGRAM_VALUE_COUNT    11U
+#define UI_FLASH_PARAMETER_VALUE_COUNT  8U
 
 typedef struct
 {

@@ -39,7 +39,7 @@ void ProgramPageView::setupScreen()
         gui::formatUnsignedWithCommas(0U, numericBuffers[index], gui::kNumericBufferSize);
     }
 
-    // Target-value input overlays: [0-2]=Position1-3, [3-5]=Speed1-3, [6-8]=Torque1-3
+    // Target-value input overlays: [0-2]=Position1-3, [3-5]=Speed1-3, [6-8]=Torque1-3, [9]=ReturnSpeed
     gui::configureNumericOverlay(targetTexts[0], TargetPosition1, targetBuffers[0]);
     gui::configureNumericOverlay(targetTexts[1], TargetPosition2, targetBuffers[1]);
     gui::configureNumericOverlay(targetTexts[2], TargetPosition3, targetBuffers[2]);
@@ -49,8 +49,9 @@ void ProgramPageView::setupScreen()
     gui::configureNumericOverlay(targetTexts[6], TargetTorque1,   targetBuffers[6]);
     gui::configureNumericOverlay(targetTexts[7], TargetTorque2,   targetBuffers[7]);
     gui::configureNumericOverlay(targetTexts[8], TargetTorque3,   targetBuffers[8]);
+    gui::configureNumericOverlay(targetTexts[9], ReturnSpeed,     targetBuffers[9]);
 
-    // Delay time overlay
+    // Delay time overlay (msec)
     gui::configureNumericOverlay(delayText, DelyTime, delayBuffer);
 
     for (uint8_t i = 0U; i < kTargetFieldCount; i++)
@@ -63,6 +64,8 @@ void ProgramPageView::setupScreen()
 
     keyBoard1.setEnterCallback(keyboardEnterCallback);
     keyBoard1.setBufferChangedCallback(keyboardChangedCallback);
+    Main_button_1.setAction(pageButtonCallback);
+    Main_button_1_1.setAction(pageButtonCallback);
     Main_button_1_2.setAction(pageButtonCallback);
     Main_button_1_2_1.setAction(pageButtonCallback);
     remove(keyBoard1);
@@ -187,6 +190,23 @@ void ProgramPageView::hideKeyboard()
 
 void ProgramPageView::onPageButtonPressed(const touchgfx::AbstractButton& src)
 {
+    if (&src == &Main_button_1)
+    {
+        if (activeInputField != kNoActiveField)
+        {
+            applyFieldText(activeInputField, fieldInputValues[activeInputField]);
+            hideKeyboard();
+        }
+        (void)presenter->notifyStartProgramSequence();
+        return;
+    }
+
+    if (&src == &Main_button_1_1)
+    {
+        presenter->notifyStopProgramSequence();
+        return;
+    }
+
     if (&src == &Main_button_1_2)
     {
         if (activeInputField != kNoActiveField)

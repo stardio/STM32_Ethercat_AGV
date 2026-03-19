@@ -428,7 +428,7 @@
             "Type": "ButtonWithLabel",
             "Name": "Main_button_1_2",
             "X": 241,
-            "Y": 358,
+            "Y": 369,
             "Width": 110,
             "Height": 50,
             "Pressed": "__generated\\alternate_theme_images_widgets_button_regular_height_50_tiny_round_active.png",
@@ -448,7 +448,7 @@
             "Type": "ButtonWithLabel",
             "Name": "Main_button_1_2_1",
             "X": 241,
-            "Y": 419,
+            "Y": 430,
             "Width": 110,
             "Height": 50,
             "Pressed": "__generated\\alternate_theme_images_widgets_button_regular_height_50_tiny_round_active.png",
@@ -484,7 +484,7 @@
             "Type": "TextArea",
             "Name": "textArea1_4_1_1_1",
             "X": 729,
-            "Y": 186,
+            "Y": 181,
             "Width": 22,
             "Height": 24,
             "TextId": "__SingleUse_EPQH",
@@ -520,6 +520,22 @@
             "Width": 40,
             "Height": 24,
             "TextId": "__SingleUse_MWX5",
+            "TextRotation": "0",
+            "Color": {
+              "Red": 77,
+              "Green": 237,
+              "Blue": 19
+            },
+            "AutoSize": true
+          },
+          {
+            "Type": "TextArea",
+            "Name": "textArea1_4_5",
+            "X": 283,
+            "Y": 307,
+            "Width": 40,
+            "Height": 24,
+            "TextId": "__SingleUse_K9ZD",
             "TextRotation": "0",
             "Color": {
               "Red": 77,
@@ -580,7 +596,7 @@
             "Type": "TextArea",
             "Name": "textArea1_4_3",
             "X": 504,
-            "Y": 186,
+            "Y": 181,
             "Width": 40,
             "Height": 24,
             "TextId": "__SingleUse_VCMR",
@@ -596,7 +612,7 @@
             "Type": "TextArea",
             "Name": "textArea1_4_1",
             "X": 287,
-            "Y": 186,
+            "Y": 181,
             "Width": 40,
             "Height": 24,
             "TextId": "__SingleUse_OD3R",
@@ -632,7 +648,7 @@
             "Type": "TextArea",
             "Name": "TargetPosition2",
             "X": 117,
-            "Y": 186,
+            "Y": 181,
             "Width": 163,
             "Height": 24,
             "TextId": "__SingleUse_NJE0",
@@ -642,7 +658,7 @@
             "Type": "TextArea",
             "Name": "TargetSpeed2",
             "X": 327,
-            "Y": 186,
+            "Y": 181,
             "Width": 166,
             "Height": 24,
             "TextId": "__SingleUse_ZREJ",
@@ -652,7 +668,7 @@
             "Type": "TextArea",
             "Name": "TargetTorque2",
             "X": 587,
-            "Y": 186,
+            "Y": 181,
             "Width": 135,
             "Height": 24,
             "TextId": "__SingleUse_7BB7",
@@ -692,7 +708,7 @@
             "Type": "ButtonWithLabel",
             "Name": "Main_button",
             "X": 544,
-            "Y": 419,
+            "Y": 430,
             "Width": 240,
             "Height": 50,
             "Pressed": "__generated\\alternate_theme_images_widgets_button_regular_height_50_medium_rounded_pressed.png",
@@ -715,7 +731,7 @@
             "Type": "ButtonWithLabel",
             "Name": "Main_button_1",
             "X": 38,
-            "Y": 358,
+            "Y": 371,
             "Width": 175,
             "Height": 50,
             "Pressed": "__generated\\alternate_theme_images_widgets_button_regular_height_50_small_round_active.png",
@@ -737,7 +753,7 @@
             "Type": "ButtonWithLabel",
             "Name": "Main_button_1_1",
             "X": 38,
-            "Y": 419,
+            "Y": 430,
             "Width": 175,
             "Height": 50,
             "Pressed": "__generated\\alternate_theme_images_widgets_button_regular_height_50_small_round_active.png",
@@ -907,7 +923,7 @@
             "Type": "TextArea",
             "Name": "textArea2_1",
             "X": 22,
-            "Y": 186,
+            "Y": 181,
             "Width": 95,
             "Height": 24,
             "TextId": "__SingleUse_H6TM",
@@ -923,7 +939,7 @@
             "Type": "TextArea",
             "Name": "textArea1_4_1_1_1_2",
             "X": 729,
-            "Y": 234,
+            "Y": 223,
             "Width": 22,
             "Height": 24,
             "TextId": "__SingleUse_RO9P",
@@ -939,7 +955,7 @@
             "Type": "TextArea",
             "Name": "textArea1_4_3_1",
             "X": 504,
-            "Y": 234,
+            "Y": 223,
             "Width": 40,
             "Height": 24,
             "TextId": "__SingleUse_SV28",
@@ -955,7 +971,7 @@
             "Type": "TextArea",
             "Name": "textArea1_4_1_2",
             "X": 287,
-            "Y": 234,
+            "Y": 223,
             "Width": 40,
             "Height": 24,
             "TextId": "__SingleUse_MK5M",
@@ -970,8 +986,8 @@
           {
             "Type": "TextArea",
             "Name": "textArea1_4_1_2_1",
-            "X": 288,
-            "Y": 283,
+            "X": 283,
+            "Y": 264,
             "Width": 51,
             "Height": 24,
             "TextId": "__SingleUse_TYX5",
@@ -987,7 +1003,7 @@
             "Type": "TextArea",
             "Name": "TargetPosition3",
             "X": 116,
-            "Y": 234,
+            "Y": 223,
             "Width": 164,
             "Height": 24,
             "TextId": "__SingleUse_1LOH",
@@ -996,11 +1012,21 @@
           {
             "Type": "TextArea",
             "Name": "DelyTime",
-            "X": 117,
-            "Y": 284,
-            "Width": 164,
-            "Height": 24,
+            "X": 130,
+            "Y": 265,
+            "Width": 146,
+            "Height": 23,
             "TextId": "__SingleUse_RYY9",
+            "TextRotation": "0"
+          },
+          {
+            "Type": "TextArea",
+            "Name": "ReturnSpeed",
+            "X": 125,
+            "Y": 307,
+            "Width": 151,
+            "Height": 24,
+            "TextId": "__SingleUse_C0MP",
             "TextRotation": "0"
           },
           {
@@ -1017,7 +1043,7 @@
             "Type": "TextArea",
             "Name": "TargetSpeed3",
             "X": 333,
-            "Y": 234,
+            "Y": 223,
             "Width": 160,
             "Height": 24,
             "TextId": "__SingleUse_5RSR",
@@ -1027,7 +1053,7 @@
             "Type": "TextArea",
             "Name": "TargetTorque3",
             "X": 587,
-            "Y": 234,
+            "Y": 223,
             "Width": 135,
             "Height": 24,
             "TextId": "__SingleUse_6Q4M",
@@ -1037,7 +1063,7 @@
             "Type": "TextArea",
             "Name": "textArea2_1_2",
             "X": 22,
-            "Y": 234,
+            "Y": 223,
             "Width": 95,
             "Height": 24,
             "TextId": "__SingleUse_HDI0",
@@ -1052,11 +1078,27 @@
           {
             "Type": "TextArea",
             "Name": "textArea2_1_2_1",
-            "X": 27,
-            "Y": 283,
+            "X": 22,
+            "Y": 264,
             "Width": 108,
             "Height": 24,
             "TextId": "__SingleUse_HHHT",
+            "TextRotation": "0",
+            "Color": {
+              "Red": 77,
+              "Green": 237,
+              "Blue": 19
+            },
+            "AutoSize": true
+          },
+          {
+            "Type": "TextArea",
+            "Name": "textArea2_1_2_1_1",
+            "X": 22,
+            "Y": 307,
+            "Width": 108,
+            "Height": 24,
+            "TextId": "__SingleUse_MTRP",
             "TextRotation": "0",
             "Color": {
               "Red": 77,
@@ -1077,8 +1119,8 @@
           {
             "Type": "CustomContainerInstance",
             "Name": "keyBoard1",
-            "X": 544,
-            "Y": 156,
+            "X": 351,
+            "Y": 70,
             "Width": 250,
             "Height": 250,
             "CustomContainerDefinitionName": "KeyBoard"
@@ -1109,199 +1151,12 @@
         ]
       },
       {
-        "Name": "HomePage",
-        "Components": [
-          {
-            "Type": "TextArea",
-            "Name": "textArea1_4",
-            "X": 268,
-            "Y": 182,
-            "Width": 40,
-            "Height": 24,
-            "TextId": "__SingleUse_6OJ9",
-            "TextRotation": "0",
-            "Color": {
-              "Red": 77,
-              "Green": 237,
-              "Blue": 19
-            },
-            "AutoSize": true
-          },
-          {
-            "Type": "TextArea",
-            "Name": "CurrentPosition",
-            "X": 104,
-            "Y": 182,
-            "Width": 158,
-            "Height": 24,
-            "TextId": "__SingleUse_5NJR",
-            "TextRotation": "0"
-          },
-          {
-            "Type": "TextArea",
-            "Name": "textArea1_1",
-            "X": 14,
-            "Y": 182,
-            "Width": 77,
-            "Height": 24,
-            "TextId": "__SingleUse_JD5S",
-            "TextRotation": "0",
-            "Color": {
-              "Red": 77,
-              "Green": 237,
-              "Blue": 19
-            },
-            "AutoSize": true
-          },
-          {
-            "Type": "ButtonWithLabel",
-            "Name": "Main_button",
-            "X": 22,
-            "Y": 419,
-            "Width": 240,
-            "Height": 50,
-            "Pressed": "__generated\\alternate_theme_images_widgets_button_regular_height_50_medium_rounded_pressed.png",
-            "Released": "__generated\\alternate_theme_images_widgets_button_regular_height_50_medium_rounded_normal.png",
-            "TextId": "__SingleUse_2LQ1",
-            "ReleasedColor": {
-              "Red": 255,
-              "Green": 255,
-              "Blue": 255
-            },
-            "PressedColor": {
-              "Red": 255,
-              "Green": 255,
-              "Blue": 255
-            },
-            "TextRotation": "0",
-            "Preset": "alternate_theme\\presets\\button\\regular\\height_50\\medium_rounded_normal.json"
-          },
-          {
-            "Type": "ButtonWithLabel",
-            "Name": "buttonWithLabel1_2",
-            "X": 62,
-            "Y": 252,
-            "Width": 240,
-            "Height": 50,
-            "Pressed": "__generated\\alternate_theme_images_widgets_button_regular_height_50_medium_rounded_pressed.png",
-            "Released": "__generated\\alternate_theme_images_widgets_button_regular_height_50_medium_rounded_normal.png",
-            "TextId": "__SingleUse_VPGH",
-            "ReleasedColor": {
-              "Red": 255,
-              "Green": 255,
-              "Blue": 255
-            },
-            "PressedColor": {
-              "Red": 255,
-              "Green": 255,
-              "Blue": 255
-            },
-            "TextRotation": "0",
-            "Preset": "alternate_theme\\presets\\button\\regular\\height_50\\medium_rounded_normal.json"
-          },
-          {
-            "Type": "TextArea",
-            "Name": "textArea2_2_1_1_2",
-            "X": 126,
-            "Y": 139,
-            "Width": 127,
-            "Height": 24,
-            "TextId": "__SingleUse_S858",
-            "TextRotation": "0",
-            "Color": {
-              "Red": 250,
-              "Green": 242,
-              "Blue": 242
-            },
-            "AutoSize": true
-          },
-          {
-            "Type": "BoxWithBorder",
-            "Name": "boxWithBorder1",
-            "Width": 800,
-            "Height": 75,
-            "Color": {
-              "Red": 240,
-              "Green": 151,
-              "Blue": 151
-            },
-            "BorderSize": 5
-          },
-          {
-            "Type": "TextArea",
-            "Name": "textArea1",
-            "X": 268,
-            "Y": 13,
-            "Width": 238,
-            "Height": 48,
-            "TextId": "__SingleUse_YG09",
-            "TextRotation": "0",
-            "AutoSize": true
-          },
-          {
-            "Type": "TextArea",
-            "Name": "textArea1_5",
-            "X": 616,
-            "Y": 25,
-            "Width": 153,
-            "Height": 24,
-            "TextId": "__SingleUse_SPH2",
-            "TextRotation": "0",
-            "AutoSize": true
-          },
-          {
-            "Type": "Image",
-            "Name": "image1",
-            "X": 9,
-            "Y": 8,
-            "Width": 82,
-            "Height": 58,
-            "RelativeFilename": "BSlogo11.png"
-          }
-        ],
-        "Interactions": [
-          {
-            "InteractionName": "Interaction1",
-            "Trigger": {
-              "Type": "TriggerClicked",
-              "TriggerComponent": "buttonWithLabel1_2"
-            },
-            "Action": {
-              "Type": "ActionCustom",
-              "FunctionName": "function1"
-            }
-          },
-          {
-            "InteractionName": "Interaction2",
-            "Trigger": {
-              "Type": "TriggerProgressIndicatorValueUpdated"
-            },
-            "Action": {
-              "Type": "ActionCustom",
-              "FunctionName": "function2"
-            }
-          },
-          {
-            "InteractionName": "Interaction3",
-            "Trigger": {
-              "Type": "TriggerClicked",
-              "TriggerComponent": "Main_button"
-            },
-            "Action": {
-              "Type": "ActionGotoScreen",
-              "ScreenTransitionType": "ScreenTransitionNone",
-              "ActionComponent": "MainPage"
-            }
-          }
-        ]
-      },
-      {
         "Name": "ManualPage",
         "Components": [
           {
             "Type": "ButtonWithLabel",
             "Name": "Main_button_1",
-            "X": 322,
+            "X": 663,
             "Y": 360,
             "Width": 110,
             "Height": 50,
@@ -1321,7 +1176,7 @@
           {
             "Type": "ButtonWithLabel",
             "Name": "Main_button_1_1",
-            "X": 322,
+            "X": 663,
             "Y": 421,
             "Width": 110,
             "Height": 50,
@@ -1625,12 +1480,12 @@
           {
             "Type": "ButtonWithLabel",
             "Name": "Main_button",
-            "X": 451,
+            "X": 245,
             "Y": 421,
-            "Width": 240,
+            "Width": 175,
             "Height": 50,
-            "Pressed": "__generated\\alternate_theme_images_widgets_button_regular_height_50_medium_rounded_pressed.png",
-            "Released": "__generated\\alternate_theme_images_widgets_button_regular_height_50_medium_rounded_normal.png",
+            "Pressed": "__generated\\alternate_theme_images_widgets_button_regular_height_50_small_rounded_pressed.png",
+            "Released": "__generated\\alternate_theme_images_widgets_button_regular_height_50_small_rounded_normal.png",
             "TextId": "__SingleUse_SUA2",
             "ReleasedColor": {
               "Red": 255,
@@ -1643,7 +1498,7 @@
               "Blue": 255
             },
             "TextRotation": "0",
-            "Preset": "alternate_theme\\presets\\button\\regular\\height_50\\medium_rounded_normal.json"
+            "Preset": "alternate_theme\\presets\\button\\regular\\height_50\\small_rounded_normal.json"
           },
           {
             "Type": "BoxWithBorder",
@@ -1681,37 +1536,13 @@
           },
           {
             "Type": "ButtonWithLabel",
-            "Name": "JogFWD",
-            "X": 57,
-            "Y": 360,
-            "Width": 240,
-            "Height": 50,
-            "Pressed": "__generated\\alternate_theme_images_widgets_button_regular_height_50_medium_rounded_pressed.png",
-            "Released": "__generated\\alternate_theme_images_widgets_button_regular_height_50_medium_rounded_normal.png",
-            "TextId": "__SingleUse_8YCJ",
-            "ReleasedColor": {
-              "Red": 255,
-              "Green": 255,
-              "Blue": 255
-            },
-            "PressedColor": {
-              "Red": 255,
-              "Green": 255,
-              "Blue": 255
-            },
-            "TextRotation": "0",
-            "Preset": "alternate_theme\\presets\\button\\regular\\height_50\\medium_rounded_normal.json"
-          },
-          {
-            "Type": "ButtonWithLabel",
             "Name": "ManualStart",
-            "X": 452,
-            "Y": 301,
-            "Width": 240,
+            "X": 451,
+            "Y": 300,
+            "Width": 175,
             "Height": 50,
-            "LockPosition": true,
-            "Pressed": "__generated\\alternate_theme_images_widgets_button_regular_height_50_medium_rounded_pressed.png",
-            "Released": "__generated\\alternate_theme_images_widgets_button_regular_height_50_medium_rounded_normal.png",
+            "Pressed": "__generated\\alternate_theme_images_widgets_button_regular_height_50_small_rounded_pressed.png",
+            "Released": "__generated\\alternate_theme_images_widgets_button_regular_height_50_small_rounded_normal.png",
             "TextId": "__SingleUse_3H4B",
             "ReleasedColor": {
               "Red": 255,
@@ -1724,17 +1555,40 @@
               "Blue": 255
             },
             "TextRotation": "0",
-            "Preset": "alternate_theme\\presets\\button\\regular\\height_50\\medium_rounded_normal.json"
+            "Preset": "alternate_theme\\presets\\button\\regular\\height_50\\small_rounded_normal.json"
+          },
+          {
+            "Type": "ButtonWithLabel",
+            "Name": "JogFWD",
+            "X": 49,
+            "Y": 360,
+            "Width": 175,
+            "Height": 50,
+            "Pressed": "__generated\\alternate_theme_images_widgets_button_regular_height_50_small_rounded_pressed.png",
+            "Released": "__generated\\alternate_theme_images_widgets_button_regular_height_50_small_rounded_normal.png",
+            "TextId": "__SingleUse_8YCJ",
+            "ReleasedColor": {
+              "Red": 255,
+              "Green": 255,
+              "Blue": 255
+            },
+            "PressedColor": {
+              "Red": 255,
+              "Green": 255,
+              "Blue": 255
+            },
+            "TextRotation": "0",
+            "Preset": "alternate_theme\\presets\\button\\regular\\height_50\\small_rounded_normal.json"
           },
           {
             "Type": "ButtonWithLabel",
             "Name": "JogREV",
-            "X": 60,
+            "X": 49,
             "Y": 421,
-            "Width": 240,
+            "Width": 175,
             "Height": 50,
-            "Pressed": "__generated\\alternate_theme_images_widgets_button_regular_height_50_medium_rounded_pressed.png",
-            "Released": "__generated\\alternate_theme_images_widgets_button_regular_height_50_medium_rounded_normal.png",
+            "Pressed": "__generated\\alternate_theme_images_widgets_button_regular_height_50_small_rounded_pressed.png",
+            "Released": "__generated\\alternate_theme_images_widgets_button_regular_height_50_small_rounded_normal.png",
             "TextId": "__SingleUse_ZPFF",
             "ReleasedColor": {
               "Red": 255,
@@ -1747,17 +1601,17 @@
               "Blue": 255
             },
             "TextRotation": "0",
-            "Preset": "alternate_theme\\presets\\button\\regular\\height_50\\medium_rounded_normal.json"
+            "Preset": "alternate_theme\\presets\\button\\regular\\height_50\\small_rounded_normal.json"
           },
           {
             "Type": "ButtonWithLabel",
             "Name": "ManualStop",
-            "X": 452,
+            "X": 451,
             "Y": 360,
-            "Width": 240,
+            "Width": 175,
             "Height": 50,
-            "Pressed": "__generated\\alternate_theme_images_widgets_button_regular_height_50_medium_rounded_pressed.png",
-            "Released": "__generated\\alternate_theme_images_widgets_button_regular_height_50_medium_rounded_normal.png",
+            "Pressed": "__generated\\alternate_theme_images_widgets_button_regular_height_50_small_rounded_pressed.png",
+            "Released": "__generated\\alternate_theme_images_widgets_button_regular_height_50_small_rounded_normal.png",
             "TextId": "__SingleUse_KPZ6",
             "ReleasedColor": {
               "Red": 255,
@@ -1770,7 +1624,29 @@
               "Blue": 255
             },
             "TextRotation": "0",
-            "Preset": "alternate_theme\\presets\\button\\regular\\height_50\\medium_rounded_normal.json"
+            "Preset": "alternate_theme\\presets\\button\\regular\\height_50\\small_rounded_normal.json"
+          },
+          {
+            "Type": "ButtonWithLabel",
+            "Name": "AbsInc",
+            "X": 451,
+            "Y": 421,
+            "Width": 175,
+            "Height": 50,
+            "Pressed": "__generated\\alternate_theme_images_widgets_button_regular_height_50_small_rounded_active.png",
+            "Released": "__generated\\alternate_theme_images_widgets_button_regular_height_50_small_rounded_action.png",
+            "TextId": "__SingleUse_ELCO",
+            "ReleasedColor": {
+              "Red": 255,
+              "Green": 255,
+              "Blue": 255
+            },
+            "PressedColor": {
+              "Red": 255,
+              "Green": 255,
+              "Blue": 255
+            },
+            "TextRotation": "0"
           },
           {
             "Type": "Image",
@@ -1782,63 +1658,10 @@
             "RelativeFilename": "BSlogo11.png"
           },
           {
-            "Type": "FlexButton",
-            "Name": "AbsInc",
-            "X": 701,
-            "Y": 301,
-            "Width": 89,
-            "Height": 109,
-            "ButtonTrigger": {
-              "Type": "ClickButtonTrigger"
-            },
-            "ButtonStyles": [
-              {
-                "Type": "TextButtonStyle",
-                "Y": 30,
-                "TextId": "__SingleUse_HWIJ",
-                "TextRotation": "0",
-                "ColorReleased": {
-                  "Red": 250,
-                  "Green": 250,
-                  "Blue": 245
-                },
-                "ColorPressed": {
-                  "Red": 250,
-                  "Green": 250,
-                  "Blue": 245
-                }
-              },
-              {
-                "Type": "BoxWithBorderButtonStyle",
-                "Width": 89,
-                "Height": 109,
-                "LockToFlexButtonSize": true,
-                "BorderSize": 5,
-                "ColorReleased": {
-                  "Green": 102,
-                  "Blue": 153
-                },
-                "ColorPressed": {
-                  "Green": 153,
-                  "Blue": 204
-                },
-                "ColorBorderReleased": {
-                  "Green": 51,
-                  "Blue": 102
-                },
-                "ColorBorderPressed": {
-                  "Red": 51,
-                  "Green": 102,
-                  "Blue": 153
-                }
-              }
-            ]
-          },
-          {
             "Type": "CustomContainerInstance",
             "Name": "keyBoard1",
-            "X": 197,
-            "Y": 75,
+            "X": 151,
+            "Y": 68,
             "Width": 250,
             "Height": 250,
             "CustomContainerDefinitionName": "KeyBoard"
@@ -1907,6 +1730,193 @@
             "Action": {
               "Type": "ActionCustom",
               "FunctionName": "function5"
+            }
+          }
+        ]
+      },
+      {
+        "Name": "HomePage",
+        "Components": [
+          {
+            "Type": "TextArea",
+            "Name": "textArea1_4",
+            "X": 268,
+            "Y": 182,
+            "Width": 40,
+            "Height": 24,
+            "TextId": "__SingleUse_6OJ9",
+            "TextRotation": "0",
+            "Color": {
+              "Red": 77,
+              "Green": 237,
+              "Blue": 19
+            },
+            "AutoSize": true
+          },
+          {
+            "Type": "TextArea",
+            "Name": "CurrentPosition",
+            "X": 104,
+            "Y": 182,
+            "Width": 158,
+            "Height": 24,
+            "TextId": "__SingleUse_5NJR",
+            "TextRotation": "0"
+          },
+          {
+            "Type": "TextArea",
+            "Name": "textArea1_1",
+            "X": 14,
+            "Y": 182,
+            "Width": 77,
+            "Height": 24,
+            "TextId": "__SingleUse_JD5S",
+            "TextRotation": "0",
+            "Color": {
+              "Red": 77,
+              "Green": 237,
+              "Blue": 19
+            },
+            "AutoSize": true
+          },
+          {
+            "Type": "ButtonWithLabel",
+            "Name": "Main_button",
+            "X": 22,
+            "Y": 419,
+            "Width": 240,
+            "Height": 50,
+            "Pressed": "__generated\\alternate_theme_images_widgets_button_regular_height_50_medium_rounded_pressed.png",
+            "Released": "__generated\\alternate_theme_images_widgets_button_regular_height_50_medium_rounded_normal.png",
+            "TextId": "__SingleUse_2LQ1",
+            "ReleasedColor": {
+              "Red": 255,
+              "Green": 255,
+              "Blue": 255
+            },
+            "PressedColor": {
+              "Red": 255,
+              "Green": 255,
+              "Blue": 255
+            },
+            "TextRotation": "0",
+            "Preset": "alternate_theme\\presets\\button\\regular\\height_50\\medium_rounded_normal.json"
+          },
+          {
+            "Type": "ButtonWithLabel",
+            "Name": "buttonWithLabel1_2",
+            "X": 62,
+            "Y": 252,
+            "Width": 240,
+            "Height": 50,
+            "Pressed": "__generated\\alternate_theme_images_widgets_button_regular_height_50_medium_rounded_pressed.png",
+            "Released": "__generated\\alternate_theme_images_widgets_button_regular_height_50_medium_rounded_normal.png",
+            "TextId": "__SingleUse_VPGH",
+            "ReleasedColor": {
+              "Red": 255,
+              "Green": 255,
+              "Blue": 255
+            },
+            "PressedColor": {
+              "Red": 255,
+              "Green": 255,
+              "Blue": 255
+            },
+            "TextRotation": "0",
+            "Preset": "alternate_theme\\presets\\button\\regular\\height_50\\medium_rounded_normal.json"
+          },
+          {
+            "Type": "TextArea",
+            "Name": "textArea2_2_1_1_2",
+            "X": 126,
+            "Y": 139,
+            "Width": 127,
+            "Height": 24,
+            "TextId": "__SingleUse_S858",
+            "TextRotation": "0",
+            "Color": {
+              "Red": 250,
+              "Green": 242,
+              "Blue": 242
+            },
+            "AutoSize": true
+          },
+          {
+            "Type": "BoxWithBorder",
+            "Name": "boxWithBorder1",
+            "Width": 800,
+            "Height": 75,
+            "Color": {
+              "Red": 240,
+              "Green": 151,
+              "Blue": 151
+            },
+            "BorderSize": 5
+          },
+          {
+            "Type": "TextArea",
+            "Name": "textArea1",
+            "X": 268,
+            "Y": 13,
+            "Width": 238,
+            "Height": 48,
+            "TextId": "__SingleUse_YG09",
+            "TextRotation": "0",
+            "AutoSize": true
+          },
+          {
+            "Type": "TextArea",
+            "Name": "textArea1_5",
+            "X": 616,
+            "Y": 25,
+            "Width": 153,
+            "Height": 24,
+            "TextId": "__SingleUse_SPH2",
+            "TextRotation": "0",
+            "AutoSize": true
+          },
+          {
+            "Type": "Image",
+            "Name": "image1",
+            "X": 9,
+            "Y": 8,
+            "Width": 82,
+            "Height": 58,
+            "RelativeFilename": "BSlogo11.png"
+          }
+        ],
+        "Interactions": [
+          {
+            "InteractionName": "Interaction1",
+            "Trigger": {
+              "Type": "TriggerClicked",
+              "TriggerComponent": "buttonWithLabel1_2"
+            },
+            "Action": {
+              "Type": "ActionCustom",
+              "FunctionName": "function1"
+            }
+          },
+          {
+            "InteractionName": "Interaction2",
+            "Trigger": {
+              "Type": "TriggerProgressIndicatorValueUpdated"
+            },
+            "Action": {
+              "Type": "ActionCustom",
+              "FunctionName": "function2"
+            }
+          },
+          {
+            "InteractionName": "Interaction3",
+            "Trigger": {
+              "Type": "TriggerClicked",
+              "TriggerComponent": "Main_button"
+            },
+            "Action": {
+              "Type": "ActionGotoScreen",
+              "ScreenTransitionType": "ScreenTransitionNone",
+              "ActionComponent": "MainPage"
             }
           }
         ]
@@ -2002,6 +2012,16 @@
             "Width": 163,
             "Height": 23,
             "TextId": "__SingleUse_CU5D",
+            "TextRotation": "0"
+          },
+          {
+            "Type": "TextArea",
+            "Name": "PositionGain",
+            "X": 514,
+            "Y": 109,
+            "Width": 163,
+            "Height": 23,
+            "TextId": "__SingleUse_UJ86",
             "TextRotation": "0"
           },
           {
@@ -2104,6 +2124,22 @@
             "Width": 102,
             "Height": 24,
             "TextId": "__SingleUse_XGU1",
+            "TextRotation": "0",
+            "Color": {
+              "Red": 77,
+              "Green": 237,
+              "Blue": 19
+            },
+            "AutoSize": true
+          },
+          {
+            "Type": "TextArea",
+            "Name": "PoGain",
+            "X": 428,
+            "Y": 108,
+            "Width": 65,
+            "Height": 24,
+            "TextId": "__SingleUse_C6B7",
             "TextRotation": "0",
             "Color": {
               "Red": 77,
@@ -2317,8 +2353,8 @@
           {
             "Type": "CustomContainerInstance",
             "Name": "keyBoard1",
-            "X": 537,
-            "Y": 215,
+            "X": 428,
+            "Y": 147,
             "Width": 250,
             "Height": 250,
             "CustomContainerDefinitionName": "KeyBoard"

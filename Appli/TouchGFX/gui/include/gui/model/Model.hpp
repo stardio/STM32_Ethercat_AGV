@@ -17,8 +17,24 @@ public:
         kParamLimitMinus,
         kParamUnitScale,
         kParamHomeOffset,
+        kParamPositionGain,
         kParamCount,
-        kProgramValueCount = 10
+        kProgramValueCount = 11
+    };
+
+    enum
+    {
+        kProgramIdxTargetPos1 = 0,
+        kProgramIdxTargetPos2,
+        kProgramIdxTargetPos3,
+        kProgramIdxTargetSpeed1,
+        kProgramIdxTargetSpeed2,
+        kProgramIdxTargetSpeed3,
+        kProgramIdxTargetTorque1,
+        kProgramIdxTargetTorque2,
+        kProgramIdxTargetTorque3,
+        kProgramIdxReturnSpeed,
+        kProgramIdxDelayMs
     };
 
     Model();
@@ -68,6 +84,11 @@ public:
     void setProgramValue(uint8_t index, int32_t value);
     int32_t getProgramValue(uint8_t index) const;
 
+    // ProgramPage 실행 시퀀스 제어
+    bool startProgramSequence();
+    void stopProgramSequence();
+    bool isProgramSequenceRunning() const;
+
     // Explicit persistence commit. Settings are only written to flash when this is called.
     void commitPersistentState();
 
@@ -79,6 +100,20 @@ public:
     bool loadParameterPageFromUiFlash();
 
 protected:
+    enum ProgramSequenceState
+    {
+        kProgramSeqIdle = 0,
+        kProgramSeqMoveStep1,
+        kProgramSeqMoveStep2,
+        kProgramSeqMoveStep3,
+        kProgramSeqDelayBeforeReturn,
+        kProgramSeqReturnToOrigin
+    };
+
+    void beginProgramMoveStep(uint8_t stepIndex);
+    void tickProgramSequence();
+    bool isTargetReached(int32_t target) const;
+    bool isHardwareTargetReached(int32_t targetHw, int32_t toleranceHw) const;
     void savePersistentState();
     bool loadPersistentState();
     void initializeParameterFlashDefaults();
@@ -93,8 +128,22 @@ protected:
     uint8_t manualCycleAbsMode_;
     int32_t parameterValues_[kParamCount];
     int32_t programValues_[kProgramValueCount];
+    ProgramSequenceState programSequenceState_;
+    int32_t programStepPositions_[3];
+    int32_t programStepSpeeds_[3];
+    uint16_t programStepTorques_[3];
+    int32_t programOriginPosition_;
+    int32_t activeProgramTargetPosition_;
+    uint32_t programDelayMs_;
+    uint32_t programDelayStartMs_;
     bool suppressPersistence_;
     bool persistentDirty_;
+
+    // Position noise filter (2-point moving average - reduced latency)
+    static constexpr int kFilterDepth = 2;
+    int32_t positionFilterBuffer_[kFilterDepth];
+    int32_t positionFilteredValue_;
+    uint8_t positionFilterIndex_;
 };
 
 #endif // MODEL_HPP

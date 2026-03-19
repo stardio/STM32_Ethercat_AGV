@@ -11,11 +11,13 @@ uint8_t  SOEM_GetPdoReady(void);
 uint8_t  SOEM_GetRunEnable(void);
 uint16_t SOEM_GetStatusword(void);
 int32_t  SOEM_GetPositionActual(void);
+int32_t  SOEM_GetPositionActualHw(void);
 int32_t  SOEM_GetVelocityActual(void);
 int16_t  SOEM_GetTorqueActual(void);
 void     SOEM_SetRunEnable(uint8_t enable);
 void     SOEM_SetTargetPositionDelta(int32_t delta);
 void     SOEM_SetTargetPositionAbs(int32_t pos);
+void     SOEM_SetTargetPositionAbsHw(int32_t hwPos);
 void     SOEM_SetProfileVelocity(int32_t velocity);
 void     SOEM_SetTorqueLimitPercent(uint16_t percent);
 void     SOEM_SetProfileAcceleration(int32_t acceleration);
@@ -25,11 +27,17 @@ void     SOEM_SetSoftwareLimitMinus(int32_t limitMinus);
 void     SOEM_SetUnitScale(int32_t scale);
 void     SOEM_SetHomeOffset(int32_t offset);
 void     SOEM_SetHomePosition(void);
+void     SOEM_SetPositionGain(int32_t gain);
+uint32_t HAL_GetTick(void);
 }
 #endif
 
 namespace
 {
+// Larger tolerance avoids visible dwell between sequence points caused by fine settle jitter.
+#define PROGRAM_SEQUENCE_POSITION_TOLERANCE 100
+#define PROGRAM_RETURN_POSITION_TOLERANCE_HW 5
+
 #if defined(SIMULATOR)
 uint8_t simRunEnable = 0U;
 int32_t simPositionActual = 0;
@@ -43,6 +51,7 @@ int32_t simLimitPlus = 0;
 int32_t simLimitMinus = 0;
 int32_t simUnitScale = 1;
 int32_t simHomeOffset = 0;
+uint32_t simSystemMs = 0U;
 
 uint8_t modelGetPdoReady()
 {
@@ -60,6 +69,11 @@ uint16_t modelGetStatusword()
 }
 
 int32_t modelGetPositionActual()
+{
+    return simPositionActual;
+}
+
+int32_t modelGetPositionActualHw()
 {
     return simPositionActual;
 }
@@ -145,6 +159,16 @@ void modelSetHomePosition()
 {
     simPositionActual = 0;
 }
+
+void modelSetPositionGain(int32_t gain)
+{
+    (void)gain;
+}
+
+uint32_t modelGetSystemMs()
+{
+    return simSystemMs;
+}
 #else
 uint8_t modelGetPdoReady()
 {
@@ -164,6 +188,11 @@ uint16_t modelGetStatusword()
 int32_t modelGetPositionActual()
 {
     return SOEM_GetPositionActual();
+}
+
+int32_t modelGetPositionActualHw()
+{
+    return SOEM_GetPositionActualHw();
 }
 
 int32_t modelGetVelocityActual()
@@ -235,6 +264,16 @@ void modelSetHomePosition()
 {
     SOEM_SetHomePosition();
 }
+
+void modelSetPositionGain(int32_t gain)
+{
+    SOEM_SetPositionGain(gain);
+}
+
+uint32_t modelGetSystemMs()
+{
+    return HAL_GetTick();
+}
 #endif
 }
 
@@ -246,8 +285,15 @@ Model::Model()
             manualCycleSpeed_(0),
             manualCycleTorque_(0),
             manualCycleAbsMode_(1U),
+            programSequenceState_(kProgramSeqIdle),
+            programOriginPosition_(0),
+            activeProgramTargetPosition_(0),
+            programDelayMs_(0U),
+            programDelayStartMs_(0U),
             suppressPersistence_(false),
-            persistentDirty_(false)
+            persistentDirty_(false),
+            positionFilteredValue_(0),
+            positionFilterIndex_(0)
 {
     for (uint8_t i = 0U; i < kParamCount; i++)
     {
@@ -257,8 +303,22 @@ Model::Model()
     {
         programValues_[i] = 0;
     }
+    for (uint8_t i = 0U; i < 3U; i++)
+    {
+        programStepPositions_[i] = 0;
+        programStepSpeeds_[i] = 1;
+        programStepTorques_[i] = 1U;
+    }
+    // Initialize position filter buffer
+    for (uint8_t i = 0U; i < kFilterDepth; i++)
+    {
+        positionFilterBuffer_[i] = 0;
+    }
     parameterValues_[kParamJogSpeed] = jogStepCounts_;
     parameterValues_[kParamUnitScale] = 1;
+    
+    // Set default ReturnSpeed to a reasonable value (same as Step3 speed)
+    programValues_[kProgramIdxReturnSpeed] = 100;  // Default return speed
 
     const bool restoredPersistentState = loadPersistentState();
 
@@ -287,6 +347,8 @@ Model::Model()
             {
                 programValues_[i] = 0;
             }
+            // Set default ReturnSpeed when no saved program exists
+            programValues_[kProgramIdxReturnSpeed] = 100;
         }
     }
 }
@@ -309,19 +371,41 @@ int32_t Model::getJogStepCounts() const
 
 void Model::tick()
 {
+#if defined(SIMULATOR)
+    simSystemMs += 16U;
+#endif
+
+    const bool pdoReady = (modelGetPdoReady() != 0U);
+    if (pdoReady)
+    {
+        runEnable_ = modelGetRunEnable();
+        tickProgramSequence();
+        
+        // Update position filter (4-point moving average to reduce PDO noise)
+        int32_t rawPosition = modelGetPositionActual();
+        positionFilterBuffer_[positionFilterIndex_] = rawPosition;
+        positionFilterIndex_ = (positionFilterIndex_ + 1) % kFilterDepth;
+        
+        int64_t sum = 0;
+        for (uint8_t i = 0; i < kFilterDepth; i++)
+        {
+            sum += (int64_t)positionFilterBuffer_[i];
+        }
+        positionFilteredValue_ = (int32_t)(sum / (int64_t)kFilterDepth);
+    }
+
     if (modelListener == 0)
     {
         return;
     }
 
-    if (modelGetPdoReady() != 0U)
+    if (pdoReady)
     {
         modelListener->onMotionDataUpdated(
-            modelGetPositionActual(),
+            positionFilteredValue_,
             modelGetVelocityActual(),
             modelGetTorqueActual());
 
-        runEnable_ = modelGetRunEnable();
         modelListener->onRunEnableChanged(runEnable_);
     }
 }
@@ -339,6 +423,11 @@ int32_t Model::getPositionActual() const
 void Model::setRunEnable(uint8_t enable)
 {
     modelSetRunEnable(enable);
+
+    if (enable == 0U)
+    {
+        stopProgramSequence();
+    }
 }
 
 void Model::sendPositionDelta(int32_t delta)
@@ -493,6 +582,16 @@ void Model::setParameterValue(uint8_t index, int32_t value)
     {
         modelSetHomeOffset(value);
     }
+    else if (index == kParamPositionGain)
+    {
+        int32_t gain = value;
+        if (gain < 0)
+        {
+            gain = 0;
+        }
+        modelSetPositionGain(gain);
+        value = gain;
+    }
 
     parameterValues_[index] = value;
     markPersistentDirty();
@@ -637,6 +736,202 @@ int32_t Model::getProgramValue(uint8_t index) const
     return programValues_[index];
 }
 
+bool Model::startProgramSequence()
+{
+    if (modelGetPdoReady() == 0U)
+    {
+        return false;
+    }
+
+    if (modelGetRunEnable() == 0U)
+    {
+        return false;
+    }
+
+    const uint16_t statusword = modelGetStatusword();
+    const bool opEnabled = ((statusword & 0x006FU) == 0x0027U);
+    if (!opEnabled)
+    {
+        return false;
+    }
+
+    for (uint8_t index = 0U; index < 3U; index++)
+    {
+        int32_t speedAbs = programValues_[kProgramIdxTargetSpeed1 + index];
+        if (speedAbs < 0)
+        {
+            speedAbs = -speedAbs;
+        }
+        if (speedAbs <= 0)
+        {
+            speedAbs = 1;
+        }
+
+        int32_t torqueAbs = programValues_[kProgramIdxTargetTorque1 + index];
+        if (torqueAbs < 0)
+        {
+            torqueAbs = -torqueAbs;
+        }
+        if (torqueAbs <= 0)
+        {
+            torqueAbs = 1;
+        }
+        if (torqueAbs > 100)
+        {
+            torqueAbs = 100;
+        }
+
+        programStepPositions_[index] = programValues_[kProgramIdxTargetPos1 + index];
+        programStepSpeeds_[index] = speedAbs;
+        programStepTorques_[index] = static_cast<uint16_t>(torqueAbs);
+    }
+
+    const int32_t delayValue = programValues_[kProgramIdxDelayMs];
+    programDelayMs_ = (delayValue > 0) ? static_cast<uint32_t>(delayValue) : 0U;
+
+    // Capture origin position in user units only (avoid HW unit precision loss)
+    programOriginPosition_ = modelGetPositionActual();
+    programDelayStartMs_ = 0U;
+
+    beginProgramMoveStep(0U);
+    return true;
+}
+
+void Model::stopProgramSequence()
+{
+    if (programSequenceState_ == kProgramSeqIdle)
+    {
+        return;
+    }
+
+    // Stop with current position (using user units)
+    modelSetTargetPositionAbs(modelGetPositionActual());
+    programSequenceState_ = kProgramSeqIdle;
+    programDelayStartMs_ = 0U;
+}
+
+bool Model::isProgramSequenceRunning() const
+{
+    return (programSequenceState_ != kProgramSeqIdle);
+}
+
+void Model::beginProgramMoveStep(uint8_t stepIndex)
+{
+    if (stepIndex >= 3U)
+    {
+        return;
+    }
+
+    modelSetProfileVelocity(programStepSpeeds_[stepIndex]);
+    modelSetTorqueLimitPercent(programStepTorques_[stepIndex]);
+
+    activeProgramTargetPosition_ = programStepPositions_[stepIndex];
+    modelSetTargetPositionAbs(activeProgramTargetPosition_);
+
+    if (stepIndex == 0U)
+    {
+        programSequenceState_ = kProgramSeqMoveStep1;
+    }
+    else if (stepIndex == 1U)
+    {
+        programSequenceState_ = kProgramSeqMoveStep2;
+    }
+    else
+    {
+        programSequenceState_ = kProgramSeqMoveStep3;
+    }
+}
+
+bool Model::isTargetReached(int32_t target) const
+{
+    const int64_t delta = static_cast<int64_t>(modelGetPositionActual()) - static_cast<int64_t>(target);
+    const int64_t absDelta = (delta < 0) ? -delta : delta;
+    return (absDelta <= static_cast<int64_t>(PROGRAM_SEQUENCE_POSITION_TOLERANCE));
+}
+
+bool Model::isHardwareTargetReached(int32_t targetHw, int32_t toleranceHw) const
+{
+    int32_t toleranceAbs = toleranceHw;
+    if (toleranceAbs < 0)
+    {
+        toleranceAbs = -toleranceAbs;
+    }
+
+    const int64_t delta = static_cast<int64_t>(modelGetPositionActualHw()) - static_cast<int64_t>(targetHw);
+    const int64_t absDelta = (delta < 0) ? -delta : delta;
+    return (absDelta <= static_cast<int64_t>(toleranceAbs));
+}
+
+void Model::tickProgramSequence()
+{
+    if (programSequenceState_ == kProgramSeqIdle)
+    {
+        return;
+    }
+
+    if (programSequenceState_ == kProgramSeqMoveStep1)
+    {
+        if (isTargetReached(activeProgramTargetPosition_))
+        {
+            beginProgramMoveStep(1U);
+        }
+        return;
+    }
+
+    if (programSequenceState_ == kProgramSeqMoveStep2)
+    {
+        if (isTargetReached(activeProgramTargetPosition_))
+        {
+            beginProgramMoveStep(2U);
+        }
+        return;
+    }
+
+    if (programSequenceState_ == kProgramSeqMoveStep3)
+    {
+        if (isTargetReached(activeProgramTargetPosition_))
+        {
+            programDelayStartMs_ = modelGetSystemMs();
+            programSequenceState_ = kProgramSeqDelayBeforeReturn;
+        }
+        return;
+    }
+
+    if (programSequenceState_ == kProgramSeqDelayBeforeReturn)
+    {
+        const uint32_t elapsed = modelGetSystemMs() - programDelayStartMs_;
+        if (elapsed >= programDelayMs_)
+        {
+            int32_t returnSpeedAbs = programValues_[kProgramIdxReturnSpeed];
+            if (returnSpeedAbs < 0)
+            {
+                returnSpeedAbs = -returnSpeedAbs;
+            }
+            if (returnSpeedAbs <= 0)
+            {
+                returnSpeedAbs = 1;
+            }
+
+            modelSetProfileVelocity(returnSpeedAbs);
+            modelSetTorqueLimitPercent(programStepTorques_[2]);
+            activeProgramTargetPosition_ = programOriginPosition_;
+            modelSetTargetPositionAbs(programOriginPosition_);
+            programSequenceState_ = kProgramSeqReturnToOrigin;
+        }
+        return;
+    }
+
+    if (programSequenceState_ == kProgramSeqReturnToOrigin)
+    {
+        // Use user-unit tolerance check (consistent with other steps)
+        if (isTargetReached(programOriginPosition_))
+        {
+            programSequenceState_ = kProgramSeqIdle;
+            programDelayStartMs_ = 0U;
+        }
+    }
+}
+
 void Model::savePersistentState()
 {
     PersistentSettingsData savedState;
@@ -700,6 +995,7 @@ bool Model::loadPersistentState()
     setParameterValue(kParamHomeOffset, savedState.parameterValues[kParamHomeOffset]);
     setParameterValue(kParamLimitPlus, savedState.parameterValues[kParamLimitPlus]);
     setParameterValue(kParamLimitMinus, savedState.parameterValues[kParamLimitMinus]);
+    setParameterValue(kParamPositionGain, savedState.parameterValues[kParamPositionGain]);
 
     for (uint8_t index = 0U; index < kProgramValueCount; index++)
     {

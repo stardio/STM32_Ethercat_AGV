@@ -19,8 +19,8 @@ public:
 protected:
     enum
     {
-        kTargetFieldCount = 9,
-        kAllInputFieldCount = 10,
+        kTargetFieldCount = 10,
+        kAllInputFieldCount = 11,
         kNoActiveField = -1
     };
 
@@ -28,7 +28,7 @@ protected:
     touchgfx::TextAreaWithOneWildcard numericTexts[3];
     touchgfx::Unicode::UnicodeChar numericBuffers[3][gui::kNumericBufferSize];
 
-    // Target-value input overlays: [0-2]=Position1-3, [3-5]=Speed1-3, [6-8]=Torque1-3
+    // Target-value input overlays: [0-2]=Position1-3, [3-5]=Speed1-3, [6-8]=Torque1-3, [9]=ReturnSpeed
     touchgfx::TextAreaWithOneWildcard targetTexts[kTargetFieldCount];
     touchgfx::Unicode::UnicodeChar targetBuffers[kTargetFieldCount][gui::kNumericBufferSize];
 

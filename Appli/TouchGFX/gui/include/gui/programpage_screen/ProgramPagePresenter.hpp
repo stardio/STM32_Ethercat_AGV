@@ -22,6 +22,8 @@ public:
     int32_t notifyGetProgramValue(uint8_t index);
     bool notifySaveProgramPageToUiFlash();
     bool notifyLoadProgramPageFromUiFlash();
+    bool notifyStartProgramSequence();
+    void notifyStopProgramSequence();
 
 private:
     ProgramPagePresenter();

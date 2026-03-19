@@ -6,7 +6,7 @@
 MainPageView::MainPageView()
         : runUiState(0U),
       runAppliedState(0U),
-            runDebounceCount(0U)
+                        runDebounceCount(0U)
 {
 
 }

@@ -1262,7 +1262,6 @@ void EtherCAT_Task(void *argument)
 
   /* DWT-based cycle time measurement */
   volatile uint32_t *DWT_CYCCNT_PTR  = (volatile uint32_t *)0xE0001004U;
-  volatile uint32_t *DWT_CTRL_PTR    = (volatile uint32_t *)0xE0001000U;
   const uint32_t cpu_freq = SystemCoreClock;  /* 600 MHz */
   uint32_t cyc_prev = *DWT_CYCCNT_PTR;
   uint32_t cyc_min  = 0xFFFFFFFFU;

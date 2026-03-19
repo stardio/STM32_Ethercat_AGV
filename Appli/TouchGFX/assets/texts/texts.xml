@@ -6,6 +6,24 @@
   <Texts>
     <TextGroup Id="Group1" />
     <TextGroup Id="Unsorted">
+      <Text Id="__SingleUse_UJ86" Alignment="Right" TypographyId="Default">
+        <Translation Language="GB"></Translation>
+      </Text>
+      <Text Id="__SingleUse_C6B7" Alignment="Left" TypographyId="Default">
+        <Translation Language="GB">P Gain</Translation>
+      </Text>
+      <Text Id="__SingleUse_C0MP" Alignment="Right" TypographyId="Default">
+        <Translation Language="GB"></Translation>
+      </Text>
+      <Text Id="__SingleUse_K9ZD" Alignment="Left" TypographyId="Default">
+        <Translation Language="GB">puls</Translation>
+      </Text>
+      <Text Id="__SingleUse_MTRP" Alignment="Left" TypographyId="Default">
+        <Translation Language="GB">RET Speed</Translation>
+      </Text>
+      <Text Id="__SingleUse_ELCO" Alignment="Center" TypographyId="Default">
+        <Translation Language="GB">ABS/INC</Translation>
+      </Text>
       <Text Id="__SingleUse_BZRO" Alignment="Center" TypographyId="Default">
         <Translation Language="GB">Read</Translation>
       </Text>
@@ -86,9 +104,6 @@
       </Text>
       <Text Id="__SingleUse_XGU1" Alignment="Left" TypographyId="Default">
         <Translation Language="GB">Jog Speed</Translation>
-      </Text>
-      <Text Id="__SingleUse_HWIJ" Alignment="Center" TypographyId="Default">
-        <Translation Language="GB">ABS&#10;INC</Translation>
       </Text>
       <Text Id="__SingleUse_W05R" Alignment="Left" TypographyId="Default">
         <Translation Language="GB">1Cycle</Translation>

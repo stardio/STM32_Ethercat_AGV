@@ -30,6 +30,7 @@ void ParameterPageView::setupScreen()
     gui::configureNumericOverlay(paramTexts[kFieldLimitMinus], Limit_Minus, paramBuffers[kFieldLimitMinus]);
     gui::configureNumericOverlay(paramTexts[kFieldUnitScale], Unit_Scale, paramBuffers[kFieldUnitScale]);
     gui::configureNumericOverlay(paramTexts[kFieldHomeOffset], Home_Offset, paramBuffers[kFieldHomeOffset]);
+    gui::configureNumericOverlay(paramTexts[kFieldPositionGain], PositionGain, paramBuffers[kFieldPositionGain]);
 
     for (uint8_t i = 0U; i < kFieldCount; i++)
     {

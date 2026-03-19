@@ -38,3 +38,13 @@ bool ProgramPagePresenter::notifyLoadProgramPageFromUiFlash()
 {
     return model->loadProgramPageFromUiFlash();
 }
+
+bool ProgramPagePresenter::notifyStartProgramSequence()
+{
+    return model->startProgramSequence();
+}
+
+void ProgramPagePresenter::notifyStopProgramSequence()
+{
+    model->stopProgramSequence();
+}

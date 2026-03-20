@@ -1824,8 +1824,8 @@
           {
             "Type": "ButtonWithLabel",
             "Name": "Main_button",
-            "X": 22,
-            "Y": 419,
+            "X": 14,
+            "Y": 430,
             "Width": 240,
             "Height": 50,
             "Pressed": "__generated\\alternate_theme_images_widgets_button_regular_height_50_medium_rounded_pressed.png",
@@ -1849,10 +1849,10 @@
             "Name": "buttonWithLabel1_2",
             "X": 62,
             "Y": 252,
-            "Width": 240,
+            "Width": 175,
             "Height": 50,
-            "Pressed": "__generated\\alternate_theme_images_widgets_button_regular_height_50_medium_rounded_pressed.png",
-            "Released": "__generated\\alternate_theme_images_widgets_button_regular_height_50_medium_rounded_normal.png",
+            "Pressed": "__generated\\alternate_theme_images_widgets_button_regular_height_50_small_round_pressed.png",
+            "Released": "__generated\\alternate_theme_images_widgets_button_regular_height_50_small_round_action.png",
             "TextId": "__SingleUse_VPGH",
             "ReleasedColor": {
               "Red": 255,
@@ -1865,7 +1865,7 @@
               "Blue": 255
             },
             "TextRotation": "0",
-            "Preset": "alternate_theme\\presets\\button\\regular\\height_50\\medium_rounded_normal.json"
+            "Preset": "alternate_theme\\presets\\button\\regular\\height_50\\small_round_action.json"
           },
           {
             "Type": "TextArea",

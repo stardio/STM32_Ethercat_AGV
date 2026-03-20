@@ -13,6 +13,7 @@ public:
     virtual ~ParameterPageView() {}
     virtual void setupScreen();
     virtual void tearDownScreen();
+    virtual void handleTickEvent();
     virtual void handleClickEvent(const touchgfx::ClickEvent& evt);
 protected:
     enum
@@ -35,6 +36,8 @@ protected:
     char paramInputs[kFieldCount][KeyBoard::MAX_BUF];
     int8_t activeField;
     bool suppressKeyboardEcho;
+    bool parameterReadAllWaiting;
+    uint16_t parameterReadAllWaitTicks;
 
     touchgfx::Callback<ParameterPageView, const char*> keyboardEnterCallback;
     touchgfx::Callback<ParameterPageView, const char*> keyboardChangedCallback;

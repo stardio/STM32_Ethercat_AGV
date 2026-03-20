@@ -6,6 +6,21 @@
   <Texts>
     <TextGroup Id="Group1" />
     <TextGroup Id="Unsorted">
+      <Text Id="__SingleUse_FFJF" Alignment="Center" TypographyId="Default">
+        <Translation Language="GB">Write All</Translation>
+      </Text>
+      <Text Id="__SingleUse_2F8D" Alignment="Center" TypographyId="Default">
+        <Translation Language="GB">Read All</Translation>
+      </Text>
+      <Text Id="__SingleUse_L5B4" Alignment="Left" TypographyId="Default">
+        <Translation Language="GB">puls</Translation>
+      </Text>
+      <Text Id="__SingleUse_DP3G" Alignment="Left" TypographyId="Default">
+        <Translation Language="GB">Actual Position</Translation>
+      </Text>
+      <Text Id="__SingleUse_WOOF" Alignment="Right" TypographyId="Default">
+        <Translation Language="GB"></Translation>
+      </Text>
       <Text Id="__SingleUse_UJ86" Alignment="Right" TypographyId="Default">
         <Translation Language="GB"></Translation>
       </Text>
@@ -55,10 +70,10 @@
         <Translation Language="GB">puls</Translation>
       </Text>
       <Text Id="__SingleUse_5RF7" Alignment="Left" TypographyId="Default">
-        <Translation Language="GB">puls</Translation>
+        <Translation Language="GB">msec</Translation>
       </Text>
       <Text Id="__SingleUse_SIIP" Alignment="Left" TypographyId="Default">
-        <Translation Language="GB">puls</Translation>
+        <Translation Language="GB">msec</Translation>
       </Text>
       <Text Id="__SingleUse_AJWG" Alignment="Left" TypographyId="Default">
         <Translation Language="GB">puls</Translation>

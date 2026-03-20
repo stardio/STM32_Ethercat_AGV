@@ -28,6 +28,8 @@ void     SOEM_SetUnitScale(int32_t scale);
 void     SOEM_SetHomeOffset(int32_t offset);
 void     SOEM_SetHomePosition(void);
 void     SOEM_SetPositionGain(int32_t gain);
+void     SOEM_RequestParameterReadAll(void);
+uint8_t  SOEM_FetchParameterReadAll(int32_t *valuesOut, uint8_t valueCount);
 uint32_t HAL_GetTick(void);
 }
 #endif
@@ -37,6 +39,8 @@ namespace
 // Larger tolerance avoids visible dwell between sequence points caused by fine settle jitter.
 #define PROGRAM_SEQUENCE_POSITION_TOLERANCE 100
 #define PROGRAM_RETURN_POSITION_TOLERANCE_HW 5
+
+static const uint8_t kParameterReadAllValueCount = 8U;
 
 #if defined(SIMULATOR)
 uint8_t simRunEnable = 0U;
@@ -112,6 +116,11 @@ void modelSetTargetPositionAbs(int32_t pos)
     simPositionActual = pos;
 }
 
+void modelSetTargetPositionAbsHw(int32_t hwPos)
+{
+    simPositionActual = hwPos;
+}
+
 void modelSetProfileVelocity(int32_t velocity)
 {
     simProfileVelocity = velocity;
@@ -163,6 +172,17 @@ void modelSetHomePosition()
 void modelSetPositionGain(int32_t gain)
 {
     (void)gain;
+}
+
+void modelRequestParameterReadAll()
+{
+}
+
+uint8_t modelFetchParameterReadAll(int32_t *valuesOut, uint8_t valueCount)
+{
+    (void)valuesOut;
+    (void)valueCount;
+    return 0U;
 }
 
 uint32_t modelGetSystemMs()
@@ -220,6 +240,11 @@ void modelSetTargetPositionAbs(int32_t pos)
     SOEM_SetTargetPositionAbs(pos);
 }
 
+void modelSetTargetPositionAbsHw(int32_t hwPos)
+{
+    SOEM_SetTargetPositionAbsHw(hwPos);
+}
+
 void modelSetProfileVelocity(int32_t velocity)
 {
     SOEM_SetProfileVelocity(velocity);
@@ -270,6 +295,16 @@ void modelSetPositionGain(int32_t gain)
     SOEM_SetPositionGain(gain);
 }
 
+void modelRequestParameterReadAll()
+{
+    SOEM_RequestParameterReadAll();
+}
+
+uint8_t modelFetchParameterReadAll(int32_t *valuesOut, uint8_t valueCount)
+{
+    return SOEM_FetchParameterReadAll(valuesOut, valueCount);
+}
+
 uint32_t modelGetSystemMs()
 {
     return HAL_GetTick();
@@ -287,6 +322,7 @@ Model::Model()
             manualCycleAbsMode_(1U),
             programSequenceState_(kProgramSeqIdle),
             programOriginPosition_(0),
+            programOriginPositionHw_(0),
             activeProgramTargetPosition_(0),
             programDelayMs_(0U),
             programDelayStartMs_(0U),
@@ -351,6 +387,10 @@ Model::Model()
             programValues_[kProgramIdxReturnSpeed] = 100;
         }
     }
+
+    // Keep runtime conversion and drive-side parameters aligned with the
+    // persisted Parameter Page values after boot.
+    writeAllParametersToDrive();
 }
 
 void Model::setJogStepCounts(int32_t counts)
@@ -418,6 +458,11 @@ uint8_t Model::getRunEnable() const
 int32_t Model::getPositionActual() const
 {
     return modelGetPositionActual();
+}
+
+int32_t Model::getPositionActualHw() const
+{
+    return modelGetPositionActualHw();
 }
 
 void Model::setRunEnable(uint8_t enable)
@@ -551,7 +596,7 @@ void Model::setParameterValue(uint8_t index, int32_t value)
         {
             accel = -accel;
         }
-        modelSetProfileAcceleration(accel);
+        value = accel;
     }
     else if (index == kParamDecTime)
     {
@@ -560,15 +605,7 @@ void Model::setParameterValue(uint8_t index, int32_t value)
         {
             decel = -decel;
         }
-        modelSetProfileDeceleration(decel);
-    }
-    else if (index == kParamLimitPlus)
-    {
-        modelSetSoftwareLimitPlus(value);
-    }
-    else if (index == kParamLimitMinus)
-    {
-        modelSetSoftwareLimitMinus(value);
+        value = decel;
     }
     else if (index == kParamUnitScale)
     {
@@ -576,11 +613,6 @@ void Model::setParameterValue(uint8_t index, int32_t value)
         {
             value = 1;
         }
-        modelSetUnitScale(value);
-    }
-    else if (index == kParamHomeOffset)
-    {
-        modelSetHomeOffset(value);
     }
     else if (index == kParamPositionGain)
     {
@@ -589,7 +621,6 @@ void Model::setParameterValue(uint8_t index, int32_t value)
         {
             gain = 0;
         }
-        modelSetPositionGain(gain);
         value = gain;
     }
 
@@ -604,6 +635,68 @@ int32_t Model::getParameterValue(uint8_t index) const
         return 0;
     }
     return parameterValues_[index];
+}
+
+void Model::writeAllParametersToDrive()
+{
+    int32_t acceleration = parameterValues_[kParamAccTime];
+    int32_t deceleration = parameterValues_[kParamDecTime];
+    int32_t unitScale = parameterValues_[kParamUnitScale];
+    int32_t homeOffset = parameterValues_[kParamHomeOffset];
+    int32_t positionGain = parameterValues_[kParamPositionGain];
+
+    if (acceleration < 0)
+    {
+        acceleration = -acceleration;
+    }
+    if (deceleration < 0)
+    {
+        deceleration = -deceleration;
+    }
+    if (unitScale <= 0)
+    {
+        unitScale = 1;
+    }
+    if (positionGain < 0)
+    {
+        positionGain = 0;
+    }
+
+    parameterValues_[kParamAccTime] = acceleration;
+    parameterValues_[kParamDecTime] = deceleration;
+    parameterValues_[kParamUnitScale] = unitScale;
+    parameterValues_[kParamPositionGain] = positionGain;
+
+    modelSetProfileAcceleration(acceleration);
+    modelSetProfileDeceleration(deceleration);
+    modelSetUnitScale(unitScale);
+    modelSetHomeOffset(homeOffset);
+    modelSetSoftwareLimitPlus(parameterValues_[kParamLimitPlus]);
+    modelSetSoftwareLimitMinus(parameterValues_[kParamLimitMinus]);
+    modelSetPositionGain(positionGain);
+}
+
+void Model::requestReadAllParametersFromDrive()
+{
+    modelRequestParameterReadAll();
+}
+
+bool Model::fetchReadAllParametersFromDrive()
+{
+    int32_t values[kParameterReadAllValueCount] = {0};
+    if (modelFetchParameterReadAll(values, kParameterReadAllValueCount) == 0U)
+    {
+        return false;
+    }
+
+    parameterValues_[kParamAccTime] = values[1];
+    parameterValues_[kParamDecTime] = values[2];
+    parameterValues_[kParamLimitPlus] = values[3];
+    parameterValues_[kParamLimitMinus] = values[4];
+    parameterValues_[kParamUnitScale] = values[5];
+    parameterValues_[kParamHomeOffset] = values[6];
+    parameterValues_[kParamPositionGain] = values[7];
+    return true;
 }
 
 void Model::setProgramValue(uint8_t index, int32_t value)
@@ -738,6 +831,11 @@ int32_t Model::getProgramValue(uint8_t index) const
 
 bool Model::startProgramSequence()
 {
+    if (programSequenceState_ != kProgramSeqIdle)
+    {
+        return false;
+    }
+
     if (modelGetPdoReady() == 0U)
     {
         return false;
@@ -789,8 +887,10 @@ bool Model::startProgramSequence()
     const int32_t delayValue = programValues_[kProgramIdxDelayMs];
     programDelayMs_ = (delayValue > 0) ? static_cast<uint32_t>(delayValue) : 0U;
 
-    // Capture origin position in user units only (avoid HW unit precision loss)
+    // Capture origin in both user and HW units to avoid integer truncation
+    // on the user->HW round-trip (scale division loses remainder).
     programOriginPosition_ = modelGetPositionActual();
+    programOriginPositionHw_ = modelGetPositionActualHw();
     programDelayStartMs_ = 0U;
 
     beginProgramMoveStep(0U);
@@ -915,7 +1015,7 @@ void Model::tickProgramSequence()
             modelSetProfileVelocity(returnSpeedAbs);
             modelSetTorqueLimitPercent(programStepTorques_[2]);
             activeProgramTargetPosition_ = programOriginPosition_;
-            modelSetTargetPositionAbs(programOriginPosition_);
+            modelSetTargetPositionAbsHw(programOriginPositionHw_);
             programSequenceState_ = kProgramSeqReturnToOrigin;
         }
         return;
@@ -923,8 +1023,11 @@ void Model::tickProgramSequence()
 
     if (programSequenceState_ == kProgramSeqReturnToOrigin)
     {
-        // Use user-unit tolerance check (consistent with other steps)
-        if (isTargetReached(programOriginPosition_))
+        // Use tight HW-unit tolerance so the motor has truly converged
+        // before the cycle ends.  This prevents drift when the next cycle
+        // re-captures the origin from the current (not-yet-settled) position.
+        if (isHardwareTargetReached(programOriginPositionHw_,
+                                    PROGRAM_RETURN_POSITION_TOLERANCE_HW))
         {
             programSequenceState_ = kProgramSeqIdle;
             programDelayStartMs_ = 0U;

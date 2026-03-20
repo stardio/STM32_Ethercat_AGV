@@ -7,6 +7,8 @@ extern "C" {
 
 #include <stdint.h>
 
+#define SOEM_PARAMETER_PAGE_VALUE_COUNT 8U
+
 #ifdef SOEM_ENABLED
 #include "soem/soem.h"
 
@@ -42,6 +44,11 @@ void     SOEM_SetUnitScale(int32_t scale);
 void     SOEM_SetHomeOffset(int32_t offset);
 void     SOEM_SetHomePosition(void);
 void     SOEM_SetPositionGain(int32_t gain);
+void     SOEM_RequestParameterReadAll(void);
+uint8_t  SOEM_FetchParameterReadAll(int32_t *valuesOut, uint8_t valueCount);
+void     SOEM_RequestPositionGainRead(void);
+uint8_t  SOEM_FetchPositionGainRead(int32_t *gainOut);
+int32_t  SOEM_GetPositionGainReadStatus(void);
 
 #else
 static inline void SOEM_PortInit(void) {}
@@ -70,6 +77,17 @@ static inline void     SOEM_SetSoftwareLimitMinus(int32_t limitMinus) { (void)li
 static inline void     SOEM_SetUnitScale(int32_t scale) { (void)scale; }
 static inline void     SOEM_SetHomeOffset(int32_t offset) { (void)offset; }
 static inline void     SOEM_SetHomePosition(void)                  {}
+static inline void     SOEM_SetPositionGain(int32_t gain) { (void)gain; }
+static inline void     SOEM_RequestParameterReadAll(void) {}
+static inline uint8_t  SOEM_FetchParameterReadAll(int32_t *valuesOut, uint8_t valueCount)
+{
+	(void)valuesOut;
+	(void)valueCount;
+	return 0U;
+}
+static inline void     SOEM_RequestPositionGainRead(void) {}
+static inline uint8_t  SOEM_FetchPositionGainRead(int32_t *gainOut) { (void)gainOut; return 0U; }
+static inline int32_t  SOEM_GetPositionGainReadStatus(void) { return 0; }
 #endif
 
 #ifdef __cplusplus

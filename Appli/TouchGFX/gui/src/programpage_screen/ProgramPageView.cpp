@@ -25,16 +25,18 @@ void ProgramPageView::setupScreen()
 {
     ProgramPageViewBase::setupScreen();
 
-    // Current-value readback: [0]=Position, [1]=Speed, [2]=Torque
+    // Current-value readback: [0]=Position, [1]=Speed, [2]=Torque, [3]=ActualPosition
     gui::configureNumericOverlay(numericTexts[0], CurrentPosition,       numericBuffers[0]);
     gui::configureNumericOverlay(numericTexts[1], CurrentPosition_3_1_1, numericBuffers[1]);
     gui::configureNumericOverlay(numericTexts[2], CurrentTorque,         numericBuffers[2]);
+    gui::configureNumericOverlay(numericTexts[3], ActualPosition,        numericBuffers[3]);
 
     add(numericTexts[0]);
     add(numericTexts[1]);
     add(numericTexts[2]);
+    add(numericTexts[3]);
 
-    for (uint8_t index = 0U; index < 3U; index++)
+    for (uint8_t index = 0U; index < 4U; index++)
     {
         gui::formatUnsignedWithCommas(0U, numericBuffers[index], gui::kNumericBufferSize);
     }
@@ -149,14 +151,16 @@ void ProgramPageView::handleClickEvent(const touchgfx::ClickEvent& evt)
     hideKeyboard();
 }
 
-void ProgramPageView::updateMotionData(int32_t position, int32_t speed, int16_t torque)
+void ProgramPageView::updateMotionData(int32_t position, int32_t speed, int16_t torque, int32_t actualPositionHw)
 {
     gui::formatSignedWithCommas(position,  numericBuffers[0], gui::kNumericBufferSize);
     gui::formatAbsoluteWithCommas(speed,   numericBuffers[1], gui::kNumericBufferSize);
     gui::formatTorquePercent(torque,        numericBuffers[2], gui::kNumericBufferSize);
+    gui::formatSignedWithCommas(actualPositionHw, numericBuffers[3], gui::kNumericBufferSize);
     numericTexts[0].invalidate();
     numericTexts[1].invalidate();
     numericTexts[2].invalidate();
+    numericTexts[3].invalidate();
 }
 
 void ProgramPageView::showKeyboardForField(int8_t fieldIndex)

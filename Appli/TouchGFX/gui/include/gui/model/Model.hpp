@@ -65,6 +65,7 @@ public:
     // Run enable 상태 캐시 (페이지 전환 시에도 유지)
     uint8_t getRunEnable() const;
     int32_t getPositionActual() const;
+    int32_t getPositionActualHw() const;
 
     // 1Cycle 설정값 캐시 (페이지 전환 시에도 유지)
     void setManualCyclePosition(int32_t position);
@@ -79,6 +80,9 @@ public:
     // ParameterPage 설정값 캐시 (페이지 전환 시에도 유지)
     void setParameterValue(uint8_t index, int32_t value);
     int32_t getParameterValue(uint8_t index) const;
+    void writeAllParametersToDrive();
+    void requestReadAllParametersFromDrive();
+    bool fetchReadAllParametersFromDrive();
 
     // ProgramPage 설정값 캐시
     void setProgramValue(uint8_t index, int32_t value);
@@ -133,6 +137,7 @@ protected:
     int32_t programStepSpeeds_[3];
     uint16_t programStepTorques_[3];
     int32_t programOriginPosition_;
+    int32_t programOriginPositionHw_;
     int32_t activeProgramTargetPosition_;
     uint32_t programDelayMs_;
     uint32_t programDelayStartMs_;

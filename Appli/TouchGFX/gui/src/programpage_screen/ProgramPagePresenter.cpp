@@ -16,7 +16,7 @@ void ProgramPagePresenter::deactivate()
 
 void ProgramPagePresenter::onMotionDataUpdated(int32_t position, int32_t speed, int16_t torque)
 {
-    view.updateMotionData(position, speed, torque);
+    view.updateMotionData(position, speed, torque, model->getPositionActualHw());
 }
 
 void ProgramPagePresenter::notifySetProgramValue(uint8_t index, int32_t value)

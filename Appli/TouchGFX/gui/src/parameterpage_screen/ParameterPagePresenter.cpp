@@ -36,3 +36,18 @@ bool ParameterPagePresenter::notifyLoadParameterPageFromUiFlash()
 {
     return model->loadParameterPageFromUiFlash();
 }
+
+void ParameterPagePresenter::notifyWriteAllParametersToDrive()
+{
+    model->writeAllParametersToDrive();
+}
+
+void ParameterPagePresenter::notifyRequestReadAllParametersFromDrive()
+{
+    model->requestReadAllParametersFromDrive();
+}
+
+bool ParameterPagePresenter::notifyFetchReadAllParametersFromDrive()
+{
+    return model->fetchReadAllParametersFromDrive();
+}

@@ -31,6 +31,9 @@ public:
     int32_t notifyGetParameterValue(uint8_t index);
     bool notifySaveParameterPageToUiFlash();
     bool notifyLoadParameterPageFromUiFlash();
+    void notifyWriteAllParametersToDrive();
+    void notifyRequestReadAllParametersFromDrive();
+    bool notifyFetchReadAllParametersFromDrive();
 
 private:
     ParameterPagePresenter();

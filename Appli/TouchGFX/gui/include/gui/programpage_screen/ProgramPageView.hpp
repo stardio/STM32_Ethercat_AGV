@@ -15,7 +15,7 @@ public:
     virtual void tearDownScreen();
     virtual void handleTickEvent();
     virtual void handleClickEvent(const touchgfx::ClickEvent& evt);
-    void updateMotionData(int32_t position, int32_t speed, int16_t torque);
+    void updateMotionData(int32_t position, int32_t speed, int16_t torque, int32_t actualPositionHw);
 protected:
     enum
     {
@@ -24,9 +24,9 @@ protected:
         kNoActiveField = -1
     };
 
-    // Current-value readback overlays: [0]=Position, [1]=Speed, [2]=Torque
-    touchgfx::TextAreaWithOneWildcard numericTexts[3];
-    touchgfx::Unicode::UnicodeChar numericBuffers[3][gui::kNumericBufferSize];
+    // Current-value readback overlays: [0]=Position, [1]=Speed, [2]=Torque, [3]=ActualPosition
+    touchgfx::TextAreaWithOneWildcard numericTexts[4];
+    touchgfx::Unicode::UnicodeChar numericBuffers[4][gui::kNumericBufferSize];
 
     // Target-value input overlays: [0-2]=Position1-3, [3-5]=Speed1-3, [6-8]=Torque1-3, [9]=ReturnSpeed
     touchgfx::TextAreaWithOneWildcard targetTexts[kTargetFieldCount];

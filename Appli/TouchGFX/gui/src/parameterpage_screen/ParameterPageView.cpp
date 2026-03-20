@@ -8,6 +8,8 @@
 ParameterPageView::ParameterPageView()
     : activeField(kNoActiveField),
       suppressKeyboardEcho(false),
+            parameterReadAllWaiting(false),
+            parameterReadAllWaitTicks(0U),
       keyboardEnterCallback(this, &ParameterPageView::onKeyboardEnter),
       keyboardChangedCallback(this, &ParameterPageView::onKeyboardBufferChanged)
 {
@@ -52,6 +54,41 @@ void ParameterPageView::tearDownScreen()
 {
     hideKeyboard();
     ParameterPageViewBase::tearDownScreen();
+}
+
+void ParameterPageView::handleTickEvent()
+{
+    ParameterPageViewBase::handleTickEvent();
+
+    if (parameterReadAllWaiting == false)
+    {
+        return;
+    }
+
+    if (presenter->notifyFetchReadAllParametersFromDrive())
+    {
+        for (uint8_t i = 0U; i < kFieldCount; i++)
+        {
+            const int32_t value = presenter->notifyGetParameterValue(i);
+            (void)snprintf(paramInputs[i], KeyBoard::MAX_BUF, "%ld", static_cast<long>(value));
+            updateFieldText(static_cast<int8_t>(i), paramInputs[i]);
+        }
+
+        parameterReadAllWaiting = false;
+        parameterReadAllWaitTicks = 0U;
+        return;
+    }
+
+    if (parameterReadAllWaitTicks < 1000U)
+    {
+        parameterReadAllWaitTicks++;
+    }
+
+    if (parameterReadAllWaitTicks > 180U)
+    {
+        parameterReadAllWaiting = false;
+        parameterReadAllWaitTicks = 0U;
+    }
 }
 
 void ParameterPageView::handleClickEvent(const touchgfx::ClickEvent& evt)
@@ -111,6 +148,32 @@ void ParameterPageView::handleClickEvent(const touchgfx::ClickEvent& evt)
 
     if (inRect(Main_button))
     {
+        return;
+    }
+
+    if (inRect(ReadAll))
+    {
+        if (activeField != kNoActiveField)
+        {
+            applyFieldText(activeField, paramInputs[activeField]);
+            hideKeyboard();
+        }
+
+        presenter->notifyRequestReadAllParametersFromDrive();
+        parameterReadAllWaiting = true;
+        parameterReadAllWaitTicks = 0U;
+        return;
+    }
+
+    if (inRect(WriteAll))
+    {
+        if (activeField != kNoActiveField)
+        {
+            applyFieldText(activeField, paramInputs[activeField]);
+            hideKeyboard();
+        }
+
+        presenter->notifyWriteAllParametersToDrive();
         return;
     }
 

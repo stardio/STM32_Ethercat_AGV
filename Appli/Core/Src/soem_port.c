@@ -27,6 +27,26 @@
 #define SOEM_TARGET_REACHED_TOLERANCE_HW 5
 #endif
 
+#ifndef SOEM_POSITION_GAIN1_INDEX
+#define SOEM_POSITION_GAIN1_INDEX 0x2101U
+#endif
+
+#ifndef SOEM_POSITION_GAIN2_INDEX
+#define SOEM_POSITION_GAIN2_INDEX 0x2105U
+#endif
+
+#ifndef SOEM_POSITION_GAIN_SUBINDEX
+#define SOEM_POSITION_GAIN_SUBINDEX 0U
+#endif
+
+#ifndef SOEM_ACCDEC_MAX_MS
+#define SOEM_ACCDEC_MAX_MS 10000U
+#endif
+
+#ifndef SOEM_SW_LIMIT_ABS_MAX_UU
+#define SOEM_SW_LIMIT_ABS_MAX_UU 1073741823L
+#endif
+
 /* Forward declaration */
 static void soem_log(const char *msg);
 static int32_t soem_clamp_hw_position(int32_t hwPos);
@@ -90,8 +110,194 @@ static volatile uint8_t  soem_unit_scale_pending = 0U;
 static volatile uint8_t  soem_home_offset_pending = 0U;
 static volatile int32_t  soem_position_gain = 0;
 static volatile uint8_t  soem_position_gain_pending = 0U;
-static volatile uint8_t  soem_position_gain_supported = 1U;
-static volatile uint8_t  soem_position_gain_unsupported_logged = 0U;
+static volatile uint8_t  soem_position_gain_read_pending = 0U;
+static volatile uint8_t  soem_position_gain_read_updated = 0U;
+static volatile int32_t  soem_position_gain_readback = 0;
+static volatile int32_t  soem_position_gain_read_status = 0;
+static volatile uint8_t  soem_parameter_read_all_pending = 0U;
+static volatile uint8_t  soem_parameter_read_all_updated = 0U;
+static volatile int32_t  soem_parameter_read_all_values[SOEM_PARAMETER_PAGE_VALUE_COUNT] = {0};
+
+static int soem_try_write_position_gain(uint16 index, int32_t gain, uint8_t *used16bit)
+{
+  uint32 gain32 = (uint32)gain;
+  int wkc = ecx_SDOwrite(&soem_context,
+                         1,
+                         index,
+                         SOEM_POSITION_GAIN_SUBINDEX,
+                         FALSE,
+                         sizeof(gain32),
+                         &gain32,
+                         EC_TIMEOUTRXM);
+  if (wkc > 0)
+  {
+    if (used16bit != NULL)
+    {
+      *used16bit = 0U;
+    }
+    return wkc;
+  }
+
+  uint16 gain16 = (gain > 65535) ? 65535U : (uint16)gain;
+  wkc = ecx_SDOwrite(&soem_context,
+                     1,
+                     index,
+                     SOEM_POSITION_GAIN_SUBINDEX,
+                     FALSE,
+                     sizeof(gain16),
+                     &gain16,
+                     EC_TIMEOUTRXM);
+  if ((wkc > 0) && (used16bit != NULL))
+  {
+    *used16bit = 1U;
+  }
+
+  return wkc;
+}
+
+static int soem_try_read_position_gain(uint16 index, int32_t *gainOut, uint8_t *used16bit)
+{
+  if (gainOut == NULL)
+  {
+    return 0;
+  }
+
+  uint32 gain32 = 0U;
+  int readSize = (int)sizeof(gain32);
+  int wkc = ecx_SDOread(&soem_context,
+                        1,
+                        index,
+                        SOEM_POSITION_GAIN_SUBINDEX,
+                        FALSE,
+                        &readSize,
+                        &gain32,
+                        EC_TIMEOUTRXM);
+  if (wkc > 0)
+  {
+    if ((readSize > 0) && (readSize <= (int)sizeof(uint16)))
+    {
+      *gainOut = (int32_t)((uint16)gain32);
+      if (used16bit != NULL)
+      {
+        *used16bit = 1U;
+      }
+    }
+    else
+    {
+      *gainOut = (int32_t)gain32;
+      if (used16bit != NULL)
+      {
+        *used16bit = 0U;
+      }
+    }
+    return wkc;
+  }
+
+  uint16 gain16 = 0U;
+  readSize = (int)sizeof(gain16);
+  wkc = ecx_SDOread(&soem_context,
+                    1,
+                    index,
+                    SOEM_POSITION_GAIN_SUBINDEX,
+                    FALSE,
+                    &readSize,
+                    &gain16,
+                    EC_TIMEOUTRXM);
+  if (wkc > 0)
+  {
+    *gainOut = (int32_t)gain16;
+    if (used16bit != NULL)
+    {
+      *used16bit = 1U;
+    }
+  }
+
+  return wkc;
+}
+
+static int soem_read_int32_object(uint16 index, uint8 subindex, int32_t *valueOut)
+{
+  if (valueOut == NULL)
+  {
+    return 0;
+  }
+
+  int32_t value = 0;
+  int readSize = (int)sizeof(value);
+  int wkc = ecx_SDOread(&soem_context,
+                        1,
+                        index,
+                        subindex,
+                        FALSE,
+                        &readSize,
+                        &value,
+                        EC_TIMEOUTRXM);
+  if (wkc > 0)
+  {
+    *valueOut = value;
+  }
+  return wkc;
+}
+
+static int soem_read_uint32_object(uint16 index, uint8 subindex, uint32_t *valueOut)
+{
+  if (valueOut == NULL)
+  {
+    return 0;
+  }
+
+  uint32_t value = 0U;
+  int readSize = (int)sizeof(value);
+  int wkc = ecx_SDOread(&soem_context,
+                        1,
+                        index,
+                        subindex,
+                        FALSE,
+                        &readSize,
+                        &value,
+                        EC_TIMEOUTRXM);
+  if (wkc > 0)
+  {
+    *valueOut = value;
+  }
+  return wkc;
+}
+
+static int soem_write_uint16_object(uint16 index, uint8 subindex, uint16_t value)
+{
+  return ecx_SDOwrite(&soem_context,
+                      1,
+                      index,
+                      subindex,
+                      FALSE,
+                      sizeof(value),
+                      &value,
+                      EC_TIMEOUTRXM);
+}
+
+static int soem_read_uint16_object(uint16 index, uint8 subindex, uint16_t *valueOut)
+{
+  if (valueOut == NULL)
+  {
+    return 0;
+  }
+
+  uint16_t value = 0U;
+  int readSize = (int)sizeof(value);
+  int wkc = ecx_SDOread(&soem_context,
+                        1,
+                        index,
+                        subindex,
+                        FALSE,
+                        &readSize,
+                        &value,
+                        EC_TIMEOUTRXM);
+  if (wkc > 0)
+  {
+    *valueOut = value;
+  }
+  return wkc;
+}
 
 /* Home offset: set by SOEM_SetHomePosition().
  * All position reads are relative to this origin.
@@ -428,8 +634,9 @@ static void soem_update_target_position_output(void)
 
   if (errorToActual <= (int64_t)SOEM_TARGET_REACHED_TOLERANCE_HW)
   {
-    soem_target_position = (int32_t)soem_shadow_position;
-    soem_target_position_output = (int32_t)soem_shadow_position;
+    /* Keep commanded target fixed to avoid cumulative drift across cycles.
+     * Only settle output to the command when we are inside tolerance. */
+    soem_target_position_output = soem_clamp_hw_position(command);
     return;
   }
 
@@ -520,6 +727,29 @@ static void soem_refresh_hw_limits(void)
   soem_target_position_output = soem_clamp_hw_position(soem_target_position_output);
 }
 
+static uint8_t soem_allow_parameter_sdo_writes(void)
+{
+  int32_t velocityAbs = soem_shadow_velocity;
+  int64_t positionError = (int64_t)soem_target_position_output - (int64_t)soem_shadow_position;
+
+  if (soem_cia402_stage != SOEM_CIA402_STAGE_OPERATION_ENABLED)
+  {
+    return 1U;
+  }
+
+  if (velocityAbs < 0)
+  {
+    velocityAbs = -velocityAbs;
+  }
+  if (positionError < 0)
+  {
+    positionError = -positionError;
+  }
+
+  return ((velocityAbs <= 1) &&
+          (positionError <= (int64_t)SOEM_TARGET_REACHED_TOLERANCE_HW)) ? 1U : 0U;
+}
+
 static void soem_apply_pending_motion_settings(void)
 {
   if ((soem_profile_velocity_pending == 0U) &&
@@ -529,24 +759,32 @@ static void soem_apply_pending_motion_settings(void)
       (soem_software_limits_pending == 0U) &&
       (soem_unit_scale_pending == 0U) &&
       (soem_home_offset_pending == 0U) &&
-      (soem_position_gain_pending == 0U))
+      (soem_position_gain_pending == 0U) &&
+      (soem_parameter_read_all_pending == 0U) &&
+      (soem_position_gain_read_pending == 0U))
   {
     return;
   }
 
   if (soem_context.slavecount < 1)
   {
+    if (soem_position_gain_read_pending != 0U)
+    {
+      soem_position_gain_read_pending = 0U;
+      soem_position_gain_read_status = -20;
+      soem_log("SOEM: position gain read failed (no slave)");
+    }
+    if (soem_parameter_read_all_pending != 0U)
+    {
+      soem_parameter_read_all_pending = 0U;
+      soem_log("SOEM: parameter read-all failed (no slave)");
+    }
     return;
   }
 
-  /* Avoid blocking SDO writes while in Operation Enabled.
-   * Some drives fault when mailbox writes occur during active CSP motion. */
-  if (soem_cia402_stage == SOEM_CIA402_STAGE_OPERATION_ENABLED)
-  {
-    return;
-  }
+  const uint8 allowSdoWrites = soem_allow_parameter_sdo_writes();
 
-  if (soem_profile_velocity_pending != 0U)
+  if ((allowSdoWrites != 0U) && (soem_profile_velocity_pending != 0U))
   {
     uint32 velocity = (uint32)soem_profile_velocity;
     int wkc = ecx_SDOwrite(&soem_context, 1, 0x6081, 0, FALSE, sizeof(velocity), &velocity, EC_TIMEOUTRXM);
@@ -562,7 +800,7 @@ static void soem_apply_pending_motion_settings(void)
     }
   }
 
-  if (soem_torque_limit_pending != 0U)
+  if ((allowSdoWrites != 0U) && (soem_torque_limit_pending != 0U))
   {
     /* 0x6072 is per-mille (1000 = 100.0%). */
     uint16 torquePermille = (uint16)(soem_torque_limit_percent * 10U);
@@ -579,14 +817,29 @@ static void soem_apply_pending_motion_settings(void)
     }
   }
 
-  if (soem_profile_acceleration_pending != 0U)
+  if ((allowSdoWrites != 0U) && (soem_profile_acceleration_pending != 0U))
   {
-    uint32 acceleration = (uint32)soem_profile_acceleration;
-    int wkc = ecx_SDOwrite(&soem_context, 1, 0x6083, 0, FALSE, sizeof(acceleration), &acceleration, EC_TIMEOUTRXM);
-    if (wkc > 0)
+    uint16_t acceleration = (uint16_t)soem_profile_acceleration;
+    uint16_t accelerationRead = 0U;
+    int wkc = soem_write_uint16_object(0x2301, 0, acceleration);
+    if ((wkc > 0) && (soem_read_uint16_object(0x2301, 0, &accelerationRead) > 0))
     {
+      soem_profile_acceleration = (int32_t)accelerationRead;
       soem_profile_acceleration_pending = 0U;
-      soem_log("SOEM: profile acceleration applied");
+      if (accelerationRead != acceleration)
+      {
+        char line[120];
+        (void)snprintf(line,
+                       sizeof(line),
+                       "SOEM: profile acceleration adjusted req=%lu act=%lu",
+                       (unsigned long)acceleration,
+                       (unsigned long)accelerationRead);
+        soem_log(line);
+      }
+      else
+      {
+        soem_log("SOEM: profile acceleration applied (u16)");
+      }
     }
     else
     {
@@ -595,14 +848,29 @@ static void soem_apply_pending_motion_settings(void)
     }
   }
 
-  if (soem_profile_deceleration_pending != 0U)
+  if ((allowSdoWrites != 0U) && (soem_profile_deceleration_pending != 0U))
   {
-    uint32 deceleration = (uint32)soem_profile_deceleration;
-    int wkc = ecx_SDOwrite(&soem_context, 1, 0x6084, 0, FALSE, sizeof(deceleration), &deceleration, EC_TIMEOUTRXM);
-    if (wkc > 0)
+    uint16_t deceleration = (uint16_t)soem_profile_deceleration;
+    uint16_t decelerationRead = 0U;
+    int wkc = soem_write_uint16_object(0x2302, 0, deceleration);
+    if ((wkc > 0) && (soem_read_uint16_object(0x2302, 0, &decelerationRead) > 0))
     {
+      soem_profile_deceleration = (int32_t)decelerationRead;
       soem_profile_deceleration_pending = 0U;
-      soem_log("SOEM: profile deceleration applied");
+      if (decelerationRead != deceleration)
+      {
+        char line[120];
+        (void)snprintf(line,
+                       sizeof(line),
+                       "SOEM: profile deceleration adjusted req=%lu act=%lu",
+                       (unsigned long)deceleration,
+                       (unsigned long)decelerationRead);
+        soem_log(line);
+      }
+      else
+      {
+        soem_log("SOEM: profile deceleration applied (u16)");
+      }
     }
     else
     {
@@ -611,25 +879,43 @@ static void soem_apply_pending_motion_settings(void)
     }
   }
 
-  if (soem_software_limits_pending != 0U)
+  if ((allowSdoWrites != 0U) && (soem_software_limits_pending != 0U))
   {
-    if (soem_software_limits_enabled == 0U)
+    if ((soem_limit_plus_user <= soem_limit_minus_user) ||
+        ((soem_limit_plus_user == 0) && (soem_limit_minus_user == 0)))
     {
-      /* L7NH may reject extreme 0x607D values while limits are disabled.
-       * Keep host-side limits disabled and skip drive write in this state. */
       soem_software_limits_pending = 0U;
-      soem_log("SOEM: software limits disabled (0x607D write skipped)");
+      soem_log("SOEM: software limits invalid (0x607D write skipped)");
     }
     else
     {
-      int32_t minLimit = soem_limit_minus_hw;
-      int32_t maxLimit = soem_limit_plus_hw;
-      int wkcMin = ecx_SDOwrite(&soem_context, 1, 0x607D, 1, FALSE, sizeof(minLimit), &minLimit, EC_TIMEOUTRXM);
+      int32_t minLimit = soem_limit_minus_user;
+      int32_t maxLimit = soem_limit_plus_user;
       int wkcMax = ecx_SDOwrite(&soem_context, 1, 0x607D, 2, FALSE, sizeof(maxLimit), &maxLimit, EC_TIMEOUTRXM);
-      if ((wkcMin > 0) && (wkcMax > 0))
+      int wkcMin = ecx_SDOwrite(&soem_context, 1, 0x607D, 1, FALSE, sizeof(minLimit), &minLimit, EC_TIMEOUTRXM);
+      int32_t minRead = 0;
+      int32_t maxRead = 0;
+      int okMinRead = soem_read_int32_object(0x607D, 1, &minRead);
+      int okMaxRead = soem_read_int32_object(0x607D, 2, &maxRead);
+      if ((wkcMin > 0) && (wkcMax > 0) && (okMinRead > 0) && (okMaxRead > 0))
       {
         soem_software_limits_pending = 0U;
-        soem_log("SOEM: software limits applied");
+        if ((minRead != minLimit) || (maxRead != maxLimit))
+        {
+          char line[144];
+          (void)snprintf(line,
+                         sizeof(line),
+                         "SOEM: software limits adjusted req=[%ld,%ld] act=[%ld,%ld]",
+                         (long)minLimit,
+                         (long)maxLimit,
+                         (long)minRead,
+                         (long)maxRead);
+          soem_log(line);
+        }
+        else
+        {
+          soem_log("SOEM: software limits applied");
+        }
       }
       else
       {
@@ -639,7 +925,7 @@ static void soem_apply_pending_motion_settings(void)
     }
   }
 
-  if (soem_unit_scale_pending != 0U)
+  if ((allowSdoWrites != 0U) && (soem_unit_scale_pending != 0U))
   {
     uint32 feedConst = (uint32)((soem_unit_scale > 0) ? soem_unit_scale : 1);
     uint32 shaftRevs = 1U;
@@ -657,7 +943,7 @@ static void soem_apply_pending_motion_settings(void)
     }
   }
 
-  if (soem_home_offset_pending != 0U)
+  if ((allowSdoWrites != 0U) && (soem_home_offset_pending != 0U))
   {
     int32_t homeOffset = soem_home_offset;
     int wkc = ecx_SDOwrite(&soem_context, 1, 0x607C, 0, FALSE, sizeof(homeOffset), &homeOffset, EC_TIMEOUTRXM);
@@ -673,26 +959,23 @@ static void soem_apply_pending_motion_settings(void)
     }
   }
 
-  if (soem_position_gain_pending != 0U)
+  if ((allowSdoWrites != 0U) && (soem_position_gain_pending != 0U))
   {
-    if (soem_position_gain_supported == 0U)
+    uint8_t used16_1 = 0U;
+    uint8_t used16_2 = 0U;
+    int wkc1 = soem_try_write_position_gain(SOEM_POSITION_GAIN1_INDEX, soem_position_gain, &used16_1);
+    int wkc2 = soem_try_write_position_gain(SOEM_POSITION_GAIN2_INDEX, soem_position_gain, &used16_2);
+    soem_position_gain_pending = 0U;
+
+    if ((wkc1 > 0) || (wkc2 > 0))
     {
-      soem_position_gain_pending = 0U;
-      if (soem_position_gain_unsupported_logged == 0U)
-      {
-        soem_position_gain_unsupported_logged = 1U;
-        soem_log("SOEM: position gain ignored (0x60FB unsupported)");
-      }
-    }
-    else
-    {
-    /* 0x60FB:01 = Position Loop Proportional Gain (UDINT) */
-    uint32 gainVal = (uint32)soem_position_gain;
-    int wkc = ecx_SDOwrite(&soem_context, 1, 0x60FB, 1, FALSE, sizeof(gainVal), &gainVal, EC_TIMEOUTRXM);
-    if (wkc > 0)
-    {
-      soem_position_gain_pending = 0U;
-      soem_log("SOEM: position gain applied");
+      char line[128];
+      (void)snprintf(line,
+                     sizeof(line),
+                     "SOEM: position gain applied [2101:%s 2105:%s]",
+                     (wkc1 > 0) ? (used16_1 ? "ok16" : "ok32") : "fail",
+                     (wkc2 > 0) ? (used16_2 ? "ok16" : "ok32") : "fail");
+      soem_log(line);
     }
     else
     {
@@ -706,7 +989,9 @@ static void soem_apply_pending_motion_settings(void)
         {
           break;
         }
-        if ((err.Etype == EC_ERR_TYPE_SDO_ERROR) && (err.Index == 0x60FBU))
+        if ((err.Etype == EC_ERR_TYPE_SDO_ERROR) &&
+            ((err.Index == SOEM_POSITION_GAIN1_INDEX) ||
+             (err.Index == SOEM_POSITION_GAIN2_INDEX)))
         {
           abortCode = err.AbortCode;
           abortFound = 1U;
@@ -714,28 +999,165 @@ static void soem_apply_pending_motion_settings(void)
         }
       }
 
-      soem_position_gain_pending = 0U;
       if (abortFound != 0U)
       {
-        char line[96];
+        char line[112];
         (void)snprintf(line,
                        sizeof(line),
                        "SOEM: position gain apply failed abort=0x%08lX",
                        (unsigned long)((uint32_t)abortCode));
         soem_log(line);
-
-        if (((uint32_t)abortCode) == 0x06020000U)
-        {
-          soem_position_gain_supported = 0U;
-          soem_position_gain_unsupported_logged = 1U;
-          soem_log("SOEM: position gain unsupported on this drive (0x60FB)");
-        }
       }
       else
       {
-        soem_log("SOEM: position gain apply failed");
+        soem_log("SOEM: position gain apply failed (0x2101/0x2105)");
       }
     }
+  }
+
+  if (soem_position_gain_read_pending != 0U)
+  {
+    int32_t gainVal = 0;
+    uint8_t used16 = 0U;
+    uint16 readIndex = 0U;
+    int32_t abortCode = 0;
+    uint8_t abortFound = 0U;
+
+    int wkc = soem_try_read_position_gain(SOEM_POSITION_GAIN1_INDEX, &gainVal, &used16);
+    if (wkc > 0)
+    {
+      readIndex = SOEM_POSITION_GAIN1_INDEX;
+    }
+    else
+    {
+      wkc = soem_try_read_position_gain(SOEM_POSITION_GAIN2_INDEX, &gainVal, &used16);
+      if (wkc > 0)
+      {
+        readIndex = SOEM_POSITION_GAIN2_INDEX;
+      }
+    }
+
+    if (wkc > 0)
+    {
+      soem_position_gain_readback = gainVal;
+      soem_position_gain_read_updated = 1U;
+      soem_position_gain = gainVal;
+      soem_position_gain_read_pending = 0U;
+      soem_position_gain_read_status = 20;
+
+      char line[96];
+      (void)snprintf(line,
+                     sizeof(line),
+                     "SOEM: position gain read ok idx=0x%04X %s",
+                     (unsigned int)readIndex,
+                     used16 ? "u16" : "u32");
+      soem_log(line);
+    }
+    else
+    {
+      ec_errort err;
+
+      while (ecx_iserror(&soem_context))
+      {
+        if (!ecx_poperror(&soem_context, &err))
+        {
+          break;
+        }
+        if ((err.Etype == EC_ERR_TYPE_SDO_ERROR) &&
+            ((err.Index == SOEM_POSITION_GAIN1_INDEX) ||
+             (err.Index == SOEM_POSITION_GAIN2_INDEX)))
+        {
+          abortCode = err.AbortCode;
+          abortFound = 1U;
+          break;
+        }
+      }
+    }
+
+    soem_position_gain_read_pending = 0U;
+    if (wkc > 0)
+    {
+      /* success path already handled */
+    }
+    else if (abortFound != 0U)
+    {
+      if (((uint32_t)abortCode) == 0x06020000U)
+      {
+        soem_position_gain_read_status = -10;
+        soem_log("SOEM: position gain unsupported (0x2101/0x2105)");
+      }
+      else
+      {
+        soem_position_gain_read_status = -31;
+        char line[112];
+        (void)snprintf(line,
+                       sizeof(line),
+                       "SOEM: position gain read failed abort=0x%08lX",
+                       (unsigned long)((uint32_t)abortCode));
+        soem_log(line);
+      }
+    }
+    else
+    {
+      soem_position_gain_read_status = -30;
+      soem_log("SOEM: position gain read failed (0x2101/0x2105)");
+    }
+  }
+
+  if (soem_parameter_read_all_pending != 0U)
+  {
+    uint16_t acceleration = 0U;
+    uint16_t deceleration = 0U;
+    uint32_t feedConst = 1U;
+    uint32_t shaftRevs = 1U;
+    int32_t homeOffsetHw = 0;
+    int32_t limitMinusUser = 0;
+    int32_t limitPlusUser = 0;
+    int32_t positionGain = 0;
+    uint8_t positionGain16 = 0U;
+
+    int okAcc = soem_read_uint16_object(0x2301, 0, &acceleration);
+    int okDec = soem_read_uint16_object(0x2302, 0, &deceleration);
+    int okFeed = soem_read_uint32_object(0x6092, 1, &feedConst);
+    int okRevs = soem_read_uint32_object(0x6092, 2, &shaftRevs);
+    int okHome = soem_read_int32_object(0x607C, 0, &homeOffsetHw);
+    int okLimitMinus = soem_read_int32_object(0x607D, 1, &limitMinusUser);
+    int okLimitPlus = soem_read_int32_object(0x607D, 2, &limitPlusUser);
+    int okGain = soem_try_read_position_gain(SOEM_POSITION_GAIN1_INDEX, &positionGain, &positionGain16);
+    if (okGain <= 0)
+    {
+      okGain = soem_try_read_position_gain(SOEM_POSITION_GAIN2_INDEX, &positionGain, &positionGain16);
+    }
+
+    soem_parameter_read_all_pending = 0U;
+
+    if ((okAcc > 0) && (okDec > 0) && (okFeed > 0) && (okHome > 0) &&
+        (okLimitMinus > 0) && (okLimitPlus > 0) && (okGain > 0))
+    {
+      int32_t unitScaleUser = (int32_t)feedConst;
+      if ((okRevs > 0) && (shaftRevs > 0U))
+      {
+        unitScaleUser = (int32_t)(feedConst / shaftRevs);
+      }
+      if (unitScaleUser <= 0)
+      {
+        unitScaleUser = 1;
+      }
+
+      soem_parameter_read_all_values[0] = 0;
+      soem_parameter_read_all_values[1] = (int32_t)acceleration;
+      soem_parameter_read_all_values[2] = (int32_t)deceleration;
+      soem_parameter_read_all_values[5] = unitScaleUser;
+      soem_parameter_read_all_values[6] = homeOffsetHw / unitScaleUser;
+      soem_parameter_read_all_values[3] = limitPlusUser;
+      soem_parameter_read_all_values[4] = limitMinusUser;
+      soem_parameter_read_all_values[7] = positionGain;
+      soem_parameter_read_all_updated = 1U;
+      soem_log("SOEM: parameter read-all ok");
+    }
+    else
+    {
+      soem_log("SOEM: parameter read-all failed");
     }
   }
 
@@ -1426,6 +1848,10 @@ void SOEM_SetProfileAcceleration(int32_t acceleration)
   {
     acceleration = -acceleration;
   }
+  if (acceleration > (int32_t)SOEM_ACCDEC_MAX_MS)
+  {
+    acceleration = (int32_t)SOEM_ACCDEC_MAX_MS;
+  }
   soem_profile_acceleration = acceleration;
   soem_profile_acceleration_pending = 1U;
 }
@@ -1436,12 +1862,24 @@ void SOEM_SetProfileDeceleration(int32_t deceleration)
   {
     deceleration = -deceleration;
   }
+  if (deceleration > (int32_t)SOEM_ACCDEC_MAX_MS)
+  {
+    deceleration = (int32_t)SOEM_ACCDEC_MAX_MS;
+  }
   soem_profile_deceleration = deceleration;
   soem_profile_deceleration_pending = 1U;
 }
 
 void SOEM_SetSoftwareLimitPlus(int32_t limitPlus)
 {
+  if (limitPlus > SOEM_SW_LIMIT_ABS_MAX_UU)
+  {
+    limitPlus = SOEM_SW_LIMIT_ABS_MAX_UU;
+  }
+  else if (limitPlus < -SOEM_SW_LIMIT_ABS_MAX_UU)
+  {
+    limitPlus = -SOEM_SW_LIMIT_ABS_MAX_UU;
+  }
   soem_limit_plus_user = limitPlus;
   soem_refresh_hw_limits();
   soem_software_limits_pending = 1U;
@@ -1449,6 +1887,14 @@ void SOEM_SetSoftwareLimitPlus(int32_t limitPlus)
 
 void SOEM_SetSoftwareLimitMinus(int32_t limitMinus)
 {
+  if (limitMinus > SOEM_SW_LIMIT_ABS_MAX_UU)
+  {
+    limitMinus = SOEM_SW_LIMIT_ABS_MAX_UU;
+  }
+  else if (limitMinus < -SOEM_SW_LIMIT_ABS_MAX_UU)
+  {
+    limitMinus = -SOEM_SW_LIMIT_ABS_MAX_UU;
+  }
   soem_limit_minus_user = limitMinus;
   soem_refresh_hw_limits();
   soem_software_limits_pending = 1U;
@@ -1467,17 +1913,60 @@ void SOEM_SetUnitScale(int32_t scale)
 
 void SOEM_SetPositionGain(int32_t gain)
 {
-  if (soem_position_gain_supported == 0U)
-  {
-    return;
-  }
-
   if (gain < 0)
   {
     gain = 0;
   }
   soem_position_gain = gain;
   soem_position_gain_pending = 1U;
+}
+
+void SOEM_RequestParameterReadAll(void)
+{
+  soem_parameter_read_all_pending = 1U;
+  soem_parameter_read_all_updated = 0U;
+}
+
+uint8_t SOEM_FetchParameterReadAll(int32_t *valuesOut, uint8_t valueCount)
+{
+  uint8_t index;
+
+  if ((valuesOut == NULL) || (valueCount < SOEM_PARAMETER_PAGE_VALUE_COUNT) ||
+      (soem_parameter_read_all_updated == 0U))
+  {
+    return 0U;
+  }
+
+  for (index = 0U; index < SOEM_PARAMETER_PAGE_VALUE_COUNT; index++)
+  {
+    valuesOut[index] = soem_parameter_read_all_values[index];
+  }
+
+  soem_parameter_read_all_updated = 0U;
+  return 1U;
+}
+
+void SOEM_RequestPositionGainRead(void)
+{
+  soem_position_gain_read_pending = 1U;
+  soem_position_gain_read_status = 10;
+}
+
+uint8_t SOEM_FetchPositionGainRead(int32_t *gainOut)
+{
+  if ((gainOut == NULL) || (soem_position_gain_read_updated == 0U))
+  {
+    return 0U;
+  }
+
+  *gainOut = soem_position_gain_readback;
+  soem_position_gain_read_updated = 0U;
+  return 1U;
+}
+
+int32_t SOEM_GetPositionGainReadStatus(void)
+{
+  return soem_position_gain_read_status;
 }
 
 void SOEM_SetHomeOffset(int32_t offset)

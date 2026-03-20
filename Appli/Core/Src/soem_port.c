@@ -2000,4 +2000,19 @@ void SOEM_SetHomePosition(void)
   soem_log("HOME: origin set to current position");
 }
 
+int32_t SOEM_GetHomeOffset(void)
+{
+  return soem_home_offset;
+}
+
+void SOEM_LoadHomeHwOffset(int32_t hwOffset)
+{
+  /* Restore a previously saved raw hardware home offset directly, without
+   * applying the unit-scale conversion used by SOEM_SetHomeOffset().
+   * Called once at startup after reading the flash home record. */
+  soem_home_offset = hwOffset;
+  soem_refresh_hw_limits();
+  soem_home_offset_pending = 1U;
+}
+
 #endif

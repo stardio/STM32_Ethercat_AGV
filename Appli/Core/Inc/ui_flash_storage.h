@@ -29,6 +29,11 @@ typedef struct
     int32_t values[UI_FLASH_PARAMETER_VALUE_COUNT];
 } UiFlashParameterData;
 
+typedef struct
+{
+    int32_t hwOffset;
+} UiFlashHomeData;
+
 uint8_t UiFlashStorage_SaveProgram(const UiFlashProgramData* data);
 uint8_t UiFlashStorage_LoadProgram(UiFlashProgramData* data);
 
@@ -37,6 +42,9 @@ uint8_t UiFlashStorage_LoadManual(UiFlashManualData* data);
 
 uint8_t UiFlashStorage_SaveParameter(const UiFlashParameterData* data);
 uint8_t UiFlashStorage_LoadParameter(UiFlashParameterData* data);
+
+uint8_t UiFlashStorage_SaveHome(int32_t hwOffset);
+uint8_t UiFlashStorage_LoadHome(int32_t* hwOffset);
 
 #ifdef __cplusplus
 }

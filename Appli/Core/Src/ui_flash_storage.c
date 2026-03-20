@@ -16,7 +16,8 @@ typedef enum
 {
     UI_FLASH_PAGE_PROGRAM = 1,
     UI_FLASH_PAGE_MANUAL = 2,
-    UI_FLASH_PAGE_PARAMETER = 3
+    UI_FLASH_PAGE_PARAMETER = 3,
+    UI_FLASH_PAGE_HOME = 4
 } UiFlashPageId;
 
 typedef struct
@@ -35,6 +36,7 @@ typedef struct
     UiFlashRecord parameter;
     UiFlashRecord manual;
     UiFlashRecord program;
+    UiFlashRecord home;
 } UiFlashInternalLayout;
 
 static uint32_t UiFlash_Crc32(const uint8_t* data, uint32_t length)
@@ -249,6 +251,10 @@ static UiFlashRecord* UiFlash_GetRecordMutable(UiFlashInternalLayout* layout, Ui
     {
         return &layout->program;
     }
+    if (page == UI_FLASH_PAGE_HOME)
+    {
+        return &layout->home;
+    }
 
     return 0;
 }
@@ -271,6 +277,10 @@ static const UiFlashRecord* UiFlash_GetRecordConst(const UiFlashInternalLayout* 
     if (page == UI_FLASH_PAGE_PROGRAM)
     {
         return &layout->program;
+    }
+    if (page == UI_FLASH_PAGE_HOME)
+    {
+        return &layout->home;
     }
 
     return 0;
@@ -386,4 +396,37 @@ uint8_t UiFlashStorage_LoadParameter(UiFlashParameterData* data)
     return UiFlash_LoadRecord(UI_FLASH_PAGE_PARAMETER,
                               data,
                               sizeof(UiFlashParameterData));
+}
+
+uint8_t UiFlashStorage_SaveHome(int32_t hwOffset)
+{
+    UiFlashHomeData payload;
+    UiFlashRecord record;
+
+    payload.hwOffset = hwOffset;
+
+    if (UiFlash_BuildRecord(UI_FLASH_PAGE_HOME, &payload, sizeof(UiFlashHomeData), &record) == 0U)
+    {
+        return 0U;
+    }
+
+    return UiFlash_SaveRecord(UI_FLASH_PAGE_HOME, &record);
+}
+
+uint8_t UiFlashStorage_LoadHome(int32_t* hwOffset)
+{
+    UiFlashHomeData payload;
+
+    if (hwOffset == 0)
+    {
+        return 0U;
+    }
+
+    if (UiFlash_LoadRecord(UI_FLASH_PAGE_HOME, &payload, sizeof(UiFlashHomeData)) == 0U)
+    {
+        return 0U;
+    }
+
+    *hwOffset = payload.hwOffset;
+    return 1U;
 }

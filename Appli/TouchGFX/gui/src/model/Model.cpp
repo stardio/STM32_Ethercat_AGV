@@ -27,6 +27,8 @@ void     SOEM_SetSoftwareLimitMinus(int32_t limitMinus);
 void     SOEM_SetUnitScale(int32_t scale);
 void     SOEM_SetHomeOffset(int32_t offset);
 void     SOEM_SetHomePosition(void);
+int32_t  SOEM_GetHomeOffset(void);
+void     SOEM_LoadHomeHwOffset(int32_t hwOffset);
 void     SOEM_SetPositionGain(int32_t gain);
 void     SOEM_RequestParameterReadAll(void);
 uint8_t  SOEM_FetchParameterReadAll(int32_t *valuesOut, uint8_t valueCount);
@@ -169,6 +171,17 @@ void modelSetHomePosition()
     simPositionActual = 0;
 }
 
+int32_t modelGetHomeOffset()
+{
+    return simHomeOffset;
+}
+
+void modelLoadHomeHwOffset(int32_t hwOffset)
+{
+    simHomeOffset = hwOffset;
+    (void)simHomeOffset;
+}
+
 void modelSetPositionGain(int32_t gain)
 {
     (void)gain;
@@ -290,6 +303,16 @@ void modelSetHomePosition()
     SOEM_SetHomePosition();
 }
 
+int32_t modelGetHomeOffset()
+{
+    return SOEM_GetHomeOffset();
+}
+
+void modelLoadHomeHwOffset(int32_t hwOffset)
+{
+    SOEM_LoadHomeHwOffset(hwOffset);
+}
+
 void modelSetPositionGain(int32_t gain)
 {
     SOEM_SetPositionGain(gain);
@@ -391,6 +414,17 @@ Model::Model()
     // Keep runtime conversion and drive-side parameters aligned with the
     // persisted Parameter Page values after boot.
     writeAllParametersToDrive();
+
+    // Restore the hardware home offset saved by the Set-Home button press.
+    // This must run AFTER writeAllParametersToDrive() so it overrides any
+    // parameter-page HomeOffset that may have been applied above.
+    {
+        int32_t savedHwOffset = 0;
+        if (UiFlashStorage_LoadHome(&savedHwOffset) != 0U)
+        {
+            modelLoadHomeHwOffset(savedHwOffset);
+        }
+    }
 }
 
 void Model::setJogStepCounts(int32_t counts)
@@ -505,6 +539,9 @@ void Model::setTargetPositionAbs(int32_t pos)
 void Model::setHomePosition()
 {
     modelSetHomePosition();
+    // Persist the raw hardware home offset so it survives power cycles.
+    int32_t hwOffset = modelGetHomeOffset();
+    (void)UiFlashStorage_SaveHome(hwOffset);
 }
 
 void Model::setManualCyclePosition(int32_t position)

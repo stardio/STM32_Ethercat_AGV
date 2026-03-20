@@ -43,6 +43,8 @@ void     SOEM_SetSoftwareLimitMinus(int32_t limitMinus);
 void     SOEM_SetUnitScale(int32_t scale);
 void     SOEM_SetHomeOffset(int32_t offset);
 void     SOEM_SetHomePosition(void);
+int32_t  SOEM_GetHomeOffset(void);
+void     SOEM_LoadHomeHwOffset(int32_t hwOffset);
 void     SOEM_SetPositionGain(int32_t gain);
 void     SOEM_RequestParameterReadAll(void);
 uint8_t  SOEM_FetchParameterReadAll(int32_t *valuesOut, uint8_t valueCount);
@@ -77,6 +79,8 @@ static inline void     SOEM_SetSoftwareLimitMinus(int32_t limitMinus) { (void)li
 static inline void     SOEM_SetUnitScale(int32_t scale) { (void)scale; }
 static inline void     SOEM_SetHomeOffset(int32_t offset) { (void)offset; }
 static inline void     SOEM_SetHomePosition(void)                  {}
+static inline int32_t  SOEM_GetHomeOffset(void)                    { return 0; }
+static inline void     SOEM_LoadHomeHwOffset(int32_t hwOffset)     { (void)hwOffset; }
 static inline void     SOEM_SetPositionGain(int32_t gain) { (void)gain; }
 static inline void     SOEM_RequestParameterReadAll(void) {}
 static inline uint8_t  SOEM_FetchParameterReadAll(int32_t *valuesOut, uint8_t valueCount)

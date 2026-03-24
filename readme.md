@@ -20,3 +20,36 @@ Debugging the code in an IDE can be complex because of the Bootloader and Applic
 9. Press the black NRST button on the STM32H7S7-DK board
 10. The application is now at a break point at the first line of main() in the Appli project. If not, click Resume (F8) once more
 11. Proceed by e.g. clicking Resume (F8) or Step Over (F6)
+
+## Home Offset / ORG Reset Rules
+
+The project uses two different concepts and they must not be mixed:
+
+- Home Offset (Parameter Page): user parameter value used by position UI behavior.
+- Internal Home Origin (home_hw): internal hardware origin used in position conversion.
+
+### Intended behavior
+
+1. `Write All`
+	- Applies motion parameters (jog speed, acc/dec, limits, unit scale, gain).
+	- Saves Parameter Page values to parameter flash.
+	- Must not overwrite internal home origin from the Home Offset field.
+
+2. `ORG Reset (Set Home)`
+	- Uses current hardware position and configured Home Offset(user) to update internal home origin:
+	  - `home_hw = actual_hw - (home_offset_user * unit_scale)`
+	- Immediately after ORG Reset, Current Position should display Home Offset(user).
+	- Persists internal home origin to home flash.
+
+3. `Read All`
+	- Refreshes drive-side motion parameters into Parameter Page.
+	- Must not replace Home Offset field with internal home origin or raw encoder-like values.
+
+### Quick verification sequence
+
+1. Enter `Home Offset = 100` in Parameter Page.
+2. Press `Write All`.
+3. Press `Read All` and confirm Home Offset stays `100`.
+4. Go to Home Mode and press `ORG Reset`.
+5. Confirm Current Position becomes `100`.
+6. Press `Read All` again and confirm Home Offset and Current Position do not jump to raw encoder-style values.

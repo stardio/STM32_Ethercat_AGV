@@ -26,13 +26,18 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include <stdio.h>
+#include <limits.h>
+#include <stdlib.h>
+#include <stdarg.h>
 #include <string.h>
 #include "settings_persistence.h"
+#include "ui_flash_storage.h"
 #include "stm32h7rsxx_hal_eth.h"
 #include "soem/soem.h"
 #include "osal.h"
 #include "lan8742.h"
 #include "soem_port.h"
+#include "emw3080_web_server.h"
 #include "task.h"  /* vTaskDelayUntil */
 /* USER CODE END Includes */
 
@@ -50,6 +55,13 @@ static volatile uint16_t uart_log_head = 0;  /* written by producer (EtherCAT ta
 static volatile uint16_t uart_log_tail = 0;  /* consumed by DMA/flush task */
 static volatile uint8_t  uart_dma_busy = 0;  /* 1 = DMA transfer in flight */
 static char uart_dma_chunk[256];  /* DMA source buffer in normal RAM */
+
+/* Set to 1 while validating CN3 pin 2/3 short loopback, set back to 0 afterwards. */
+#define WIFI_UART7_LOOPBACK_TEST 0
+/* Set to 1 while validating SPI4 MOSI/MISO loopback in SPI bridge mode.
+ * Validated route on STM32H7S78-DK: AF5 + SSOE.
+ */
+#define WIFI_SPI4_LOOPBACK_TEST 0
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -76,6 +88,7 @@ DMA_HandleTypeDef handle_HPDMA1_Channel0;
 LTDC_HandleTypeDef hltdc;
 
 UART_HandleTypeDef huart4;
+UART_HandleTypeDef huart7;
 
 ETH_HandleTypeDef heth;
 /* DMA descriptors in RAM_CMD (0x24068000), MPU non-cacheable region.
@@ -118,8 +131,8 @@ extern volatile int g_soem_sockhandle_value;
 osThreadId_t defaultTaskHandle;
 const osThreadAttr_t defaultTask_attributes = {
   .name = "defaultTask",
-  .stack_size = 128 * 4,
-  .priority = (osPriority_t) osPriorityNormal,
+  .stack_size = 1024 * 4,
+  .priority = (osPriority_t) osPriorityBelowNormal,
 };
 /* Definitions for TouchGFXTask */
 osThreadId_t TouchGFXTaskHandle;
@@ -143,6 +156,7 @@ static void MX_JPEG_Init(void);
 static void MX_FLASH_Init(void);
 static void MX_I2C1_Init(void);
 static void MX_UART4_Init(void);
+static void MX_UART7_Init(void);
 static void MX_GPU2D_Init(void);
 static void MX_ICACHE_GPU2D_Init(void);
 static void MX_GFXMMU_Init(void);
@@ -152,6 +166,7 @@ static void MX_ETH_Init(void);
 
 /* USER CODE BEGIN PFP */
 void EtherCAT_Task(void *argument);
+extern uint8_t TouchGFX_ModelReloadAllFromUiFlash(void);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -159,6 +174,10 @@ void EtherCAT_Task(void *argument);
 /* Non-blocking UART: push text into ring buffer, flushed by UART_LogFlush() */
 static void UART4_SendText(const char *text)
 {
+  if (Emw3080WebServer_GetDiagActiveUart() == 4U && Emw3080WebServer_IsRunning() != 0U)
+  {
+    return;
+  }
   if (text == NULL) return;
   uint16_t len = (uint16_t)strlen(text);
   for (uint16_t i = 0; i < len; i++)
@@ -174,6 +193,10 @@ static void UART4_SendText(const char *text)
 /* Flush ring buffer to UART via interrupt (call from low-priority context) */
 static void UART_LogFlush(void)
 {
+  if (Emw3080WebServer_GetDiagActiveUart() == 4U && Emw3080WebServer_IsRunning() != 0U)
+  {
+    return;
+  }
   if (uart_dma_busy) return;  /* previous transfer still in flight */
   uint16_t h = uart_log_head;
   uint16_t t = uart_log_tail;
@@ -196,12 +219,1486 @@ static void UART_LogFlush(void)
   }
 }
 
+#define PC_CMD_LINE_MAX 192U
+#define PC_PROGRAM_POSITION_TOLERANCE 100
+#define PC_PROGRAM_RETURN_TOLERANCE_HW 5
+#define PC_UART_RX_RING_SIZE 512U
+
+enum
+{
+  PC_PARAM_JOG_SPEED = 0,
+  PC_PARAM_ACC_TIME,
+  PC_PARAM_DEC_TIME,
+  PC_PARAM_LIMIT_PLUS,
+  PC_PARAM_LIMIT_MINUS,
+  PC_PARAM_UNIT_SCALE,
+  PC_PARAM_HOME_OFFSET,
+  PC_PARAM_POSITION_GAIN,
+  PC_PARAM_COUNT
+};
+
+enum
+{
+  PC_PROG_POS1 = 0,
+  PC_PROG_POS2,
+  PC_PROG_POS3,
+  PC_PROG_SPEED1,
+  PC_PROG_SPEED2,
+  PC_PROG_SPEED3,
+  PC_PROG_TORQUE1,
+  PC_PROG_TORQUE2,
+  PC_PROG_TORQUE3,
+  PC_PROG_RETURN_SPEED,
+  PC_PROG_DELAY_MS,
+  PC_PROG_COUNT
+};
+
+typedef enum
+{
+  PC_SEQ_IDLE = 0,
+  PC_SEQ_MOVE_STEP1,
+  PC_SEQ_MOVE_STEP2,
+  PC_SEQ_MOVE_STEP3,
+  PC_SEQ_DELAY_BEFORE_RETURN,
+  PC_SEQ_RETURN_TO_ORIGIN
+} PcProgramSequenceState;
+
+typedef struct
+{
+  int32_t manualPosition;
+  int32_t manualSpeed;
+  int16_t manualTorque;
+  uint8_t manualAbsMode;
+  int32_t parameterValues[PC_PARAM_COUNT];
+  int32_t programValues[PC_PROG_COUNT];
+
+  uint8_t parameterReadPending;
+  uint32_t parameterReadStartMs;
+
+  PcProgramSequenceState seqState;
+  int32_t seqStepPositions[3];
+  int32_t seqStepSpeeds[3];
+  uint16_t seqStepTorques[3];
+  int32_t seqOriginPosition;
+  int32_t seqOriginPositionHw;
+  int32_t seqActiveTarget;
+  uint32_t seqDelayMs;
+  uint32_t seqDelayStartMs;
+} PcCommandContext;
+
+static PcCommandContext g_pcCmd;
+static char g_pcCmdLine[PC_CMD_LINE_MAX];
+static uint16_t g_pcCmdLen = 0U;
+static volatile uint8_t g_pcUartRxRing[PC_UART_RX_RING_SIZE];
+static volatile uint16_t g_pcUartRxHead = 0U;
+static volatile uint16_t g_pcUartRxTail = 0U;
+static uint8_t g_pcUartRxByte = 0U;
+
+static void Pc_ProcessCommandLine(char *line);
+
+static uint8_t Pc_ToLowerAscii(uint8_t c)
+{
+  if (c >= (uint8_t)'A' && c <= (uint8_t)'Z')
+  {
+    return (uint8_t)(c + ((uint8_t)'a' - (uint8_t)'A'));
+  }
+  return c;
+}
+
+static uint8_t Pc_StrEqIgnoreCase(const char *a, const char *b)
+{
+  if (a == NULL || b == NULL)
+  {
+    return 0U;
+  }
+
+  while (*a != '\0' && *b != '\0')
+  {
+    if (Pc_ToLowerAscii((uint8_t)*a) != Pc_ToLowerAscii((uint8_t)*b))
+    {
+      return 0U;
+    }
+    a++;
+    b++;
+  }
+
+  return ((*a == '\0') && (*b == '\0')) ? 1U : 0U;
+}
+
+static uint8_t Pc_StartsWithIgnoreCase(const char *text, const char *prefix)
+{
+  if (text == NULL || prefix == NULL)
+  {
+    return 0U;
+  }
+
+  while (*prefix != '\0')
+  {
+    if (*text == '\0')
+    {
+      return 0U;
+    }
+    if (Pc_ToLowerAscii((uint8_t)*text) != Pc_ToLowerAscii((uint8_t)*prefix))
+    {
+      return 0U;
+    }
+    text++;
+    prefix++;
+  }
+  return 1U;
+}
+
+static char* Pc_Trim(char *s)
+{
+  char *end;
+  if (s == NULL)
+  {
+    return s;
+  }
+
+  while (*s == ' ' || *s == '\t')
+  {
+    s++;
+  }
+
+  end = s + strlen(s);
+  while (end > s)
+  {
+    char c = *(end - 1);
+    if (c != ' ' && c != '\t')
+    {
+      break;
+    }
+    end--;
+  }
+  *end = '\0';
+  return s;
+}
+
+static int32_t Pc_ParseInt32(const char *text, int32_t fallback)
+{
+  char *endPtr = NULL;
+  long parsed;
+  if (text == NULL)
+  {
+    return fallback;
+  }
+
+  parsed = strtol(text, &endPtr, 10);
+  if (endPtr == text)
+  {
+    return fallback;
+  }
+  if (parsed > INT32_MAX)
+  {
+    parsed = INT32_MAX;
+  }
+  else if (parsed < INT32_MIN)
+  {
+    parsed = INT32_MIN;
+  }
+  return (int32_t)parsed;
+}
+
+static uint8_t Pc_ParseBool(const char *text, uint8_t fallback)
+{
+  if (text == NULL)
+  {
+    return fallback;
+  }
+
+  if (Pc_StrEqIgnoreCase(text, "1") || Pc_StrEqIgnoreCase(text, "true") || Pc_StrEqIgnoreCase(text, "on"))
+  {
+    return 1U;
+  }
+  if (Pc_StrEqIgnoreCase(text, "0") || Pc_StrEqIgnoreCase(text, "false") || Pc_StrEqIgnoreCase(text, "off"))
+  {
+    return 0U;
+  }
+
+  return fallback;
+}
+
+static int32_t Pc_AbsMin1(int32_t value)
+{
+  int32_t absValue = value;
+  if (absValue < 0)
+  {
+    absValue = -absValue;
+  }
+  if (absValue <= 0)
+  {
+    absValue = 1;
+  }
+  return absValue;
+}
+
+static uint16_t Pc_ClampTorquePercent(int32_t value)
+{
+  int32_t absValue = Pc_AbsMin1(value);
+  if (absValue > 100)
+  {
+    absValue = 100;
+  }
+  return (uint16_t)absValue;
+}
+
+static void Pc_CmdReply(const char *fmt, ...)
+{
+  char msg[192];
+  va_list args;
+  int len;
+
+  va_start(args, fmt);
+  len = vsnprintf(msg, sizeof(msg), fmt, args);
+  va_end(args);
+
+  if (len < 0)
+  {
+    return;
+  }
+
+  if (len >= (int)sizeof(msg))
+  {
+    len = (int)sizeof(msg) - 1;
+    msg[len] = '\0';
+  }
+
+  UART4_SendText(msg);
+  UART4_SendText("\r\n");
+}
+
+static void Pc_ReplyConfigSnapshot(void)
+{
+  Pc_CmdReply("CFGM,pos=%ld,speed=%ld,torque=%d,abs=%u",
+              (long)g_pcCmd.manualPosition,
+              (long)g_pcCmd.manualSpeed,
+              (int)g_pcCmd.manualTorque,
+              (unsigned int)g_pcCmd.manualAbsMode);
+
+  Pc_CmdReply("CFGP,jog=%ld,acc=%ld,dec=%ld,lplus=%ld,lminus=%ld,unit=%ld,home=%ld,gain=%ld",
+              (long)g_pcCmd.parameterValues[PC_PARAM_JOG_SPEED],
+              (long)g_pcCmd.parameterValues[PC_PARAM_ACC_TIME],
+              (long)g_pcCmd.parameterValues[PC_PARAM_DEC_TIME],
+              (long)g_pcCmd.parameterValues[PC_PARAM_LIMIT_PLUS],
+              (long)g_pcCmd.parameterValues[PC_PARAM_LIMIT_MINUS],
+              (long)g_pcCmd.parameterValues[PC_PARAM_UNIT_SCALE],
+              (long)g_pcCmd.parameterValues[PC_PARAM_HOME_OFFSET],
+              (long)g_pcCmd.parameterValues[PC_PARAM_POSITION_GAIN]);
+
+  Pc_CmdReply("CFGR,p1=%ld,p2=%ld,p3=%ld,s1=%ld,s2=%ld,s3=%ld,t1=%ld,t2=%ld,t3=%ld,rs=%ld,delay=%ld",
+              (long)g_pcCmd.programValues[PC_PROG_POS1],
+              (long)g_pcCmd.programValues[PC_PROG_POS2],
+              (long)g_pcCmd.programValues[PC_PROG_POS3],
+              (long)g_pcCmd.programValues[PC_PROG_SPEED1],
+              (long)g_pcCmd.programValues[PC_PROG_SPEED2],
+              (long)g_pcCmd.programValues[PC_PROG_SPEED3],
+              (long)g_pcCmd.programValues[PC_PROG_TORQUE1],
+              (long)g_pcCmd.programValues[PC_PROG_TORQUE2],
+              (long)g_pcCmd.programValues[PC_PROG_TORQUE3],
+              (long)g_pcCmd.programValues[PC_PROG_RETURN_SPEED],
+              (long)g_pcCmd.programValues[PC_PROG_DELAY_MS]);
+}
+
+static void Pc_SyncTouchGfxModel(void)
+{
+  (void)TouchGFX_ModelReloadAllFromUiFlash();
+}
+
+static void Pc_SaveManualToFlash(void)
+{
+  UiFlashManualData manualData;
+  manualData.position = g_pcCmd.manualPosition;
+  manualData.speed = g_pcCmd.manualSpeed;
+  manualData.torque = g_pcCmd.manualTorque;
+  manualData.absMode = g_pcCmd.manualAbsMode;
+  memset(manualData.reserved, 0, sizeof(manualData.reserved));
+  (void)UiFlashStorage_SaveManual(&manualData);
+}
+
+static void Pc_SaveParameterToFlash(void)
+{
+  UiFlashParameterData parameterData;
+  uint8_t i;
+  for (i = 0U; i < PC_PARAM_COUNT; i++)
+  {
+    parameterData.values[i] = g_pcCmd.parameterValues[i];
+  }
+  (void)UiFlashStorage_SaveParameter(&parameterData);
+}
+
+static void Pc_SaveProgramToFlash(void)
+{
+  UiFlashProgramData programData;
+  uint8_t i;
+  for (i = 0U; i < PC_PROG_COUNT; i++)
+  {
+    programData.values[i] = g_pcCmd.programValues[i];
+  }
+  (void)UiFlashStorage_SaveProgram(&programData);
+}
+
+static uint8_t Pc_IsMotionEnabled(void)
+{
+  const uint16_t statusword = SOEM_GetStatusword();
+  if (SOEM_GetPdoReady() == 0U)
+  {
+    return 0U;
+  }
+  if (SOEM_GetRunEnable() == 0U)
+  {
+    return 0U;
+  }
+  return (((statusword & 0x006FU) == 0x0027U) ? 1U : 0U);
+}
+
+static uint8_t Pc_IsTargetReached(int32_t target)
+{
+  int64_t delta = (int64_t)SOEM_GetPositionActual() - (int64_t)target;
+  if (delta < 0)
+  {
+    delta = -delta;
+  }
+  return (delta <= (int64_t)PC_PROGRAM_POSITION_TOLERANCE) ? 1U : 0U;
+}
+
+static uint8_t Pc_IsHardwareTargetReached(int32_t targetHw, int32_t toleranceHw)
+{
+  int32_t tolerance = toleranceHw;
+  int64_t delta;
+  if (tolerance < 0)
+  {
+    tolerance = -tolerance;
+  }
+
+  delta = (int64_t)SOEM_GetPositionActualHw() - (int64_t)targetHw;
+  if (delta < 0)
+  {
+    delta = -delta;
+  }
+  return (delta <= (int64_t)tolerance) ? 1U : 0U;
+}
+
+static int32_t Pc_ClampInt64ToInt32(int64_t value)
+{
+  if (value > (int64_t)INT32_MAX)
+  {
+    return INT32_MAX;
+  }
+  if (value < (int64_t)INT32_MIN)
+  {
+    return INT32_MIN;
+  }
+  return (int32_t)value;
+}
+
+static void Pc_ProgramStop(void)
+{
+  if (g_pcCmd.seqState == PC_SEQ_IDLE)
+  {
+    return;
+  }
+
+  SOEM_SetTargetPositionAbs(SOEM_GetPositionActual());
+  g_pcCmd.seqState = PC_SEQ_IDLE;
+  g_pcCmd.seqDelayStartMs = 0U;
+}
+
+static void Pc_ProgramBeginStep(uint8_t stepIndex)
+{
+  if (stepIndex >= 3U)
+  {
+    return;
+  }
+
+  SOEM_SetProfileVelocity(g_pcCmd.seqStepSpeeds[stepIndex]);
+  SOEM_SetTorqueLimitPercent(g_pcCmd.seqStepTorques[stepIndex]);
+  g_pcCmd.seqActiveTarget = g_pcCmd.seqStepPositions[stepIndex];
+  SOEM_SetTargetPositionAbs(g_pcCmd.seqActiveTarget);
+
+  if (stepIndex == 0U)
+  {
+    g_pcCmd.seqState = PC_SEQ_MOVE_STEP1;
+  }
+  else if (stepIndex == 1U)
+  {
+    g_pcCmd.seqState = PC_SEQ_MOVE_STEP2;
+  }
+  else
+  {
+    g_pcCmd.seqState = PC_SEQ_MOVE_STEP3;
+  }
+}
+
+static uint8_t Pc_ProgramStart(void)
+{
+  uint8_t i;
+  int32_t delayValue;
+
+  if (g_pcCmd.seqState != PC_SEQ_IDLE)
+  {
+    return 0U;
+  }
+  if (Pc_IsMotionEnabled() == 0U)
+  {
+    return 0U;
+  }
+
+  for (i = 0U; i < 3U; i++)
+  {
+    g_pcCmd.seqStepPositions[i] = g_pcCmd.programValues[PC_PROG_POS1 + i];
+    g_pcCmd.seqStepSpeeds[i] = Pc_AbsMin1(g_pcCmd.programValues[PC_PROG_SPEED1 + i]);
+    g_pcCmd.seqStepTorques[i] = Pc_ClampTorquePercent(g_pcCmd.programValues[PC_PROG_TORQUE1 + i]);
+  }
+
+  delayValue = g_pcCmd.programValues[PC_PROG_DELAY_MS];
+  g_pcCmd.seqDelayMs = (delayValue > 0) ? (uint32_t)delayValue : 0U;
+
+  g_pcCmd.seqOriginPosition = SOEM_GetPositionActual();
+  g_pcCmd.seqOriginPositionHw = SOEM_GetPositionActualHw();
+  g_pcCmd.seqDelayStartMs = 0U;
+
+  Pc_ProgramBeginStep(0U);
+  return 1U;
+}
+
+static void Pc_ProgramTick(void)
+{
+  if (g_pcCmd.seqState == PC_SEQ_IDLE)
+  {
+    return;
+  }
+
+  if (SOEM_GetRunEnable() == 0U)
+  {
+    Pc_ProgramStop();
+    return;
+  }
+
+  if (g_pcCmd.seqState == PC_SEQ_MOVE_STEP1)
+  {
+    if (Pc_IsTargetReached(g_pcCmd.seqActiveTarget) != 0U)
+    {
+      Pc_ProgramBeginStep(1U);
+    }
+    return;
+  }
+
+  if (g_pcCmd.seqState == PC_SEQ_MOVE_STEP2)
+  {
+    if (Pc_IsTargetReached(g_pcCmd.seqActiveTarget) != 0U)
+    {
+      Pc_ProgramBeginStep(2U);
+    }
+    return;
+  }
+
+  if (g_pcCmd.seqState == PC_SEQ_MOVE_STEP3)
+  {
+    if (Pc_IsTargetReached(g_pcCmd.seqActiveTarget) != 0U)
+    {
+      g_pcCmd.seqDelayStartMs = HAL_GetTick();
+      g_pcCmd.seqState = PC_SEQ_DELAY_BEFORE_RETURN;
+    }
+    return;
+  }
+
+  if (g_pcCmd.seqState == PC_SEQ_DELAY_BEFORE_RETURN)
+  {
+    uint32_t elapsed = HAL_GetTick() - g_pcCmd.seqDelayStartMs;
+    if (elapsed >= g_pcCmd.seqDelayMs)
+    {
+      const int32_t returnSpeed = Pc_AbsMin1(g_pcCmd.programValues[PC_PROG_RETURN_SPEED]);
+      SOEM_SetProfileVelocity(returnSpeed);
+      SOEM_SetTorqueLimitPercent(g_pcCmd.seqStepTorques[2]);
+      g_pcCmd.seqActiveTarget = g_pcCmd.seqOriginPosition;
+      SOEM_SetTargetPositionAbsHw(g_pcCmd.seqOriginPositionHw);
+      g_pcCmd.seqState = PC_SEQ_RETURN_TO_ORIGIN;
+    }
+    return;
+  }
+
+  if (g_pcCmd.seqState == PC_SEQ_RETURN_TO_ORIGIN)
+  {
+    if (Pc_IsHardwareTargetReached(g_pcCmd.seqOriginPositionHw, PC_PROGRAM_RETURN_TOLERANCE_HW) != 0U)
+    {
+      g_pcCmd.seqState = PC_SEQ_IDLE;
+      g_pcCmd.seqDelayStartMs = 0U;
+    }
+  }
+}
+
+static void Pc_ApplyParametersToDrive(void)
+{
+  int32_t jogSpeed = g_pcCmd.parameterValues[PC_PARAM_JOG_SPEED];
+  int32_t acc = g_pcCmd.parameterValues[PC_PARAM_ACC_TIME];
+  int32_t dec = g_pcCmd.parameterValues[PC_PARAM_DEC_TIME];
+  int32_t unitScale = g_pcCmd.parameterValues[PC_PARAM_UNIT_SCALE];
+  int32_t posGain = g_pcCmd.parameterValues[PC_PARAM_POSITION_GAIN];
+
+  if (jogSpeed < 0)
+  {
+    jogSpeed = -jogSpeed;
+  }
+  if (jogSpeed <= 0)
+  {
+    jogSpeed = 1;
+  }
+  if (acc < 0)
+  {
+    acc = -acc;
+  }
+  if (dec < 0)
+  {
+    dec = -dec;
+  }
+  if (unitScale <= 0)
+  {
+    unitScale = 1;
+  }
+  if (posGain < 0)
+  {
+    posGain = 0;
+  }
+
+  g_pcCmd.parameterValues[PC_PARAM_JOG_SPEED] = jogSpeed;
+  g_pcCmd.parameterValues[PC_PARAM_ACC_TIME] = acc;
+  g_pcCmd.parameterValues[PC_PARAM_DEC_TIME] = dec;
+  g_pcCmd.parameterValues[PC_PARAM_UNIT_SCALE] = unitScale;
+  g_pcCmd.parameterValues[PC_PARAM_POSITION_GAIN] = posGain;
+
+  SOEM_SetProfileVelocity(jogSpeed);
+  SOEM_SetProfileAcceleration(acc);
+  SOEM_SetProfileDeceleration(dec);
+  SOEM_SetUnitScale(unitScale);
+  SOEM_SetSoftwareLimitPlus(g_pcCmd.parameterValues[PC_PARAM_LIMIT_PLUS]);
+  SOEM_SetSoftwareLimitMinus(g_pcCmd.parameterValues[PC_PARAM_LIMIT_MINUS]);
+  SOEM_SetPositionGain(posGain);
+}
+
+static void Pc_CommandInit(void)
+{
+  UiFlashManualData manualData;
+  UiFlashParameterData parameterData;
+  UiFlashProgramData programData;
+  int32_t savedHomeHwOffset = 0;
+  uint8_t i;
+
+  memset(&g_pcCmd, 0, sizeof(g_pcCmd));
+  g_pcCmd.manualAbsMode = 1U;
+  g_pcCmd.parameterValues[PC_PARAM_UNIT_SCALE] = 1;
+  g_pcCmd.programValues[PC_PROG_RETURN_SPEED] = 100;
+  g_pcCmd.seqState = PC_SEQ_IDLE;
+
+  if (UiFlashStorage_LoadManual(&manualData) != 0U)
+  {
+    g_pcCmd.manualPosition = manualData.position;
+    g_pcCmd.manualSpeed = manualData.speed;
+    g_pcCmd.manualTorque = manualData.torque;
+    g_pcCmd.manualAbsMode = (manualData.absMode != 0U) ? 1U : 0U;
+  }
+
+  if (UiFlashStorage_LoadParameter(&parameterData) != 0U)
+  {
+    for (i = 0U; i < PC_PARAM_COUNT; i++)
+    {
+      g_pcCmd.parameterValues[i] = parameterData.values[i];
+    }
+  }
+
+  if (UiFlashStorage_LoadProgram(&programData) != 0U)
+  {
+    for (i = 0U; i < PC_PROG_COUNT; i++)
+    {
+      g_pcCmd.programValues[i] = programData.values[i];
+    }
+  }
+
+  /* Restore saved home origin at boot so absolute/user position remains calibrated
+   * after power cycle, independent of TouchGFX model startup timing. */
+  if (UiFlashStorage_LoadHome(&savedHomeHwOffset) != 0U)
+  {
+    SOEM_LoadHomeHwOffset(savedHomeHwOffset);
+  }
+}
+
+static void Pc_CommandHandleByte(uint8_t ch)
+{
+  if (ch == (uint8_t)'\r')
+  {
+    return;
+  }
+
+  if (ch == (uint8_t)'\n')
+  {
+    g_pcCmdLine[g_pcCmdLen] = '\0';
+    if (g_pcCmdLen > 0U)
+    {
+      Pc_ProcessCommandLine(g_pcCmdLine);
+    }
+    g_pcCmdLen = 0U;
+    return;
+  }
+
+  if (g_pcCmdLen < (PC_CMD_LINE_MAX - 1U))
+  {
+    g_pcCmdLine[g_pcCmdLen++] = (char)ch;
+  }
+  else
+  {
+    g_pcCmdLen = 0U;
+  }
+}
+
+static void Pc_CommandEnsureRxArmed(void)
+{
+  if (huart4.RxState == HAL_UART_STATE_READY)
+  {
+    (void)HAL_UART_Receive_IT(&huart4, &g_pcUartRxByte, 1U);
+  }
+}
+
+static void Pc_ProcessCommandLine(char *line)
+{
+  char *payload = Pc_Trim(line);
+  char *eq;
+  char *key;
+  char *value;
+  int32_t parsed;
+
+  if (payload == NULL || *payload == '\0')
+  {
+    return;
+  }
+
+  if (Pc_StartsWithIgnoreCase(payload, "CMD,"))
+  {
+    payload += 4;
+  }
+
+  eq = strchr(payload, '=');
+  if (eq == NULL)
+  {
+    return;
+  }
+
+  *eq = '\0';
+  key = Pc_Trim(payload);
+  value = Pc_Trim(eq + 1);
+
+  if (Pc_StrEqIgnoreCase(key, "run"))
+  {
+    uint8_t runEnable = Pc_ParseBool(value, 0U);
+    char msg[64];
+    SOEM_SetRunEnable(runEnable);
+    (void)snprintf(msg, sizeof(msg), "[CMD] run request=%u applied=%u", (unsigned int)runEnable, (unsigned int)SOEM_GetRunEnable());
+    Pc_CmdReply(msg);
+    if (runEnable == 0U)
+    {
+      Pc_ProgramStop();
+    }
+    return;
+  }
+
+  if (Pc_StrEqIgnoreCase(key, "jog_delta"))
+  {
+    parsed = Pc_ParseInt32(value, 0);
+    if (Pc_IsMotionEnabled() != 0U)
+    {
+      SOEM_SetTargetPositionDelta(parsed);
+    }
+    return;
+  }
+
+  if (Pc_StrEqIgnoreCase(key, "target_delta"))
+  {
+    parsed = Pc_ParseInt32(value, 0);
+    g_pcCmd.manualPosition = parsed;
+    if (Pc_IsMotionEnabled() != 0U)
+    {
+      SOEM_SetTargetPositionDelta(parsed);
+    }
+    return;
+  }
+
+  if (Pc_StrEqIgnoreCase(key, "target_abs"))
+  {
+    parsed = Pc_ParseInt32(value, SOEM_GetPositionActual());
+    g_pcCmd.manualPosition = parsed;
+    SOEM_SetTargetPositionAbs(parsed);
+    return;
+  }
+
+  if (Pc_StrEqIgnoreCase(key, "set_home"))
+  {
+    if (Pc_ParseBool(value, 0U) != 0U)
+    {
+      int32_t unitScale = g_pcCmd.parameterValues[PC_PARAM_UNIT_SCALE];
+      int32_t homeOffsetUser = g_pcCmd.parameterValues[PC_PARAM_HOME_OFFSET];
+      int64_t desiredHomeHw;
+      int32_t homeOffsetHw;
+
+      if (unitScale <= 0)
+      {
+        unitScale = 1;
+        g_pcCmd.parameterValues[PC_PARAM_UNIT_SCALE] = unitScale;
+      }
+
+      /* User intent: after Set Home,
+       * CurrentPosition(user) = 0 + HomeOffset(user).
+       * With user = (actualHw - homeHw) / scale,
+       * choose homeHw = actualHw - HomeOffset(user) * scale. */
+      desiredHomeHw = (int64_t)SOEM_GetPositionActualHw() -
+                      ((int64_t)homeOffsetUser * (int64_t)unitScale);
+      homeOffsetHw = Pc_ClampInt64ToInt32(desiredHomeHw);
+
+      SOEM_LoadHomeHwOffset(homeOffsetHw);
+      (void)UiFlashStorage_SaveHome(homeOffsetHw);
+      Pc_SaveParameterToFlash();
+    }
+    return;
+  }
+
+  if (Pc_StrEqIgnoreCase(key, "manual_speed"))
+  {
+    parsed = Pc_AbsMin1(Pc_ParseInt32(value, g_pcCmd.manualSpeed));
+    g_pcCmd.manualSpeed = parsed;
+    SOEM_SetProfileVelocity(parsed);
+    return;
+  }
+
+  if (Pc_StrEqIgnoreCase(key, "manual_torque"))
+  {
+    uint16_t tq = Pc_ClampTorquePercent(Pc_ParseInt32(value, (int32_t)g_pcCmd.manualTorque));
+    g_pcCmd.manualTorque = (int16_t)tq;
+    SOEM_SetTorqueLimitPercent(tq);
+    return;
+  }
+
+  if (Pc_StrEqIgnoreCase(key, "manual_abs"))
+  {
+    g_pcCmd.manualAbsMode = Pc_ParseBool(value, g_pcCmd.manualAbsMode);
+    return;
+  }
+
+  if (Pc_StrEqIgnoreCase(key, "manual_pos"))
+  {
+    g_pcCmd.manualPosition = Pc_ParseInt32(value, g_pcCmd.manualPosition);
+    return;
+  }
+
+  if (Pc_StrEqIgnoreCase(key, "manual_apply"))
+  {
+    if (Pc_ParseBool(value, 0U) != 0U)
+    {
+      Pc_SaveManualToFlash();
+      Pc_SyncTouchGfxModel();
+      Pc_ReplyConfigSnapshot();
+    }
+    return;
+  }
+
+  if (Pc_StrEqIgnoreCase(key, "manual_stop"))
+  {
+    if (Pc_ParseBool(value, 0U) != 0U)
+    {
+      SOEM_SetTargetPositionAbs(SOEM_GetPositionActual());
+      Pc_ProgramStop();
+    }
+    return;
+  }
+
+  if (Pc_StrEqIgnoreCase(key, "manual_save"))
+  {
+    if (Pc_ParseBool(value, 0U) != 0U)
+    {
+      Pc_SaveManualToFlash();
+      Pc_SyncTouchGfxModel();
+      Pc_ReplyConfigSnapshot();
+    }
+    return;
+  }
+
+  if (Pc_StrEqIgnoreCase(key, "manual_load"))
+  {
+    if (Pc_ParseBool(value, 0U) != 0U)
+    {
+      UiFlashManualData manualData;
+      if (UiFlashStorage_LoadManual(&manualData) != 0U)
+      {
+        g_pcCmd.manualPosition = manualData.position;
+        g_pcCmd.manualSpeed = Pc_AbsMin1(manualData.speed);
+        g_pcCmd.manualTorque = (int16_t)Pc_ClampTorquePercent((int32_t)manualData.torque);
+        g_pcCmd.manualAbsMode = (manualData.absMode != 0U) ? 1U : 0U;
+        SOEM_SetProfileVelocity(g_pcCmd.manualSpeed);
+        SOEM_SetTorqueLimitPercent((uint16_t)g_pcCmd.manualTorque);
+        Pc_SyncTouchGfxModel();
+        Pc_ReplyConfigSnapshot();
+      }
+    }
+    return;
+  }
+
+  if (Pc_StrEqIgnoreCase(key, "param_jog_speed"))         { g_pcCmd.parameterValues[PC_PARAM_JOG_SPEED] = Pc_ParseInt32(value, g_pcCmd.parameterValues[PC_PARAM_JOG_SPEED]); return; }
+  if (Pc_StrEqIgnoreCase(key, "param_acc"))               { g_pcCmd.parameterValues[PC_PARAM_ACC_TIME] = Pc_ParseInt32(value, g_pcCmd.parameterValues[PC_PARAM_ACC_TIME]); return; }
+  if (Pc_StrEqIgnoreCase(key, "param_dec"))               { g_pcCmd.parameterValues[PC_PARAM_DEC_TIME] = Pc_ParseInt32(value, g_pcCmd.parameterValues[PC_PARAM_DEC_TIME]); return; }
+  if (Pc_StrEqIgnoreCase(key, "param_limit_plus"))        { g_pcCmd.parameterValues[PC_PARAM_LIMIT_PLUS] = Pc_ParseInt32(value, g_pcCmd.parameterValues[PC_PARAM_LIMIT_PLUS]); return; }
+  if (Pc_StrEqIgnoreCase(key, "param_limit_minus"))       { g_pcCmd.parameterValues[PC_PARAM_LIMIT_MINUS] = Pc_ParseInt32(value, g_pcCmd.parameterValues[PC_PARAM_LIMIT_MINUS]); return; }
+  if (Pc_StrEqIgnoreCase(key, "param_unit_scale"))        { g_pcCmd.parameterValues[PC_PARAM_UNIT_SCALE] = Pc_ParseInt32(value, g_pcCmd.parameterValues[PC_PARAM_UNIT_SCALE]); return; }
+    if (Pc_StrEqIgnoreCase(key, "param_home_offset"))       { g_pcCmd.parameterValues[PC_PARAM_HOME_OFFSET] = Pc_ParseInt32(value, g_pcCmd.parameterValues[PC_PARAM_HOME_OFFSET]); return; }
+  if (Pc_StrEqIgnoreCase(key, "param_position_gain"))     { g_pcCmd.parameterValues[PC_PARAM_POSITION_GAIN] = Pc_ParseInt32(value, g_pcCmd.parameterValues[PC_PARAM_POSITION_GAIN]); return; }
+
+  if (Pc_StrEqIgnoreCase(key, "param_write_all"))
+  {
+    if (Pc_ParseBool(value, 0U) != 0U)
+    {
+      Pc_ApplyParametersToDrive();
+      Pc_ReplyConfigSnapshot();
+    }
+    return;
+  }
+
+  if (Pc_StrEqIgnoreCase(key, "param_apply"))
+  {
+    if (Pc_ParseBool(value, 0U) != 0U)
+    {
+      Pc_ApplyParametersToDrive();
+      Pc_SaveParameterToFlash();
+      Pc_SyncTouchGfxModel();
+      Pc_ReplyConfigSnapshot();
+    }
+    return;
+  }
+
+  if (Pc_StrEqIgnoreCase(key, "cfg_read"))
+  {
+    if (Pc_ParseBool(value, 0U) != 0U)
+    {
+      SOEM_RequestParameterReadAll();
+      g_pcCmd.parameterReadPending = 1U;
+      g_pcCmd.parameterReadStartMs = HAL_GetTick();
+      Pc_ReplyConfigSnapshot();
+    }
+    return;
+  }
+
+  if (Pc_StrEqIgnoreCase(key, "param_read_all"))
+  {
+    if (Pc_ParseBool(value, 0U) != 0U)
+    {
+      SOEM_RequestParameterReadAll();
+      g_pcCmd.parameterReadPending = 1U;
+      g_pcCmd.parameterReadStartMs = HAL_GetTick();
+    }
+    return;
+  }
+
+  if (Pc_StrEqIgnoreCase(key, "param_save"))
+  {
+    if (Pc_ParseBool(value, 0U) != 0U)
+    {
+      Pc_SaveParameterToFlash();
+      Pc_SyncTouchGfxModel();
+      Pc_ReplyConfigSnapshot();
+    }
+    return;
+  }
+
+  if (Pc_StrEqIgnoreCase(key, "param_load"))
+  {
+    if (Pc_ParseBool(value, 0U) != 0U)
+    {
+      UiFlashParameterData parameterData;
+      uint8_t i;
+      if (UiFlashStorage_LoadParameter(&parameterData) != 0U)
+      {
+        for (i = 0U; i < PC_PARAM_COUNT; i++)
+        {
+          g_pcCmd.parameterValues[i] = parameterData.values[i];
+        }
+        Pc_SyncTouchGfxModel();
+        Pc_ReplyConfigSnapshot();
+      }
+    }
+    return;
+  }
+
+  if (Pc_StrEqIgnoreCase(key, "prog_pos1"))          { g_pcCmd.programValues[PC_PROG_POS1] = Pc_ParseInt32(value, g_pcCmd.programValues[PC_PROG_POS1]); return; }
+  if (Pc_StrEqIgnoreCase(key, "prog_pos2"))          { g_pcCmd.programValues[PC_PROG_POS2] = Pc_ParseInt32(value, g_pcCmd.programValues[PC_PROG_POS2]); return; }
+  if (Pc_StrEqIgnoreCase(key, "prog_pos3"))          { g_pcCmd.programValues[PC_PROG_POS3] = Pc_ParseInt32(value, g_pcCmd.programValues[PC_PROG_POS3]); return; }
+  if (Pc_StrEqIgnoreCase(key, "prog_speed1"))        { g_pcCmd.programValues[PC_PROG_SPEED1] = Pc_ParseInt32(value, g_pcCmd.programValues[PC_PROG_SPEED1]); return; }
+  if (Pc_StrEqIgnoreCase(key, "prog_speed2"))        { g_pcCmd.programValues[PC_PROG_SPEED2] = Pc_ParseInt32(value, g_pcCmd.programValues[PC_PROG_SPEED2]); return; }
+  if (Pc_StrEqIgnoreCase(key, "prog_speed3"))        { g_pcCmd.programValues[PC_PROG_SPEED3] = Pc_ParseInt32(value, g_pcCmd.programValues[PC_PROG_SPEED3]); return; }
+  if (Pc_StrEqIgnoreCase(key, "prog_torque1"))       { g_pcCmd.programValues[PC_PROG_TORQUE1] = Pc_ParseInt32(value, g_pcCmd.programValues[PC_PROG_TORQUE1]); return; }
+  if (Pc_StrEqIgnoreCase(key, "prog_torque2"))       { g_pcCmd.programValues[PC_PROG_TORQUE2] = Pc_ParseInt32(value, g_pcCmd.programValues[PC_PROG_TORQUE2]); return; }
+  if (Pc_StrEqIgnoreCase(key, "prog_torque3"))       { g_pcCmd.programValues[PC_PROG_TORQUE3] = Pc_ParseInt32(value, g_pcCmd.programValues[PC_PROG_TORQUE3]); return; }
+  if (Pc_StrEqIgnoreCase(key, "prog_return_speed"))  { g_pcCmd.programValues[PC_PROG_RETURN_SPEED] = Pc_ParseInt32(value, g_pcCmd.programValues[PC_PROG_RETURN_SPEED]); return; }
+  if (Pc_StrEqIgnoreCase(key, "prog_delay_ms"))      { g_pcCmd.programValues[PC_PROG_DELAY_MS] = Pc_ParseInt32(value, g_pcCmd.programValues[PC_PROG_DELAY_MS]); return; }
+
+  if (Pc_StrEqIgnoreCase(key, "program_save"))
+  {
+    if (Pc_ParseBool(value, 0U) != 0U)
+    {
+      Pc_SaveProgramToFlash();
+      Pc_SyncTouchGfxModel();
+      Pc_ReplyConfigSnapshot();
+    }
+    return;
+  }
+
+  if (Pc_StrEqIgnoreCase(key, "program_apply"))
+  {
+    if (Pc_ParseBool(value, 0U) != 0U)
+    {
+      Pc_SaveProgramToFlash();
+      Pc_SyncTouchGfxModel();
+      Pc_ReplyConfigSnapshot();
+    }
+    return;
+  }
+
+  if (Pc_StrEqIgnoreCase(key, "program_load"))
+  {
+    if (Pc_ParseBool(value, 0U) != 0U)
+    {
+      UiFlashProgramData programData;
+      uint8_t i;
+      if (UiFlashStorage_LoadProgram(&programData) != 0U)
+      {
+        for (i = 0U; i < PC_PROG_COUNT; i++)
+        {
+          g_pcCmd.programValues[i] = programData.values[i];
+        }
+        Pc_SyncTouchGfxModel();
+        Pc_ReplyConfigSnapshot();
+      }
+    }
+    return;
+  }
+
+  if (Pc_StrEqIgnoreCase(key, "program_start"))
+  {
+    if (Pc_ParseBool(value, 0U) != 0U)
+    {
+      if (Pc_ProgramStart() == 0U)
+      {
+        Pc_CmdReply("[CMD] program_start rejected");
+      }
+    }
+    return;
+  }
+
+  if (Pc_StrEqIgnoreCase(key, "program_stop"))
+  {
+    if (Pc_ParseBool(value, 0U) != 0U)
+    {
+      Pc_ProgramStop();
+    }
+    return;
+  }
+
+  {
+    char msg[96];
+    (void)snprintf(msg, sizeof(msg), "[CMD] unknown key=%s", (key != NULL) ? key : "?");
+    Pc_CmdReply(msg);
+  }
+}
+
+static void Pc_CommandPollUart(void)
+{
+  uint8_t ch;
+
+  while (g_pcUartRxTail != g_pcUartRxHead)
+  {
+    ch = g_pcUartRxRing[g_pcUartRxTail];
+    g_pcUartRxTail = (uint16_t)((g_pcUartRxTail + 1U) % PC_UART_RX_RING_SIZE);
+    Pc_CommandHandleByte(ch);
+  }
+
+  while (HAL_UART_Receive(&huart4, &ch, 1U, 0U) == HAL_OK)
+  {
+    Pc_CommandHandleByte(ch);
+  }
+
+  Pc_CommandEnsureRxArmed();
+}
+
+static void Pc_CommandTick(void)
+{
+  if (g_pcCmd.parameterReadPending != 0U)
+  {
+    int32_t values[UI_FLASH_PARAMETER_VALUE_COUNT] = {0};
+    if (SOEM_FetchParameterReadAll(values, UI_FLASH_PARAMETER_VALUE_COUNT) != 0U)
+    {
+      g_pcCmd.parameterValues[PC_PARAM_ACC_TIME] = values[1];
+      g_pcCmd.parameterValues[PC_PARAM_DEC_TIME] = values[2];
+      g_pcCmd.parameterValues[PC_PARAM_LIMIT_PLUS] = values[3];
+      g_pcCmd.parameterValues[PC_PARAM_LIMIT_MINUS] = values[4];
+      g_pcCmd.parameterValues[PC_PARAM_UNIT_SCALE] = values[5];
+      g_pcCmd.parameterValues[PC_PARAM_POSITION_GAIN] = values[7];
+      g_pcCmd.parameterReadPending = 0U;
+      Pc_SaveParameterToFlash();
+      Pc_SyncTouchGfxModel();
+      Pc_CmdReply("[CMD] param_read_all ok");
+      Pc_ReplyConfigSnapshot();
+    }
+    else if ((HAL_GetTick() - g_pcCmd.parameterReadStartMs) > 1800U)
+    {
+      g_pcCmd.parameterReadPending = 0U;
+      Pc_CmdReply("[CMD] param_read_all timeout");
+    }
+  }
+
+  Pc_ProgramTick();
+}
+
+static void WIFI_UART7_LoopbackSelfTest(void)
+{
+#if WIFI_UART7_LOOPBACK_TEST
+  static const uint8_t txPattern[] = {'A', 'T', '\r', '\n'};
+  uint8_t rxByte = 0U;
+  uint8_t rxCapture[8] = {0};
+  uint32_t rxCount = 0U;
+  uint32_t txOk = 0U;
+  uint32_t pass = 0U;
+  uint32_t start = 0U;
+  char msg[160];
+
+  /* Drain stale UART7 bytes first. */
+  for (uint32_t i = 0U; i < 32U; i++)
+  {
+    if (HAL_UART_Receive(&huart7, &rxByte, 1U, 2U) != HAL_OK)
+    {
+      break;
+    }
+  }
+
+  if (HAL_UART_Transmit(&huart7, (uint8_t*)txPattern, (uint16_t)sizeof(txPattern), 100U) == HAL_OK)
+  {
+    txOk = 1U;
+  }
+
+  start = HAL_GetTick();
+  while ((HAL_GetTick() - start) < 250U)
+  {
+    if (HAL_UART_Receive(&huart7, &rxByte, 1U, 5U) == HAL_OK)
+    {
+      if (rxCount < (uint32_t)sizeof(rxCapture))
+      {
+        rxCapture[rxCount] = rxByte;
+      }
+      rxCount++;
+      if ((rxCount >= (uint32_t)sizeof(txPattern)) &&
+          (memcmp(rxCapture, txPattern, sizeof(txPattern)) == 0))
+      {
+        pass = 1U;
+        break;
+      }
+    }
+  }
+
+  (void)snprintf(msg,
+                 sizeof(msg),
+                 "[WIFI] UART7 loopback tx_ok=%lu rx=%lu first=%02X %02X %02X %02X pass=%lu\\r\\n",
+                 (unsigned long)txOk,
+                 (unsigned long)rxCount,
+                 (unsigned int)rxCapture[0],
+                 (unsigned int)rxCapture[1],
+                 (unsigned int)rxCapture[2],
+                 (unsigned int)rxCapture[3],
+                 (unsigned long)pass);
+  UART4_SendText(msg);
+#endif
+}
+
+static void WIFI_UART7_QuickAtProbe(void)
+{
+  static const uint8_t atCmd[] = {'A', 'T', '\r', '\n'};
+  uint8_t rxBuf[10] = {0};
+  uint8_t rxByte = 0U;
+  uint32_t probeOk = 0U;
+  char msg[200];
+
+  UART4_SendText("[WIFI] Switching to UART7 for MB1400...\r\n");
+
+  /* Pulse CHIP_EN to wake module before first probe. */
+  HAL_GPIO_WritePin(MB1400_CHIP_EN_GPIO_Port, MB1400_CHIP_EN_Pin, GPIO_PIN_RESET);
+  osDelay(100);
+  HAL_GPIO_WritePin(MB1400_CHIP_EN_GPIO_Port, MB1400_CHIP_EN_Pin, GPIO_PIN_SET);
+  osDelay(500);
+
+  for (uint32_t rtsMode = 0U; rtsMode < 2U; rtsMode++)
+  {
+    uint32_t txOk = 0U;
+    uint32_t rxOk = 0U;
+    GPIO_PinState rtsPin = (rtsMode == 0U) ? GPIO_PIN_RESET : GPIO_PIN_SET;
+
+    HAL_GPIO_WritePin(MB1400_RTS_GPIO_Port, MB1400_RTS_Pin, rtsPin);
+    osDelay(20);
+
+    /* Drain stale UART7 bytes. */
+    for (uint32_t i = 0U; i < 32U; i++)
+    {
+      if (HAL_UART_Receive(&huart7, &rxByte, 1U, 2U) != HAL_OK)
+      {
+        break;
+      }
+    }
+
+    memset(rxBuf, 0, sizeof(rxBuf));
+    if (HAL_UART_Transmit(&huart7, (uint8_t*)atCmd, (uint16_t)sizeof(atCmd), 100U) == HAL_OK)
+    {
+      txOk = 1U;
+    }
+
+    if (HAL_UART_Receive(&huart7, rxBuf, (uint16_t)sizeof(rxBuf), 500U) == HAL_OK)
+    {
+      rxOk = 1U;
+      probeOk = 1U;
+    }
+
+    (void)snprintf(msg,
+                   sizeof(msg),
+                   "[WIFI] UART7 probe rts=%lu tx_ok=%lu rx_ok=%lu first=%02X %02X %02X %02X\r\n",
+                   (unsigned long)rtsMode,
+                   (unsigned long)txOk,
+                   (unsigned long)rxOk,
+                   (unsigned int)rxBuf[0],
+                   (unsigned int)rxBuf[1],
+                   (unsigned int)rxBuf[2],
+                   (unsigned int)rxBuf[3]);
+    UART4_SendText(msg);
+
+    if (rxOk != 0U)
+    {
+      /* Keep working RTS level for subsequent AT init. */
+      break;
+    }
+  }
+
+  if (probeOk == 0U)
+  {
+    UART4_SendText("[WIFI] Still no response on UART7. Check PE7/PE8 AF config and SB1/SB5/SB7.\r\n");
+  }
+}
+
+#if WIFI_SPI4_LOOPBACK_TEST
+static uint32_t g_spi4_last_sr_before = 0U;
+static uint32_t g_spi4_last_sr_after = 0U;
+static uint32_t g_spi4_last_stage = 0U;
+
+static void WIFI_SPI4_GpioShortSelfTest(void)
+{
+#if WIFI_SPI4_LOOPBACK_TEST
+  GPIO_InitTypeDef GPIO_InitStruct = {0};
+  uint32_t pdHigh = 0U;
+  uint32_t puLow = 0U;
+  uint32_t pass = 0U;
+  char msg[160];
+
+  __HAL_RCC_GPIOE_CLK_ENABLE();
+
+  /* STMod+ SPI route on STM32H7S78-DK: PE14 (MOSI), PE13 (MISO). */
+  GPIO_InitStruct.Pin = GPIO_PIN_14;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  HAL_GPIO_Init(GPIOE, &GPIO_InitStruct);
+
+  GPIO_InitStruct.Pin = GPIO_PIN_13;
+  GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
+  GPIO_InitStruct.Pull = GPIO_PULLDOWN;
+  HAL_GPIO_Init(GPIOE, &GPIO_InitStruct);
+
+  HAL_GPIO_WritePin(GPIOE, GPIO_PIN_14, GPIO_PIN_SET);
+  HAL_Delay(1U);
+  if (HAL_GPIO_ReadPin(GPIOE, GPIO_PIN_13) == GPIO_PIN_SET)
+  {
+    pdHigh = 1U;
+  }
+
+  GPIO_InitStruct.Pin = GPIO_PIN_13;
+  GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
+  GPIO_InitStruct.Pull = GPIO_PULLUP;
+  HAL_GPIO_Init(GPIOE, &GPIO_InitStruct);
+
+  HAL_GPIO_WritePin(GPIOE, GPIO_PIN_14, GPIO_PIN_RESET);
+  HAL_Delay(1U);
+  if (HAL_GPIO_ReadPin(GPIOE, GPIO_PIN_13) == GPIO_PIN_RESET)
+  {
+    puLow = 1U;
+  }
+
+  pass = ((pdHigh != 0U) && (puLow != 0U)) ? 1U : 0U;
+
+  (void)snprintf(msg,
+                 sizeof(msg),
+                 "[WIFI] SPI4 gpio-short pe14->pe13 pd_high=%lu pu_low=%lu pass=%lu\\r\\n",
+                 (unsigned long)pdHigh,
+                 (unsigned long)puLow,
+                 (unsigned long)pass);
+  UART4_SendText(msg);
+#endif
+}
+
+static void WIFI_SPI4_ClearFlags(void)
+{
+#if WIFI_SPI4_LOOPBACK_TEST
+  SPI4->IFCR = (SPI_IFCR_EOTC | SPI_IFCR_TXTFC | SPI_IFCR_OVRC | SPI_IFCR_UDRC | SPI_IFCR_MODFC | SPI_IFCR_SUSPC);
+#endif
+}
+
+static void WIFI_SPI4_InitForLoopback(uint32_t gpioAlternate, uint32_t cfg2ExtraBits)
+{
+#if WIFI_SPI4_LOOPBACK_TEST
+  GPIO_InitTypeDef GPIO_InitStruct = {0};
+
+  __HAL_RCC_GPIOE_CLK_ENABLE();
+  __HAL_RCC_SPI4_CLK_ENABLE();
+
+  /* SPI4 on PE12(SCK), PE13(MISO), PE14(MOSI), PE10(CS) for STMod+ SPI mode. */
+  GPIO_InitStruct.Pin = GPIO_PIN_10 | GPIO_PIN_12 | GPIO_PIN_13 | GPIO_PIN_14;
+  GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
+  GPIO_InitStruct.Alternate = (uint32_t)gpioAlternate;
+  HAL_GPIO_Init(GPIOE, &GPIO_InitStruct);
+
+  __HAL_RCC_SPI4_FORCE_RESET();
+  __HAL_RCC_SPI4_RELEASE_RESET();
+
+  SPI4->CR1 = 0U;
+  SPI4->CR2 = 0U;
+  SPI4->IFCR = 0xFFFFFFFFUL;
+
+  /* 8-bit data, conservative baud divider for first bring-up. */
+  SPI4->CFG1 = ((7UL << SPI_CFG1_DSIZE_Pos) | SPI_CFG1_MBR_1 | SPI_CFG1_MBR_0);
+  SPI4->CFG2 = (SPI_CFG2_MASTER | SPI_CFG2_SSM | cfg2ExtraBits);
+  SPI4->CR1 = SPI_CR1_SSI;
+  SET_BIT(SPI4->CR1, SPI_CR1_SPE);
+
+  g_spi4_last_sr_before = SPI4->SR;
+  if ((SPI4->SR & SPI_SR_MODF) != 0U)
+  {
+    WIFI_SPI4_ClearFlags();
+  }
+#endif
+}
+
+static uint8_t WIFI_SPI4_TransferByte(uint8_t txByte, uint8_t *rxByte, uint32_t timeoutMs)
+{
+#if WIFI_SPI4_LOOPBACK_TEST
+  uint32_t tickStart;
+
+  g_spi4_last_stage = 0U;
+  g_spi4_last_sr_before = SPI4->SR;
+
+  if (rxByte == NULL)
+  {
+    g_spi4_last_stage = 7U;
+    g_spi4_last_sr_after = SPI4->SR;
+    return 0U;
+  }
+
+  WIFI_SPI4_ClearFlags();
+
+  MODIFY_REG(SPI4->CR2, SPI_CR2_TSIZE, 1UL);
+  SET_BIT(SPI4->CR1, SPI_CR1_CSTART);
+
+  tickStart = HAL_GetTick();
+  while ((SPI4->SR & SPI_SR_TXP) == 0U)
+  {
+    if ((SPI4->SR & SPI_SR_MODF) != 0U)
+    {
+      g_spi4_last_stage = 4U;
+      g_spi4_last_sr_after = SPI4->SR;
+      WIFI_SPI4_ClearFlags();
+      return 0U;
+    }
+    if ((HAL_GetTick() - tickStart) >= timeoutMs)
+    {
+      g_spi4_last_stage = 1U;
+      g_spi4_last_sr_after = SPI4->SR;
+      return 0U;
+    }
+  }
+  *(__IO uint8_t*)&SPI4->TXDR = txByte;
+
+  tickStart = HAL_GetTick();
+  while ((SPI4->SR & SPI_SR_RXP) == 0U)
+  {
+    if ((SPI4->SR & SPI_SR_MODF) != 0U)
+    {
+      g_spi4_last_stage = 5U;
+      g_spi4_last_sr_after = SPI4->SR;
+      WIFI_SPI4_ClearFlags();
+      return 0U;
+    }
+    if ((HAL_GetTick() - tickStart) >= timeoutMs)
+    {
+      g_spi4_last_stage = 2U;
+      g_spi4_last_sr_after = SPI4->SR;
+      return 0U;
+    }
+  }
+  *rxByte = *(__IO uint8_t*)&SPI4->RXDR;
+
+  tickStart = HAL_GetTick();
+  while ((SPI4->SR & SPI_SR_EOT) == 0U)
+  {
+    if ((SPI4->SR & SPI_SR_MODF) != 0U)
+    {
+      g_spi4_last_stage = 6U;
+      g_spi4_last_sr_after = SPI4->SR;
+      WIFI_SPI4_ClearFlags();
+      return 0U;
+    }
+    if ((HAL_GetTick() - tickStart) >= timeoutMs)
+    {
+      g_spi4_last_stage = 3U;
+      g_spi4_last_sr_after = SPI4->SR;
+      return 0U;
+    }
+  }
+
+  g_spi4_last_stage = 100U;
+  g_spi4_last_sr_after = SPI4->SR;
+  WIFI_SPI4_ClearFlags();
+  return 1U;
+#else
+  (void)txByte;
+  (void)rxByte;
+  (void)timeoutMs;
+  return 0U;
+#endif
+}
+
+static void WIFI_SPI4_LoopbackSelfTest(void)
+{
+#if WIFI_SPI4_LOOPBACK_TEST
+  typedef struct
+  {
+    uint32_t gpioAlternate;
+    uint32_t cfg2ExtraBits;
+    const char* name;
+  } WIFI_SPI4_TestCase;
+
+  static const WIFI_SPI4_TestCase testCases[] = {
+    {GPIO_AF5_SPI4, 0U, "af5"},
+    {GPIO_AF6_SPI4, 0U, "af6"},
+    {GPIO_AF5_SPI4, SPI_CFG2_IOSWP, "af5+ioswp"},
+    {GPIO_AF6_SPI4, SPI_CFG2_IOSWP, "af6+ioswp"},
+    {GPIO_AF5_SPI4, SPI_CFG2_AFCNTR, "af5+afcntr"},
+    {GPIO_AF6_SPI4, SPI_CFG2_AFCNTR, "af6+afcntr"},
+    {GPIO_AF5_SPI4, SPI_CFG2_SSOE, "af5+ssoe"},
+    {GPIO_AF6_SPI4, SPI_CFG2_SSOE, "af6+ssoe"},
+    {GPIO_AF5_SPI4, (SPI_CFG2_IOSWP | SPI_CFG2_AFCNTR), "af5+ioswp+afcntr"},
+    {GPIO_AF6_SPI4, (SPI_CFG2_IOSWP | SPI_CFG2_AFCNTR), "af6+ioswp+afcntr"},
+    {GPIO_AF5_SPI4, (SPI_CFG2_IOSWP | SPI_CFG2_SSOE), "af5+ioswp+ssoe"},
+    {GPIO_AF6_SPI4, (SPI_CFG2_IOSWP | SPI_CFG2_SSOE), "af6+ioswp+ssoe"}
+  };
+  static const uint8_t txPattern[] = {0xA5U, 0x5AU, 0x3CU, 0xC3U};
+  uint8_t rxPattern[sizeof(txPattern)] = {0};
+  uint32_t selectedCase = 0xFFFFFFFFUL;
+  char msg[240];
+
+  WIFI_SPI4_GpioShortSelfTest();
+
+  for (uint32_t caseIndex = 0U; caseIndex < (uint32_t)(sizeof(testCases) / sizeof(testCases[0])); caseIndex++)
+  {
+    uint32_t txCount = 0U;
+    uint32_t rxMatch = 0U;
+    uint32_t pass = 1U;
+    uint32_t sr = 0U;
+
+    memset(rxPattern, 0, sizeof(rxPattern));
+    WIFI_SPI4_InitForLoopback(testCases[caseIndex].gpioAlternate, testCases[caseIndex].cfg2ExtraBits);
+
+    for (uint32_t i = 0U; i < (uint32_t)sizeof(txPattern); i++)
+    {
+      uint8_t rxByte = 0U;
+      if (WIFI_SPI4_TransferByte(txPattern[i], &rxByte, 20U) == 0U)
+      {
+        pass = 0U;
+        break;
+      }
+
+      txCount++;
+      rxPattern[i] = rxByte;
+      if (rxByte == txPattern[i])
+      {
+        rxMatch++;
+      }
+      else
+      {
+        pass = 0U;
+      }
+    }
+
+    sr = SPI4->SR;
+    CLEAR_BIT(SPI4->CR1, SPI_CR1_SPE);
+
+    (void)snprintf(msg,
+                   sizeof(msg),
+                   "[WIFI] SPI4 probe=%s tx=%lu match=%lu stage=%lu sr0=%08lX sr1=%08lX sr=%08lX rx=%02X %02X %02X %02X pass=%lu\\r\\n",
+                   testCases[caseIndex].name,
+                   (unsigned long)txCount,
+                   (unsigned long)rxMatch,
+                   (unsigned long)g_spi4_last_stage,
+                   (unsigned long)g_spi4_last_sr_before,
+                   (unsigned long)g_spi4_last_sr_after,
+                   (unsigned long)sr,
+                   (unsigned int)rxPattern[0],
+                   (unsigned int)rxPattern[1],
+                   (unsigned int)rxPattern[2],
+                   (unsigned int)rxPattern[3],
+                   (unsigned long)pass);
+    UART4_SendText(msg);
+
+    if (pass != 0U)
+    {
+      selectedCase = caseIndex;
+      break;
+    }
+  }
+
+  if (selectedCase != 0xFFFFFFFFUL)
+  {
+    (void)snprintf(msg,
+                   sizeof(msg),
+                   "[WIFI] SPI4 loopback route=%s selected\\r\\n",
+                   testCases[selectedCase].name);
+    UART4_SendText(msg);
+  }
+  else
+  {
+    UART4_SendText("[WIFI] SPI4 loopback no valid route found\\r\\n");
+  }
+#endif
+}
+#endif
+
 /* Called by HAL when DMA TX completes */
 void HAL_UART_TxCpltCallback(UART_HandleTypeDef *huart)
 {
   if (huart->Instance == UART4)
   {
     uart_dma_busy = 0;
+  }
+}
+
+void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
+{
+  if (huart->Instance == UART4)
+  {
+    uint16_t nextHead = (uint16_t)((g_pcUartRxHead + 1U) % PC_UART_RX_RING_SIZE);
+    if (nextHead != g_pcUartRxTail)
+    {
+      g_pcUartRxRing[g_pcUartRxHead] = g_pcUartRxByte;
+      g_pcUartRxHead = nextHead;
+    }
+
+    (void)HAL_UART_Receive_IT(&huart4, &g_pcUartRxByte, 1U);
   }
 }
 
@@ -256,6 +1753,8 @@ int main(void)
   MX_FLASH_Init();
   MX_I2C1_Init();
   MX_UART4_Init();
+  Pc_CommandEnsureRxArmed();
+  MX_UART7_Init();
   MX_GPU2D_Init();
   MX_ICACHE_GPU2D_Init();
   MX_GFXMMU_Init();
@@ -388,6 +1887,42 @@ static void MX_UART4_Init(void)
     Error_Handler();
   }
   if (HAL_UARTEx_DisableFifoMode(&huart4) != HAL_OK)
+  {
+    Error_Handler();
+  }
+}
+
+/**
+  * @brief UART7 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_UART7_Init(void)
+{
+  huart7.Instance = UART7;
+  huart7.Init.BaudRate = 115200;
+  huart7.Init.WordLength = UART_WORDLENGTH_8B;
+  huart7.Init.StopBits = UART_STOPBITS_1;
+  huart7.Init.Parity = UART_PARITY_NONE;
+  huart7.Init.Mode = UART_MODE_TX_RX;
+  huart7.Init.HwFlowCtl = UART_HWCONTROL_NONE;
+  huart7.Init.OverSampling = UART_OVERSAMPLING_16;
+  huart7.Init.OneBitSampling = UART_ONE_BIT_SAMPLE_DISABLE;
+  huart7.Init.ClockPrescaler = UART_PRESCALER_DIV1;
+  huart7.AdvancedInit.AdvFeatureInit = UART_ADVFEATURE_NO_INIT;
+  if (HAL_UART_Init(&huart7) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  if (HAL_UARTEx_SetTxFifoThreshold(&huart7, UART_TXFIFO_THRESHOLD_1_8) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  if (HAL_UARTEx_SetRxFifoThreshold(&huart7, UART_RXFIFO_THRESHOLD_1_8) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  if (HAL_UARTEx_DisableFifoMode(&huart7) != HAL_OK)
   {
     Error_Handler();
   }
@@ -770,6 +2305,7 @@ static void MX_GPIO_Init(void)
   __HAL_RCC_GPIOB_CLK_ENABLE();
   __HAL_RCC_GPIOE_CLK_ENABLE();
   __HAL_RCC_GPIOA_CLK_ENABLE();
+  __HAL_RCC_GPIOD_CLK_ENABLE();
   __HAL_RCC_GPIOO_CLK_ENABLE();  /* For user LEDs LD1(PO1), LD2(PO5) */
 
   /*Configure GPIO pin Output Level */
@@ -780,6 +2316,13 @@ static void MX_GPIO_Init(void)
 
   /*Configure GPIO pin Output Level - LCD Backlight DISABLED */
   HAL_GPIO_WritePin(LCD_BL_CTRL_GPIO_Port, LCD_BL_CTRL_Pin, GPIO_PIN_RESET);
+
+  /*Configure GPIO pin Output Level - MB1400 reset deasserted (active low). */
+  HAL_GPIO_WritePin(MB1400_RESET_GPIO_Port, MB1400_RESET_Pin, GPIO_PIN_SET);
+  /*Configure GPIO pin Output Level - MB1400 RTS asserted (active low) to allow module TX. */
+  HAL_GPIO_WritePin(MB1400_RTS_GPIO_Port, MB1400_RTS_Pin, GPIO_PIN_RESET);
+  /*Configure GPIO pin Output Level - MB1400 CHIP_EN asserted (active high). */
+  HAL_GPIO_WritePin(MB1400_CHIP_EN_GPIO_Port, MB1400_CHIP_EN_Pin, GPIO_PIN_SET);
   
   /*Configure GPIO pin Output Level - User LEDs OFF */
   HAL_GPIO_WritePin(GPIOO, GPIO_PIN_1 | GPIO_PIN_5, GPIO_PIN_RESET);
@@ -824,6 +2367,33 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(LCD_BL_CTRL_GPIO_Port, &GPIO_InitStruct);
+
+  /*Configure GPIO pin : MB1400_RESET_Pin */
+  GPIO_InitStruct.Pin = MB1400_RESET_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  HAL_GPIO_Init(MB1400_RESET_GPIO_Port, &GPIO_InitStruct);
+
+  /*Configure GPIO pin : MB1400_RTS_Pin */
+  GPIO_InitStruct.Pin = MB1400_RTS_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  HAL_GPIO_Init(MB1400_RTS_GPIO_Port, &GPIO_InitStruct);
+
+  /*Configure GPIO pin : MB1400_CHIP_EN_Pin */
+  GPIO_InitStruct.Pin = MB1400_CHIP_EN_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  HAL_GPIO_Init(MB1400_CHIP_EN_GPIO_Port, &GPIO_InitStruct);
+
+  /*Configure GPIO pin : MB1400_INT_Pin */
+  GPIO_InitStruct.Pin = MB1400_INT_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  HAL_GPIO_Init(MB1400_INT_GPIO_Port, &GPIO_InitStruct);
 
   /* EXTI interrupt init*/
   HAL_NVIC_SetPriority(TP_IRQ_EXTI_IRQn, 7, 0);
@@ -1252,6 +2822,7 @@ void EtherCAT_Task(void *argument)
   
   /* Initialize SOEM */
   SOEM_PortInit();
+  Pc_CommandInit();
   
   UART4_SendText("[SOEM] Starting cyclic processing\r\n");
   g_soemErrorCode = 310;  /* SOEM running */
@@ -1269,15 +2840,43 @@ void EtherCAT_Task(void *argument)
   uint64_t cyc_sum  = 0U;
   uint32_t cyc_cnt  = 0U;
   uint32_t cyc_poll_max = 0U;  /* max SOEM_PortPoll() time */
+  uint32_t tel_tick = 0U;       /* telemetry decimation counter (1 tick = 1ms cycle) */
 
   /* Main EtherCAT cycle */
   while (1)
   {
+    /* Handle PC-side command lines from UART4 (LCD clone control). */
+    Pc_CommandPollUart();
+
     /* Measure SOEM_PortPoll execution time */
     uint32_t poll_start = *DWT_CYCCNT_PTR;
 
     /* Poll SOEM state machine */
     SOEM_PortPoll();
+    Pc_CommandTick();
+
+    /* Stream compact telemetry for PC GUI every 50ms. */
+    if ((tel_tick++ % 50U) == 0U)
+    {
+      const int32_t pos = SOEM_GetPositionActual();
+      const int32_t vel = SOEM_GetVelocityActual();
+      const int16_t tq = SOEM_GetTorqueActual();
+      const uint16_t sw = SOEM_GetStatusword();
+      const uint8_t pdo = SOEM_GetPdoReady();
+      const uint8_t run = SOEM_GetRunEnable();
+      char tel[160];
+
+      (void)snprintf(tel,
+                     sizeof(tel),
+                     "TEL,pos=%ld,vel=%ld,torque=%d,status=0x%04X,pdo=%u,run=%u\r\n",
+                     (long)pos,
+                     (long)vel,
+                     (int)tq,
+                     (unsigned int)sw,
+                     (unsigned int)pdo,
+                     (unsigned int)run);
+      UART4_SendText(tel);
+    }
 
     uint32_t poll_elapsed = *DWT_CYCCNT_PTR - poll_start;
     if (poll_elapsed > cyc_poll_max) cyc_poll_max = poll_elapsed;
@@ -1529,10 +3128,64 @@ error_loop:
 void StartDefaultTask(void *argument)
 {
   /* USER CODE BEGIN 5 */
+  char wifiMsg[240];
+  const char* wifiDiag;
+  int32_t wifiDiagCode;
+
+#if WIFI_SPI4_LOOPBACK_TEST
+  UART4_SendText("[WIFI] SPI4 loopback mode start (set SB2/SB6/SB8 ON, short CN3 pin2(PE14 MOSI)<->pin3(PE13 MISO))\r\n");
+  WIFI_SPI4_LoopbackSelfTest();
+  UART4_SendText("[WIFI] SPI4 loopback mode done, Wi-Fi init skipped\r\n");
+  for(;;)
+  {
+    osDelay(1000);
+  }
+#endif
+
+  /* MB1400 UART mode uses UART7 on STM32H7S78-DK STMod+ routing. */
+  UART4_SendText("[WIFI] init starting (UART7 AT sync ~14s timeout)...\r\n");
+  WIFI_UART7_LoopbackSelfTest();
+  WIFI_UART7_QuickAtProbe();
+  Emw3080WebServer_Init();
+
+  wifiDiag = Emw3080WebServer_GetDiagMessage();
+  if (wifiDiag == NULL)
+  {
+    wifiDiag = "n/a";
+  }
+
+  wifiDiagCode = Emw3080WebServer_GetDiagCode();
+  if (Emw3080WebServer_IsRunning() != 0U)
+  {
+    (void)snprintf(wifiMsg,
+                   sizeof(wifiMsg),
+                   "[WIFI] AP up code=%ld uart=%lu baud=%lu mux=%u msg=%s\r\n",
+                   (long)wifiDiagCode,
+                   (unsigned long)Emw3080WebServer_GetDiagActiveUart(),
+                   (unsigned long)Emw3080WebServer_GetDiagBaud(),
+                   (unsigned int)Emw3080WebServer_GetDiagMultiConnMode(),
+                   wifiDiag);
+  }
+  else
+  {
+    (void)snprintf(wifiMsg,
+                   sizeof(wifiMsg),
+                   "[WIFI] AP failed code=%ld uart=%lu msg=%s (check SB1/SB5/SB7 and UART7 PE7/PE8 route)\r\n",
+                   (long)wifiDiagCode,
+                   (unsigned long)Emw3080WebServer_GetDiagActiveUart(),
+                   wifiDiag);
+  }
+  UART4_SendText(wifiMsg);
+
   /* Infinite loop */
   for(;;)
   {
-    osDelay(1);
+    if (Emw3080WebServer_IsRunning() != 0U)
+    {
+      Emw3080WebServer_SetCurrentPosition(SOEM_GetPositionActual());
+      Emw3080WebServer_Process();
+    }
+    osDelay(10);
   }
   /* USER CODE END 5 */
 }

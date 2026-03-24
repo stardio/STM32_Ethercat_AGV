@@ -43,6 +43,20 @@ namespace
 #define PROGRAM_RETURN_POSITION_TOLERANCE_HW 5
 
 static const uint8_t kParameterReadAllValueCount = 8U;
+static Model* gActiveModelInstance = 0;
+
+int32_t modelClampInt64ToInt32(int64_t value)
+{
+    if (value > (int64_t)INT32_MAX)
+    {
+        return INT32_MAX;
+    }
+    if (value < (int64_t)INT32_MIN)
+    {
+        return INT32_MIN;
+    }
+    return (int32_t)value;
+}
 
 #if defined(SIMULATOR)
 uint8_t simRunEnable = 0U;
@@ -158,22 +172,6 @@ void modelSetUnitScale(int32_t scale)
 {
     simUnitScale = scale;
     (void)simUnitScale;
-}
-
-void modelSetHomeOffset(int32_t offset)
-{
-    simHomeOffset = offset;
-    (void)simHomeOffset;
-}
-
-void modelSetHomePosition()
-{
-    simPositionActual = 0;
-}
-
-int32_t modelGetHomeOffset()
-{
-    return simHomeOffset;
 }
 
 void modelLoadHomeHwOffset(int32_t hwOffset)
@@ -293,21 +291,6 @@ void modelSetUnitScale(int32_t scale)
     SOEM_SetUnitScale(scale);
 }
 
-void modelSetHomeOffset(int32_t offset)
-{
-    SOEM_SetHomeOffset(offset);
-}
-
-void modelSetHomePosition()
-{
-    SOEM_SetHomePosition();
-}
-
-int32_t modelGetHomeOffset()
-{
-    return SOEM_GetHomeOffset();
-}
-
 void modelLoadHomeHwOffset(int32_t hwOffset)
 {
     SOEM_LoadHomeHwOffset(hwOffset);
@@ -354,6 +337,8 @@ Model::Model()
             positionFilteredValue_(0),
             positionFilterIndex_(0)
 {
+    gActiveModelInstance = this;
+
     for (uint8_t i = 0U; i < kParamCount; i++)
     {
         parameterValues_[i] = 0;
@@ -536,12 +521,43 @@ void Model::setTargetPositionAbs(int32_t pos)
     modelSetTargetPositionAbs(pos);
 }
 
+void Model::applyJogSpeedToSoem()
+{
+    int32_t jogSpeed = parameterValues_[kParamJogSpeed];
+    
+    if (jogSpeed <= 0)
+    {
+        jogSpeed = 1;
+    }
+    
+    SOEM_SetProfileVelocity(jogSpeed);
+}
+
 void Model::setHomePosition()
 {
-    modelSetHomePosition();
-    // Persist the raw hardware home offset so it survives power cycles.
-    int32_t hwOffset = modelGetHomeOffset();
-    (void)UiFlashStorage_SaveHome(hwOffset);
+    int32_t unitScale = parameterValues_[kParamUnitScale];
+    int32_t homeOffsetUser = parameterValues_[kParamHomeOffset];
+    int64_t desiredHomeHw;
+    int32_t homeOffsetHw;
+
+    if (unitScale <= 0)
+    {
+        unitScale = 1;
+        parameterValues_[kParamUnitScale] = unitScale;
+    }
+
+    /* User intent: after Set Home,
+     * CurrentPosition(user) = 0 + HomeOffset(user).
+     * With user = (actualHw - homeHw) / scale,
+     * choose homeHw = actualHw - HomeOffset(user) * scale. */
+    desiredHomeHw = (int64_t)modelGetPositionActualHw() -
+                    ((int64_t)homeOffsetUser * (int64_t)unitScale);
+    homeOffsetHw = modelClampInt64ToInt32(desiredHomeHw);
+
+    modelLoadHomeHwOffset(homeOffsetHw);
+    (void)UiFlashStorage_SaveHome(homeOffsetHw);
+    (void)saveParameterPageToUiFlash();
+    markPersistentDirty();
 }
 
 void Model::setManualCyclePosition(int32_t position)
@@ -676,12 +692,20 @@ int32_t Model::getParameterValue(uint8_t index) const
 
 void Model::writeAllParametersToDrive()
 {
+    int32_t jogSpeed = parameterValues_[kParamJogSpeed];
     int32_t acceleration = parameterValues_[kParamAccTime];
     int32_t deceleration = parameterValues_[kParamDecTime];
     int32_t unitScale = parameterValues_[kParamUnitScale];
-    int32_t homeOffset = parameterValues_[kParamHomeOffset];
     int32_t positionGain = parameterValues_[kParamPositionGain];
 
+    if (jogSpeed < 0)
+    {
+        jogSpeed = -jogSpeed;
+    }
+    if (jogSpeed <= 0)
+    {
+        jogSpeed = 1;
+    }
     if (acceleration < 0)
     {
         acceleration = -acceleration;
@@ -699,18 +723,25 @@ void Model::writeAllParametersToDrive()
         positionGain = 0;
     }
 
+    parameterValues_[kParamJogSpeed] = jogSpeed;
     parameterValues_[kParamAccTime] = acceleration;
     parameterValues_[kParamDecTime] = deceleration;
     parameterValues_[kParamUnitScale] = unitScale;
     parameterValues_[kParamPositionGain] = positionGain;
 
+    modelSetProfileVelocity(jogSpeed);
     modelSetProfileAcceleration(acceleration);
     modelSetProfileDeceleration(deceleration);
     modelSetUnitScale(unitScale);
-    modelSetHomeOffset(homeOffset);
     modelSetSoftwareLimitPlus(parameterValues_[kParamLimitPlus]);
     modelSetSoftwareLimitMinus(parameterValues_[kParamLimitMinus]);
     modelSetPositionGain(positionGain);
+}
+
+void Model::writeAllParametersToDriveAndSaveHome()
+{
+    writeAllParametersToDrive();
+    (void)saveParameterPageToUiFlash();
 }
 
 void Model::requestReadAllParametersFromDrive()
@@ -731,7 +762,6 @@ bool Model::fetchReadAllParametersFromDrive()
     parameterValues_[kParamLimitPlus] = values[3];
     parameterValues_[kParamLimitMinus] = values[4];
     parameterValues_[kParamUnitScale] = values[5];
-    parameterValues_[kParamHomeOffset] = values[6];
     parameterValues_[kParamPositionGain] = values[7];
     return true;
 }
@@ -851,6 +881,7 @@ bool Model::loadParameterPageFromUiFlash()
     {
         setParameterValue(index, data.values[index]);
     }
+
     suppressPersistence_ = false;
 
     return true;
@@ -1146,4 +1177,33 @@ bool Model::loadPersistentState()
     persistentDirty_ = false;
 
     return true;
+}
+
+extern "C" uint8_t TouchGFX_ModelReloadAllFromUiFlash(void)
+{
+    if (gActiveModelInstance == 0)
+    {
+        return 0U;
+    }
+
+    bool changed = false;
+    if (gActiveModelInstance->loadManualPageFromUiFlash())
+    {
+        changed = true;
+    }
+    if (gActiveModelInstance->loadParameterPageFromUiFlash())
+    {
+        changed = true;
+    }
+    if (gActiveModelInstance->loadProgramPageFromUiFlash())
+    {
+        changed = true;
+    }
+
+    if (changed)
+    {
+        gActiveModelInstance->writeAllParametersToDrive();
+    }
+
+    return changed ? 1U : 0U;
 }

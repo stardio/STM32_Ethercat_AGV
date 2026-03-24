@@ -45,6 +45,13 @@ The project uses two different concepts and they must not be mixed:
 	- Refreshes drive-side motion parameters into Parameter Page.
 	- Must not replace Home Offset field with internal home origin or raw encoder-like values.
 
+4. Home diagnostics (optional)
+	- Runtime UART command: `CMD,diag_home_log=1` (enable), `CMD,diag_home_log=0` (disable).
+	- When enabled, firmware prints `[HOME_DIAG]` snapshots at key points:
+	  - parameter apply/write-all
+	  - ORG Reset (set_home)
+	  - parameter read-all completion
+
 ### Quick verification sequence
 
 1. Enter `Home Offset = 100` in Parameter Page.

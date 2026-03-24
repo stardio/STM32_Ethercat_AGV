@@ -223,6 +223,7 @@ static void UART_LogFlush(void)
 #define PC_PROGRAM_POSITION_TOLERANCE 100
 #define PC_PROGRAM_RETURN_TOLERANCE_HW 5
 #define PC_UART_RX_RING_SIZE 512U
+#define PC_HOME_DIAG_LOG_DEFAULT 0U
 
 enum
 {
@@ -293,6 +294,7 @@ static volatile uint8_t g_pcUartRxRing[PC_UART_RX_RING_SIZE];
 static volatile uint16_t g_pcUartRxHead = 0U;
 static volatile uint16_t g_pcUartRxTail = 0U;
 static uint8_t g_pcUartRxByte = 0U;
+static uint8_t g_pcHomeDiagLog = PC_HOME_DIAG_LOG_DEFAULT;
 
 static void Pc_ProcessCommandLine(char *line);
 
@@ -466,6 +468,22 @@ static void Pc_CmdReply(const char *fmt, ...)
 
   UART4_SendText(msg);
   UART4_SendText("\r\n");
+}
+
+static void Pc_HomeDiagLog(const char *tag)
+{
+  if (g_pcHomeDiagLog == 0U)
+  {
+    return;
+  }
+
+  Pc_CmdReply("[HOME_DIAG] tag=%s cur_u=%ld cur_hw=%ld home_hw=%ld home_user=%ld unit=%ld",
+              (tag != NULL) ? tag : "?",
+              (long)SOEM_GetPositionActual(),
+              (long)SOEM_GetPositionActualHw(),
+              (long)SOEM_GetHomeOffset(),
+              (long)g_pcCmd.parameterValues[PC_PARAM_HOME_OFFSET],
+              (long)g_pcCmd.parameterValues[PC_PARAM_UNIT_SCALE]);
 }
 
 static void Pc_ReplyConfigSnapshot(void)
@@ -774,6 +792,7 @@ static void Pc_ApplyParametersToDrive(void)
   SOEM_SetSoftwareLimitPlus(g_pcCmd.parameterValues[PC_PARAM_LIMIT_PLUS]);
   SOEM_SetSoftwareLimitMinus(g_pcCmd.parameterValues[PC_PARAM_LIMIT_MINUS]);
   SOEM_SetPositionGain(posGain);
+  Pc_HomeDiagLog("apply_params");
 }
 
 static void Pc_CommandInit(void)
@@ -900,6 +919,14 @@ static void Pc_ProcessCommandLine(char *line)
     return;
   }
 
+  if (Pc_StrEqIgnoreCase(key, "diag_home_log"))
+  {
+    g_pcHomeDiagLog = Pc_ParseBool(value, g_pcHomeDiagLog);
+    Pc_CmdReply("[CMD] diag_home_log=%u", (unsigned int)g_pcHomeDiagLog);
+    Pc_HomeDiagLog("diag_toggle");
+    return;
+  }
+
   if (Pc_StrEqIgnoreCase(key, "jog_delta"))
   {
     parsed = Pc_ParseInt32(value, 0);
@@ -955,6 +982,7 @@ static void Pc_ProcessCommandLine(char *line)
       SOEM_LoadHomeHwOffset(homeOffsetHw);
       (void)UiFlashStorage_SaveHome(homeOffsetHw);
       Pc_SaveParameterToFlash();
+      Pc_HomeDiagLog("set_home");
     }
     return;
   }
@@ -1053,6 +1081,7 @@ static void Pc_ProcessCommandLine(char *line)
     if (Pc_ParseBool(value, 0U) != 0U)
     {
       Pc_ApplyParametersToDrive();
+      Pc_HomeDiagLog("param_write_all");
       Pc_ReplyConfigSnapshot();
     }
     return;
@@ -1063,6 +1092,7 @@ static void Pc_ProcessCommandLine(char *line)
     if (Pc_ParseBool(value, 0U) != 0U)
     {
       Pc_ApplyParametersToDrive();
+      Pc_HomeDiagLog("param_apply");
       Pc_SaveParameterToFlash();
       Pc_SyncTouchGfxModel();
       Pc_ReplyConfigSnapshot();
@@ -1237,6 +1267,7 @@ static void Pc_CommandTick(void)
       g_pcCmd.parameterValues[PC_PARAM_UNIT_SCALE] = values[5];
       g_pcCmd.parameterValues[PC_PARAM_POSITION_GAIN] = values[7];
       g_pcCmd.parameterReadPending = 0U;
+      Pc_HomeDiagLog("param_read_all");
       Pc_SaveParameterToFlash();
       Pc_SyncTouchGfxModel();
       Pc_CmdReply("[CMD] param_read_all ok");

@@ -1,0 +1,16 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>agv_description</name>
+  <version>2.0.0</version>
+  <description>AGV URDF and static TF for RTAB-Map + Nav2</description>
+  <maintainer email="agv@local">AGV Team</maintainer>
+  <license>MIT</license>
+
+  <buildtool_depend>ament_cmake_python</buildtool_depend>
+  <depend>robot_state_publisher</depend>
+  <depend>xacro</depend>
+
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>

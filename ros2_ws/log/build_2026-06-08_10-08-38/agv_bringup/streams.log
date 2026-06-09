@@ -1,0 +1,34 @@
+[2.958s] Invoking command in '/mnt/d/Ethercat_N753-6AX_AGV/ros2_ws/build/agv_bringup': AMENT_PREFIX_PATH=/mnt/d/Ethercat_N753-6AX_AGV/ros2_ws/install/agv_description PYTHONPATH=/mnt/d/Ethercat_N753-6AX_AGV/ros2_ws/build/agv_bringup/prefix_override:/usr/lib/python3/dist-packages/colcon_core/task/python/colcon_distutils_commands:/mnt/d/Ethercat_N753-6AX_AGV/ros2_ws/install/agv_bringup/lib/python3.10/site-packages:/mnt/d/Ethercat_N753-6AX_AGV/ros2_ws/build/agv_description:/mnt/d/Ethercat_N753-6AX_AGV/ros2_ws/install/agv_description/lib/python3.10/site-packages /usr/bin/python3 -W ignore:setup.py install is deprecated -W ignore:easy_install command is deprecated setup.py develop --editable --build-directory /mnt/d/Ethercat_N753-6AX_AGV/ros2_ws/build/agv_bringup/build --no-deps symlink_data
+[3.977s] running develop
+[4.203s] running egg_info
+[4.204s] creating agv_bringup.egg-info
+[4.205s] writing agv_bringup.egg-info/PKG-INFO
+[4.211s] writing dependency_links to agv_bringup.egg-info/dependency_links.txt
+[4.215s] writing entry points to agv_bringup.egg-info/entry_points.txt
+[4.217s] writing requirements to agv_bringup.egg-info/requires.txt
+[4.220s] writing top-level names to agv_bringup.egg-info/top_level.txt
+[4.224s] writing manifest file 'agv_bringup.egg-info/SOURCES.txt'
+[4.309s] reading manifest file 'agv_bringup.egg-info/SOURCES.txt'
+[4.376s] writing manifest file 'agv_bringup.egg-info/SOURCES.txt'
+[4.393s] running build_ext
+[4.393s] Creating /mnt/d/Ethercat_N753-6AX_AGV/ros2_ws/install/agv_bringup/lib/python3.10/site-packages/agv-bringup.egg-link (link to .)
+[4.414s] Installing stm32_bridge_node script to /mnt/d/Ethercat_N753-6AX_AGV/ros2_ws/install/agv_bringup/bin
+[4.427s] 
+[4.428s] Installed /mnt/d/Ethercat_N753-6AX_AGV/ros2_ws/build/agv_bringup
+[4.431s] running symlink_data
+[4.438s] creating /mnt/d/Ethercat_N753-6AX_AGV/ros2_ws/install/agv_bringup/share/ament_index
+[4.440s] creating /mnt/d/Ethercat_N753-6AX_AGV/ros2_ws/install/agv_bringup/share/ament_index/resource_index
+[4.443s] creating /mnt/d/Ethercat_N753-6AX_AGV/ros2_ws/install/agv_bringup/share/ament_index/resource_index/packages
+[4.457s] symbolically linking /mnt/d/Ethercat_N753-6AX_AGV/ros2_ws/build/agv_bringup/resource/agv_bringup -> /mnt/d/Ethercat_N753-6AX_AGV/ros2_ws/install/agv_bringup/share/ament_index/resource_index/packages
+[4.473s] symbolically linking /mnt/d/Ethercat_N753-6AX_AGV/ros2_ws/build/agv_bringup/package.xml -> /mnt/d/Ethercat_N753-6AX_AGV/ros2_ws/install/agv_bringup/share/agv_bringup
+[4.481s] creating /mnt/d/Ethercat_N753-6AX_AGV/ros2_ws/install/agv_bringup/share/agv_bringup/launch
+[4.494s] symbolically linking /mnt/d/Ethercat_N753-6AX_AGV/ros2_ws/build/agv_bringup/launch/full_nav.launch.py -> /mnt/d/Ethercat_N753-6AX_AGV/ros2_ws/install/agv_bringup/share/agv_bringup/launch
+[4.510s] symbolically linking /mnt/d/Ethercat_N753-6AX_AGV/ros2_ws/build/agv_bringup/launch/full_slam.launch.py -> /mnt/d/Ethercat_N753-6AX_AGV/ros2_ws/install/agv_bringup/share/agv_bringup/launch
+[4.527s] symbolically linking /mnt/d/Ethercat_N753-6AX_AGV/ros2_ws/build/agv_bringup/launch/hardware.launch.py -> /mnt/d/Ethercat_N753-6AX_AGV/ros2_ws/install/agv_bringup/share/agv_bringup/launch
+[4.543s] symbolically linking /mnt/d/Ethercat_N753-6AX_AGV/ros2_ws/build/agv_bringup/launch/localization.launch.py -> /mnt/d/Ethercat_N753-6AX_AGV/ros2_ws/install/agv_bringup/share/agv_bringup/launch
+[4.559s] symbolically linking /mnt/d/Ethercat_N753-6AX_AGV/ros2_ws/build/agv_bringup/launch/nav2.launch.py -> /mnt/d/Ethercat_N753-6AX_AGV/ros2_ws/install/agv_bringup/share/agv_bringup/launch
+[4.575s] symbolically linking /mnt/d/Ethercat_N753-6AX_AGV/ros2_ws/build/agv_bringup/launch/slam.launch.py -> /mnt/d/Ethercat_N753-6AX_AGV/ros2_ws/install/agv_bringup/share/agv_bringup/launch
+[4.585s] creating /mnt/d/Ethercat_N753-6AX_AGV/ros2_ws/install/agv_bringup/share/agv_bringup/config
+[4.598s] symbolically linking /mnt/d/Ethercat_N753-6AX_AGV/ros2_ws/build/agv_bringup/config/nav2_params.yaml -> /mnt/d/Ethercat_N753-6AX_AGV/ros2_ws/install/agv_bringup/share/agv_bringup/config
+[4.614s] symbolically linking /mnt/d/Ethercat_N753-6AX_AGV/ros2_ws/build/agv_bringup/config/rtabmap_params.yaml -> /mnt/d/Ethercat_N753-6AX_AGV/ros2_ws/install/agv_bringup/share/agv_bringup/config
+[4.636s] Invoked command in '/mnt/d/Ethercat_N753-6AX_AGV/ros2_ws/build/agv_bringup' returned '0': AMENT_PREFIX_PATH=/mnt/d/Ethercat_N753-6AX_AGV/ros2_ws/install/agv_description PYTHONPATH=/mnt/d/Ethercat_N753-6AX_AGV/ros2_ws/build/agv_bringup/prefix_override:/usr/lib/python3/dist-packages/colcon_core/task/python/colcon_distutils_commands:/mnt/d/Ethercat_N753-6AX_AGV/ros2_ws/install/agv_bringup/lib/python3.10/site-packages:/mnt/d/Ethercat_N753-6AX_AGV/ros2_ws/build/agv_description:/mnt/d/Ethercat_N753-6AX_AGV/ros2_ws/install/agv_description/lib/python3.10/site-packages /usr/bin/python3 -W ignore:setup.py install is deprecated -W ignore:easy_install command is deprecated setup.py develop --editable --build-directory /mnt/d/Ethercat_N753-6AX_AGV/ros2_ws/build/agv_bringup/build --no-deps symlink_data

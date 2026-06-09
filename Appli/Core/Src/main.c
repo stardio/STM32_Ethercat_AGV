@@ -18,10 +18,8 @@
 /* USER CODE END Header */
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
-#include "gfxmmu_lut.h"
 #include "FreeRTOS.h"
 #include "cmsis_os2.h"
-#include "app_touchgfx.h"
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
@@ -32,13 +30,21 @@
 #include <string.h>
 #include "settings_persistence.h"
 #include "ui_flash_storage.h"
-#include "stm32h7rsxx_hal_eth.h"
+#include "axis_config.h"
+#include "interpolator.h"
 #include "soem/soem.h"
 #include "osal.h"
 #include "lan8742.h"
 #include "soem_port.h"
-#include "emw3080_web_server.h"
 #include "task.h"  /* vTaskDelayUntil */
+#include "interlock_manager.h"
+#include "press_state_machine.h"
+#include "recipe_manager.h"
+#include "cycle_logger.h"
+#include "alarm_manager.h"
+#include "user_auth.h"
+#include "maint_counter.h"
+#include "uart_protocol.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -49,12 +55,36 @@
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
 /* Non-blocking UART ring buffer for EtherCAT logging */
-#define UART_LOG_BUF_SIZE 2048U
+#define UART_LOG_BUF_SIZE 4096U  /* enlarged for graph streaming */
 static volatile char uart_log_buf[UART_LOG_BUF_SIZE];
 static volatile uint16_t uart_log_head = 0;  /* written by producer (EtherCAT task) */
 static volatile uint16_t uart_log_tail = 0;  /* consumed by DMA/flush task */
 static volatile uint8_t  uart_dma_busy = 0;  /* 1 = DMA transfer in flight */
 static char uart_dma_chunk[256];  /* DMA source buffer in normal RAM */
+
+/* ── High-resolution press graph capture (1ms EtherCAT loop) ─────────────── */
+#define GRAPH_BUF_MAX     2000U  /* 2 ms × 2000 = 4 s max cycle               */
+#define GRAPH_SAMPLE_DIV     2U  /* sample every 2ms inside 1ms loop           */
+#define GRAPH_STREAM_DIV     2U  /* send 1 ASCII line every 2ms → < UART speed */
+
+typedef struct {
+    int32_t  pos;      /* mm (soem_hw_to_user units, already converted)       */
+    int16_t  torque;   /* 0.1% of rated torque                                */
+    int16_t  velocity; /* user unit/s (from drive TxPDO)                      */
+    uint16_t ms;       /* elapsed ms since cycle capture start                */
+    uint8_t  step;     /* PressState_t value                                  */
+    uint8_t  _pad;
+} GraphSample_t;
+
+static GraphSample_t g_graphBuf[GRAPH_BUF_MAX];
+static uint16_t      g_graphCount       = 0U;
+static uint16_t      g_graphStreamCount = 0U; /* frozen count at stream trigger */
+static uint8_t       g_graphActive      = 0U; /* 1 = sampling in progress      */
+static uint8_t       g_graphSendPend    = 0U; /* 1 = waiting to stream to PC   */
+static uint16_t      g_graphSendIdx     = 0U; /* next sample index to send     */
+static uint32_t      g_graphDivCnt      = 0U; /* sample decimation counter     */
+static uint32_t      g_graphStreamDiv   = 0U; /* stream rate limiter counter   */
+static uint32_t      g_graphStartMs     = 0U; /* HAL_GetTick() at capture start */
 
 /* Set to 1 while validating CN3 pin 2/3 short loopback, set back to 0 afterwards. */
 #define WIFI_UART7_LOOPBACK_TEST 0
@@ -71,32 +101,14 @@ static char uart_dma_chunk[256];  /* DMA source buffer in normal RAM */
 
 /* Private variables ---------------------------------------------------------*/
 
-CRC_HandleTypeDef hcrc;
-
-DMA2D_HandleTypeDef hdma2d;
-
-GFXMMU_HandleTypeDef hgfxmmu;
-
-GPU2D_HandleTypeDef hgpu2d;
-
-I2C_HandleTypeDef hi2c1;
-
-JPEG_HandleTypeDef hjpeg;
-DMA_HandleTypeDef handle_HPDMA1_Channel1;
-DMA_HandleTypeDef handle_HPDMA1_Channel0;
-
-LTDC_HandleTypeDef hltdc;
-
-UART_HandleTypeDef huart4;
-UART_HandleTypeDef huart7;
+UART_HandleTypeDef huart3;
 
 ETH_HandleTypeDef heth;
-/* DMA descriptors in RAM_CMD (0x24068000), MPU non-cacheable region.
- * ETH DMA uses AXI bus — cannot access SRAMAHB (AHB-only). Must stay in AXI SRAM. */
+/* ETH DMA descriptors: AXI SRAM non-cacheable region (MPU Region 0 at 0x24070000) */
 __ALIGN_BEGIN ETH_DMADescTypeDef DMARxDscrTab[ETH_RX_DESC_CNT] __ALIGN_END __attribute__((section(".eth_dma"), aligned(32)));
 __ALIGN_BEGIN ETH_DMADescTypeDef DMATxDscrTab[ETH_TX_DESC_CNT] __ALIGN_END __attribute__((section(".eth_dma"), aligned(32)));
 
-/* Debug status variables (shared with TouchGFX) */
+/* Debug status variables */
 volatile uint8_t g_ethLinkStatus = 0;
 volatile uint8_t g_soemInitStatus = 0;
 volatile uint8_t g_slaveCount = 0;
@@ -134,50 +146,27 @@ const osThreadAttr_t defaultTask_attributes = {
   .stack_size = 1024 * 4,
   .priority = (osPriority_t) osPriorityBelowNormal,
 };
-/* Definitions for TouchGFXTask */
-osThreadId_t TouchGFXTaskHandle;
-const osThreadAttr_t TouchGFXTask_attributes = {
-  .name = "TouchGFXTask",
-  .stack_size = 4096 * 4,
-  .priority = (osPriority_t) osPriorityNormal,
-};
 /* USER CODE BEGIN PV */
 
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
 static void MPU_Config(void);
+static void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
-static void MX_HPDMA1_Init(void);
-static void MX_LTDC_Init(void);
-static void MX_CRC_Init(void);
-static void MX_DMA2D_Init(void);
-static void MX_JPEG_Init(void);
-static void MX_FLASH_Init(void);
-static void MX_I2C1_Init(void);
-static void MX_UART4_Init(void);
-static void MX_UART7_Init(void);
-static void MX_GPU2D_Init(void);
-static void MX_ICACHE_GPU2D_Init(void);
-static void MX_GFXMMU_Init(void);
-void StartDefaultTask(void *argument);
-extern void TouchGFX_Task(void *argument);
+static void MX_USART3_Init(void);
 static void MX_ETH_Init(void);
+void StartDefaultTask(void *argument);
 
 /* USER CODE BEGIN PFP */
 void EtherCAT_Task(void *argument);
-extern uint8_t TouchGFX_ModelReloadAllFromUiFlash(void);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
 /* Non-blocking UART: push text into ring buffer, flushed by UART_LogFlush() */
-static void UART4_SendText(const char *text)
+static void USART3_SendText(const char *text)
 {
-  if (Emw3080WebServer_GetDiagActiveUart() == 4U && Emw3080WebServer_IsRunning() != 0U)
-  {
-    return;
-  }
   if (text == NULL) return;
   uint16_t len = (uint16_t)strlen(text);
   for (uint16_t i = 0; i < len; i++)
@@ -190,101 +179,51 @@ static void UART4_SendText(const char *text)
   }
 }
 
+/* Binary TX callback for UartProto — pushes raw bytes into the same ring buffer */
+static void USART3_SendBinary(const uint8_t *data, uint16_t len)
+{
+  if (data == NULL || len == 0U) return;
+  for (uint16_t i = 0U; i < len; i++)
+  {
+    uint16_t next = (uart_log_head + 1U) % UART_LOG_BUF_SIZE;
+    if (next == uart_log_tail) break;
+    uart_log_buf[uart_log_head] = (char)data[i];
+    uart_log_head = next;
+  }
+}
+
 /* Flush ring buffer to UART via interrupt (call from low-priority context) */
 static void UART_LogFlush(void)
 {
-  if (Emw3080WebServer_GetDiagActiveUart() == 4U && Emw3080WebServer_IsRunning() != 0U)
-  {
-    return;
-  }
   if (uart_dma_busy) return;  /* previous transfer still in flight */
   uint16_t h = uart_log_head;
   uint16_t t = uart_log_tail;
   if (h == t) return;  /* nothing to send */
 
-  /* Copy chunk out of ring buffer */
+  /* Copy one chunk from ring buffer. Commit tail only when IT TX starts. */
   uint16_t n = 0;
   while (t != h && n < sizeof(uart_dma_chunk))
   {
     uart_dma_chunk[n++] = uart_log_buf[t];
     t = (t + 1U) % UART_LOG_BUF_SIZE;
   }
-  uart_log_tail = t;
-  uart_dma_busy = 1;
-  if (HAL_UART_Transmit_IT(&huart4, (uint8_t *)uart_dma_chunk, n) != HAL_OK)
+  if (HAL_UART_Transmit_IT(&huart3, (uint8_t *)uart_dma_chunk, n) == HAL_OK)
   {
-    /* IT not available — fall back to blocking */
-    uart_dma_busy = 0;
-    (void)HAL_UART_Transmit(&huart4, (uint8_t *)uart_dma_chunk, n, 50);
+    uart_log_tail = t;
+    uart_dma_busy = 1;
   }
 }
 
 #define PC_CMD_LINE_MAX 192U
-#define PC_PROGRAM_POSITION_TOLERANCE 100
+#define PC_PROGRAM_POSITION_TOLERANCE 3
 #define PC_PROGRAM_RETURN_TOLERANCE_HW 5
 #define PC_UART_RX_RING_SIZE 512U
-#define PC_HOME_DIAG_LOG_DEFAULT 0U
-
-enum
-{
-  PC_PARAM_JOG_SPEED = 0,
-  PC_PARAM_ACC_TIME,
-  PC_PARAM_DEC_TIME,
-  PC_PARAM_LIMIT_PLUS,
-  PC_PARAM_LIMIT_MINUS,
-  PC_PARAM_UNIT_SCALE,
-  PC_PARAM_HOME_OFFSET,
-  PC_PARAM_POSITION_GAIN,
-  PC_PARAM_COUNT
-};
-
-enum
-{
-  PC_PROG_POS1 = 0,
-  PC_PROG_POS2,
-  PC_PROG_POS3,
-  PC_PROG_SPEED1,
-  PC_PROG_SPEED2,
-  PC_PROG_SPEED3,
-  PC_PROG_TORQUE1,
-  PC_PROG_TORQUE2,
-  PC_PROG_TORQUE3,
-  PC_PROG_RETURN_SPEED,
-  PC_PROG_DELAY_MS,
-  PC_PROG_COUNT
-};
-
-typedef enum
-{
-  PC_SEQ_IDLE = 0,
-  PC_SEQ_MOVE_STEP1,
-  PC_SEQ_MOVE_STEP2,
-  PC_SEQ_MOVE_STEP3,
-  PC_SEQ_DELAY_BEFORE_RETURN,
-  PC_SEQ_RETURN_TO_ORIGIN
-} PcProgramSequenceState;
+#define PC_UART_RX_POLL_BUDGET 32U
 
 typedef struct
 {
-  int32_t manualPosition;
-  int32_t manualSpeed;
-  int16_t manualTorque;
-  uint8_t manualAbsMode;
-  int32_t parameterValues[PC_PARAM_COUNT];
-  int32_t programValues[PC_PROG_COUNT];
-
-  uint8_t parameterReadPending;
+  uint8_t  parameterReadPending;
   uint32_t parameterReadStartMs;
-
-  PcProgramSequenceState seqState;
-  int32_t seqStepPositions[3];
-  int32_t seqStepSpeeds[3];
-  uint16_t seqStepTorques[3];
-  int32_t seqOriginPosition;
-  int32_t seqOriginPositionHw;
-  int32_t seqActiveTarget;
-  uint32_t seqDelayMs;
-  uint32_t seqDelayStartMs;
 } PcCommandContext;
 
 static PcCommandContext g_pcCmd;
@@ -294,7 +233,14 @@ static volatile uint8_t g_pcUartRxRing[PC_UART_RX_RING_SIZE];
 static volatile uint16_t g_pcUartRxHead = 0U;
 static volatile uint16_t g_pcUartRxTail = 0U;
 static uint8_t g_pcUartRxByte = 0U;
-static uint8_t g_pcHomeDiagLog = PC_HOME_DIAG_LOG_DEFAULT;
+
+/* Async flash save flags — set in EtherCAT_Task, consumed in DefaultTask.
+ * Flash erase can take seconds and must NOT run inside the 1ms EtherCAT loop. */
+#define FLASH_SAVE_HOME    0x01U
+#define FLASH_SAVE_PARAM   0x02U
+#define FLASH_SAVE_PROGRAM 0x04U
+#define FLASH_SAVE_MANUAL  0x08U
+volatile uint8_t  g_flashSavePending  = 0U;
 
 static void Pc_ProcessCommandLine(char *line);
 
@@ -305,26 +251,6 @@ static uint8_t Pc_ToLowerAscii(uint8_t c)
     return (uint8_t)(c + ((uint8_t)'a' - (uint8_t)'A'));
   }
   return c;
-}
-
-static uint8_t Pc_StrEqIgnoreCase(const char *a, const char *b)
-{
-  if (a == NULL || b == NULL)
-  {
-    return 0U;
-  }
-
-  while (*a != '\0' && *b != '\0')
-  {
-    if (Pc_ToLowerAscii((uint8_t)*a) != Pc_ToLowerAscii((uint8_t)*b))
-    {
-      return 0U;
-    }
-    a++;
-    b++;
-  }
-
-  return ((*a == '\0') && (*b == '\0')) ? 1U : 0U;
 }
 
 static uint8_t Pc_StartsWithIgnoreCase(const char *text, const char *prefix)
@@ -377,74 +303,6 @@ static char* Pc_Trim(char *s)
   return s;
 }
 
-static int32_t Pc_ParseInt32(const char *text, int32_t fallback)
-{
-  char *endPtr = NULL;
-  long parsed;
-  if (text == NULL)
-  {
-    return fallback;
-  }
-
-  parsed = strtol(text, &endPtr, 10);
-  if (endPtr == text)
-  {
-    return fallback;
-  }
-  if (parsed > INT32_MAX)
-  {
-    parsed = INT32_MAX;
-  }
-  else if (parsed < INT32_MIN)
-  {
-    parsed = INT32_MIN;
-  }
-  return (int32_t)parsed;
-}
-
-static uint8_t Pc_ParseBool(const char *text, uint8_t fallback)
-{
-  if (text == NULL)
-  {
-    return fallback;
-  }
-
-  if (Pc_StrEqIgnoreCase(text, "1") || Pc_StrEqIgnoreCase(text, "true") || Pc_StrEqIgnoreCase(text, "on"))
-  {
-    return 1U;
-  }
-  if (Pc_StrEqIgnoreCase(text, "0") || Pc_StrEqIgnoreCase(text, "false") || Pc_StrEqIgnoreCase(text, "off"))
-  {
-    return 0U;
-  }
-
-  return fallback;
-}
-
-static int32_t Pc_AbsMin1(int32_t value)
-{
-  int32_t absValue = value;
-  if (absValue < 0)
-  {
-    absValue = -absValue;
-  }
-  if (absValue <= 0)
-  {
-    absValue = 1;
-  }
-  return absValue;
-}
-
-static uint16_t Pc_ClampTorquePercent(int32_t value)
-{
-  int32_t absValue = Pc_AbsMin1(value);
-  if (absValue > 100)
-  {
-    absValue = 100;
-  }
-  return (uint16_t)absValue;
-}
-
 static void Pc_CmdReply(const char *fmt, ...)
 {
   char msg[192];
@@ -466,379 +324,27 @@ static void Pc_CmdReply(const char *fmt, ...)
     msg[len] = '\0';
   }
 
-  UART4_SendText(msg);
-  UART4_SendText("\r\n");
+  USART3_SendText(msg);
+  USART3_SendText("\r\n");
 }
 
-static void Pc_HomeDiagLog(const char *tag)
-{
-  if (g_pcHomeDiagLog == 0U)
-  {
-    return;
-  }
-
-  Pc_CmdReply("[HOME_DIAG] tag=%s cur_u=%ld cur_hw=%ld home_hw=%ld home_user=%ld unit=%ld",
-              (tag != NULL) ? tag : "?",
-              (long)SOEM_GetPositionActual(),
-              (long)SOEM_GetPositionActualHw(),
-              (long)SOEM_GetHomeOffset(),
-              (long)g_pcCmd.parameterValues[PC_PARAM_HOME_OFFSET],
-              (long)g_pcCmd.parameterValues[PC_PARAM_UNIT_SCALE]);
-}
-
-static void Pc_ReplyConfigSnapshot(void)
-{
-  Pc_CmdReply("CFGM,pos=%ld,speed=%ld,torque=%d,abs=%u",
-              (long)g_pcCmd.manualPosition,
-              (long)g_pcCmd.manualSpeed,
-              (int)g_pcCmd.manualTorque,
-              (unsigned int)g_pcCmd.manualAbsMode);
-
-  Pc_CmdReply("CFGP,jog=%ld,acc=%ld,dec=%ld,lplus=%ld,lminus=%ld,unit=%ld,home=%ld,gain=%ld",
-              (long)g_pcCmd.parameterValues[PC_PARAM_JOG_SPEED],
-              (long)g_pcCmd.parameterValues[PC_PARAM_ACC_TIME],
-              (long)g_pcCmd.parameterValues[PC_PARAM_DEC_TIME],
-              (long)g_pcCmd.parameterValues[PC_PARAM_LIMIT_PLUS],
-              (long)g_pcCmd.parameterValues[PC_PARAM_LIMIT_MINUS],
-              (long)g_pcCmd.parameterValues[PC_PARAM_UNIT_SCALE],
-              (long)g_pcCmd.parameterValues[PC_PARAM_HOME_OFFSET],
-              (long)g_pcCmd.parameterValues[PC_PARAM_POSITION_GAIN]);
-
-  Pc_CmdReply("CFGR,p1=%ld,p2=%ld,p3=%ld,s1=%ld,s2=%ld,s3=%ld,t1=%ld,t2=%ld,t3=%ld,rs=%ld,delay=%ld",
-              (long)g_pcCmd.programValues[PC_PROG_POS1],
-              (long)g_pcCmd.programValues[PC_PROG_POS2],
-              (long)g_pcCmd.programValues[PC_PROG_POS3],
-              (long)g_pcCmd.programValues[PC_PROG_SPEED1],
-              (long)g_pcCmd.programValues[PC_PROG_SPEED2],
-              (long)g_pcCmd.programValues[PC_PROG_SPEED3],
-              (long)g_pcCmd.programValues[PC_PROG_TORQUE1],
-              (long)g_pcCmd.programValues[PC_PROG_TORQUE2],
-              (long)g_pcCmd.programValues[PC_PROG_TORQUE3],
-              (long)g_pcCmd.programValues[PC_PROG_RETURN_SPEED],
-              (long)g_pcCmd.programValues[PC_PROG_DELAY_MS]);
-}
-
-static void Pc_SyncTouchGfxModel(void)
-{
-  (void)TouchGFX_ModelReloadAllFromUiFlash();
-}
-
-static void Pc_SaveManualToFlash(void)
-{
-  UiFlashManualData manualData;
-  manualData.position = g_pcCmd.manualPosition;
-  manualData.speed = g_pcCmd.manualSpeed;
-  manualData.torque = g_pcCmd.manualTorque;
-  manualData.absMode = g_pcCmd.manualAbsMode;
-  memset(manualData.reserved, 0, sizeof(manualData.reserved));
-  (void)UiFlashStorage_SaveManual(&manualData);
-}
-
-static void Pc_SaveParameterToFlash(void)
-{
-  UiFlashParameterData parameterData;
-  uint8_t i;
-  for (i = 0U; i < PC_PARAM_COUNT; i++)
-  {
-    parameterData.values[i] = g_pcCmd.parameterValues[i];
-  }
-  (void)UiFlashStorage_SaveParameter(&parameterData);
-}
-
-static void Pc_SaveProgramToFlash(void)
-{
-  UiFlashProgramData programData;
-  uint8_t i;
-  for (i = 0U; i < PC_PROG_COUNT; i++)
-  {
-    programData.values[i] = g_pcCmd.programValues[i];
-  }
-  (void)UiFlashStorage_SaveProgram(&programData);
-}
-
-static uint8_t Pc_IsMotionEnabled(void)
-{
-  const uint16_t statusword = SOEM_GetStatusword();
-  if (SOEM_GetPdoReady() == 0U)
-  {
-    return 0U;
-  }
-  if (SOEM_GetRunEnable() == 0U)
-  {
-    return 0U;
-  }
-  return (((statusword & 0x006FU) == 0x0027U) ? 1U : 0U);
-}
-
-static uint8_t Pc_IsTargetReached(int32_t target)
-{
-  int64_t delta = (int64_t)SOEM_GetPositionActual() - (int64_t)target;
-  if (delta < 0)
-  {
-    delta = -delta;
-  }
-  return (delta <= (int64_t)PC_PROGRAM_POSITION_TOLERANCE) ? 1U : 0U;
-}
-
-static uint8_t Pc_IsHardwareTargetReached(int32_t targetHw, int32_t toleranceHw)
-{
-  int32_t tolerance = toleranceHw;
-  int64_t delta;
-  if (tolerance < 0)
-  {
-    tolerance = -tolerance;
-  }
-
-  delta = (int64_t)SOEM_GetPositionActualHw() - (int64_t)targetHw;
-  if (delta < 0)
-  {
-    delta = -delta;
-  }
-  return (delta <= (int64_t)tolerance) ? 1U : 0U;
-}
-
-static int32_t Pc_ClampInt64ToInt32(int64_t value)
-{
-  if (value > (int64_t)INT32_MAX)
-  {
-    return INT32_MAX;
-  }
-  if (value < (int64_t)INT32_MIN)
-  {
-    return INT32_MIN;
-  }
-  return (int32_t)value;
-}
-
-static void Pc_ProgramStop(void)
-{
-  if (g_pcCmd.seqState == PC_SEQ_IDLE)
-  {
-    return;
-  }
-
-  SOEM_SetTargetPositionAbs(SOEM_GetPositionActual());
-  g_pcCmd.seqState = PC_SEQ_IDLE;
-  g_pcCmd.seqDelayStartMs = 0U;
-}
-
-static void Pc_ProgramBeginStep(uint8_t stepIndex)
-{
-  if (stepIndex >= 3U)
-  {
-    return;
-  }
-
-  SOEM_SetProfileVelocity(g_pcCmd.seqStepSpeeds[stepIndex]);
-  SOEM_SetTorqueLimitPercent(g_pcCmd.seqStepTorques[stepIndex]);
-  g_pcCmd.seqActiveTarget = g_pcCmd.seqStepPositions[stepIndex];
-  SOEM_SetTargetPositionAbs(g_pcCmd.seqActiveTarget);
-
-  if (stepIndex == 0U)
-  {
-    g_pcCmd.seqState = PC_SEQ_MOVE_STEP1;
-  }
-  else if (stepIndex == 1U)
-  {
-    g_pcCmd.seqState = PC_SEQ_MOVE_STEP2;
-  }
-  else
-  {
-    g_pcCmd.seqState = PC_SEQ_MOVE_STEP3;
-  }
-}
-
-static uint8_t Pc_ProgramStart(void)
-{
-  uint8_t i;
-  int32_t delayValue;
-
-  if (g_pcCmd.seqState != PC_SEQ_IDLE)
-  {
-    return 0U;
-  }
-  if (Pc_IsMotionEnabled() == 0U)
-  {
-    return 0U;
-  }
-
-  for (i = 0U; i < 3U; i++)
-  {
-    g_pcCmd.seqStepPositions[i] = g_pcCmd.programValues[PC_PROG_POS1 + i];
-    g_pcCmd.seqStepSpeeds[i] = Pc_AbsMin1(g_pcCmd.programValues[PC_PROG_SPEED1 + i]);
-    g_pcCmd.seqStepTorques[i] = Pc_ClampTorquePercent(g_pcCmd.programValues[PC_PROG_TORQUE1 + i]);
-  }
-
-  delayValue = g_pcCmd.programValues[PC_PROG_DELAY_MS];
-  g_pcCmd.seqDelayMs = (delayValue > 0) ? (uint32_t)delayValue : 0U;
-
-  g_pcCmd.seqOriginPosition = SOEM_GetPositionActual();
-  g_pcCmd.seqOriginPositionHw = SOEM_GetPositionActualHw();
-  g_pcCmd.seqDelayStartMs = 0U;
-
-  Pc_ProgramBeginStep(0U);
-  return 1U;
-}
-
-static void Pc_ProgramTick(void)
-{
-  if (g_pcCmd.seqState == PC_SEQ_IDLE)
-  {
-    return;
-  }
-
-  if (SOEM_GetRunEnable() == 0U)
-  {
-    Pc_ProgramStop();
-    return;
-  }
-
-  if (g_pcCmd.seqState == PC_SEQ_MOVE_STEP1)
-  {
-    if (Pc_IsTargetReached(g_pcCmd.seqActiveTarget) != 0U)
-    {
-      Pc_ProgramBeginStep(1U);
-    }
-    return;
-  }
-
-  if (g_pcCmd.seqState == PC_SEQ_MOVE_STEP2)
-  {
-    if (Pc_IsTargetReached(g_pcCmd.seqActiveTarget) != 0U)
-    {
-      Pc_ProgramBeginStep(2U);
-    }
-    return;
-  }
-
-  if (g_pcCmd.seqState == PC_SEQ_MOVE_STEP3)
-  {
-    if (Pc_IsTargetReached(g_pcCmd.seqActiveTarget) != 0U)
-    {
-      g_pcCmd.seqDelayStartMs = HAL_GetTick();
-      g_pcCmd.seqState = PC_SEQ_DELAY_BEFORE_RETURN;
-    }
-    return;
-  }
-
-  if (g_pcCmd.seqState == PC_SEQ_DELAY_BEFORE_RETURN)
-  {
-    uint32_t elapsed = HAL_GetTick() - g_pcCmd.seqDelayStartMs;
-    if (elapsed >= g_pcCmd.seqDelayMs)
-    {
-      const int32_t returnSpeed = Pc_AbsMin1(g_pcCmd.programValues[PC_PROG_RETURN_SPEED]);
-      SOEM_SetProfileVelocity(returnSpeed);
-      SOEM_SetTorqueLimitPercent(g_pcCmd.seqStepTorques[2]);
-      g_pcCmd.seqActiveTarget = g_pcCmd.seqOriginPosition;
-      SOEM_SetTargetPositionAbsHw(g_pcCmd.seqOriginPositionHw);
-      g_pcCmd.seqState = PC_SEQ_RETURN_TO_ORIGIN;
-    }
-    return;
-  }
-
-  if (g_pcCmd.seqState == PC_SEQ_RETURN_TO_ORIGIN)
-  {
-    if (Pc_IsHardwareTargetReached(g_pcCmd.seqOriginPositionHw, PC_PROGRAM_RETURN_TOLERANCE_HW) != 0U)
-    {
-      g_pcCmd.seqState = PC_SEQ_IDLE;
-      g_pcCmd.seqDelayStartMs = 0U;
-    }
-  }
-}
-
-static void Pc_ApplyParametersToDrive(void)
-{
-  int32_t jogSpeed = g_pcCmd.parameterValues[PC_PARAM_JOG_SPEED];
-  int32_t acc = g_pcCmd.parameterValues[PC_PARAM_ACC_TIME];
-  int32_t dec = g_pcCmd.parameterValues[PC_PARAM_DEC_TIME];
-  int32_t unitScale = g_pcCmd.parameterValues[PC_PARAM_UNIT_SCALE];
-  int32_t posGain = g_pcCmd.parameterValues[PC_PARAM_POSITION_GAIN];
-
-  if (jogSpeed < 0)
-  {
-    jogSpeed = -jogSpeed;
-  }
-  if (jogSpeed <= 0)
-  {
-    jogSpeed = 1;
-  }
-  if (acc < 0)
-  {
-    acc = -acc;
-  }
-  if (dec < 0)
-  {
-    dec = -dec;
-  }
-  if (unitScale <= 0)
-  {
-    unitScale = 1;
-  }
-  if (posGain < 0)
-  {
-    posGain = 0;
-  }
-
-  g_pcCmd.parameterValues[PC_PARAM_JOG_SPEED] = jogSpeed;
-  g_pcCmd.parameterValues[PC_PARAM_ACC_TIME] = acc;
-  g_pcCmd.parameterValues[PC_PARAM_DEC_TIME] = dec;
-  g_pcCmd.parameterValues[PC_PARAM_UNIT_SCALE] = unitScale;
-  g_pcCmd.parameterValues[PC_PARAM_POSITION_GAIN] = posGain;
-
-  SOEM_SetProfileVelocity(jogSpeed);
-  SOEM_SetProfileAcceleration(acc);
-  SOEM_SetProfileDeceleration(dec);
-  SOEM_SetUnitScale(unitScale);
-  SOEM_SetSoftwareLimitPlus(g_pcCmd.parameterValues[PC_PARAM_LIMIT_PLUS]);
-  SOEM_SetSoftwareLimitMinus(g_pcCmd.parameterValues[PC_PARAM_LIMIT_MINUS]);
-  SOEM_SetPositionGain(posGain);
-  Pc_HomeDiagLog("apply_params");
-}
 
 static void Pc_CommandInit(void)
 {
-  UiFlashManualData manualData;
-  UiFlashParameterData parameterData;
-  UiFlashProgramData programData;
-  int32_t savedHomeHwOffset = 0;
-  uint8_t i;
+  uint8_t ax;
 
   memset(&g_pcCmd, 0, sizeof(g_pcCmd));
-  g_pcCmd.manualAbsMode = 1U;
-  g_pcCmd.parameterValues[PC_PARAM_UNIT_SCALE] = 1;
-  g_pcCmd.programValues[PC_PROG_RETURN_SPEED] = 100;
-  g_pcCmd.seqState = PC_SEQ_IDLE;
 
-  if (UiFlashStorage_LoadManual(&manualData) != 0U)
+  AxisConfig_InitDefaults();
+  if (RobotFlash_Load() != 0U)
   {
-    g_pcCmd.manualPosition = manualData.position;
-    g_pcCmd.manualSpeed = manualData.speed;
-    g_pcCmd.manualTorque = manualData.torque;
-    g_pcCmd.manualAbsMode = (manualData.absMode != 0U) ? 1U : 0U;
-  }
-
-  if (UiFlashStorage_LoadParameter(&parameterData) != 0U)
-  {
-    for (i = 0U; i < PC_PARAM_COUNT; i++)
+    for (ax = 0U; ax < (uint8_t)AXIS_COUNT; ax++)
     {
-      g_pcCmd.parameterValues[i] = parameterData.values[i];
+      SOEM_LoadHomeHwOffset((AxisId_t)ax, g_axis_param[ax].home_offset);
     }
   }
-
-  if (UiFlashStorage_LoadProgram(&programData) != 0U)
-  {
-    for (i = 0U; i < PC_PROG_COUNT; i++)
-    {
-      g_pcCmd.programValues[i] = programData.values[i];
-    }
-  }
-
-  /* Restore saved home origin at boot so absolute/user position remains calibrated
-   * after power cycle, independent of TouchGFX model startup timing. */
-  if (UiFlashStorage_LoadHome(&savedHomeHwOffset) != 0U)
-  {
-    SOEM_LoadHomeHwOffset(savedHomeHwOffset);
-  }
+  SOEM_SyncRtFromAxisParam();
+  SOEM_RefreshAllLimits();
 }
 
 static void Pc_CommandHandleByte(uint8_t ch)
@@ -871,9 +377,9 @@ static void Pc_CommandHandleByte(uint8_t ch)
 
 static void Pc_CommandEnsureRxArmed(void)
 {
-  if (huart4.RxState == HAL_UART_STATE_READY)
+  if (huart3.RxState == HAL_UART_STATE_READY)
   {
-    (void)HAL_UART_Receive_IT(&huart4, &g_pcUartRxByte, 1U);
+    (void)HAL_UART_Receive_IT(&huart3, &g_pcUartRxByte, 1U);
   }
 }
 
@@ -882,8 +388,6 @@ static void Pc_ProcessCommandLine(char *line)
   char *payload = Pc_Trim(line);
   char *eq;
   char *key;
-  char *value;
-  int32_t parsed;
 
   if (payload == NULL || *payload == '\0')
   {
@@ -903,329 +407,6 @@ static void Pc_ProcessCommandLine(char *line)
 
   *eq = '\0';
   key = Pc_Trim(payload);
-  value = Pc_Trim(eq + 1);
-
-  if (Pc_StrEqIgnoreCase(key, "run"))
-  {
-    uint8_t runEnable = Pc_ParseBool(value, 0U);
-    char msg[64];
-    SOEM_SetRunEnable(runEnable);
-    (void)snprintf(msg, sizeof(msg), "[CMD] run request=%u applied=%u", (unsigned int)runEnable, (unsigned int)SOEM_GetRunEnable());
-    Pc_CmdReply(msg);
-    if (runEnable == 0U)
-    {
-      Pc_ProgramStop();
-    }
-    return;
-  }
-
-  if (Pc_StrEqIgnoreCase(key, "diag_home_log"))
-  {
-    g_pcHomeDiagLog = Pc_ParseBool(value, g_pcHomeDiagLog);
-    Pc_CmdReply("[CMD] diag_home_log=%u", (unsigned int)g_pcHomeDiagLog);
-    Pc_HomeDiagLog("diag_toggle");
-    return;
-  }
-
-  if (Pc_StrEqIgnoreCase(key, "jog_delta"))
-  {
-    parsed = Pc_ParseInt32(value, 0);
-    if (Pc_IsMotionEnabled() != 0U)
-    {
-      SOEM_SetTargetPositionDelta(parsed);
-    }
-    return;
-  }
-
-  if (Pc_StrEqIgnoreCase(key, "target_delta"))
-  {
-    parsed = Pc_ParseInt32(value, 0);
-    g_pcCmd.manualPosition = parsed;
-    if (Pc_IsMotionEnabled() != 0U)
-    {
-      SOEM_SetTargetPositionDelta(parsed);
-    }
-    return;
-  }
-
-  if (Pc_StrEqIgnoreCase(key, "target_abs"))
-  {
-    parsed = Pc_ParseInt32(value, SOEM_GetPositionActual());
-    g_pcCmd.manualPosition = parsed;
-    SOEM_SetTargetPositionAbs(parsed);
-    return;
-  }
-
-  if (Pc_StrEqIgnoreCase(key, "set_home"))
-  {
-    if (Pc_ParseBool(value, 0U) != 0U)
-    {
-      int32_t unitScale = g_pcCmd.parameterValues[PC_PARAM_UNIT_SCALE];
-      int32_t homeOffsetUser = g_pcCmd.parameterValues[PC_PARAM_HOME_OFFSET];
-      int64_t desiredHomeHw;
-      int32_t homeOffsetHw;
-
-      if (unitScale <= 0)
-      {
-        unitScale = 1;
-        g_pcCmd.parameterValues[PC_PARAM_UNIT_SCALE] = unitScale;
-      }
-
-      /* User intent: after Set Home,
-       * CurrentPosition(user) = 0 + HomeOffset(user).
-       * With user = (actualHw - homeHw) / scale,
-       * choose homeHw = actualHw - HomeOffset(user) * scale. */
-      desiredHomeHw = (int64_t)SOEM_GetPositionActualHw() -
-                      ((int64_t)homeOffsetUser * (int64_t)unitScale);
-      homeOffsetHw = Pc_ClampInt64ToInt32(desiredHomeHw);
-
-      SOEM_LoadHomeHwOffset(homeOffsetHw);
-      (void)UiFlashStorage_SaveHome(homeOffsetHw);
-      Pc_SaveParameterToFlash();
-      Pc_HomeDiagLog("set_home");
-    }
-    return;
-  }
-
-  if (Pc_StrEqIgnoreCase(key, "manual_speed"))
-  {
-    parsed = Pc_AbsMin1(Pc_ParseInt32(value, g_pcCmd.manualSpeed));
-    g_pcCmd.manualSpeed = parsed;
-    SOEM_SetProfileVelocity(parsed);
-    return;
-  }
-
-  if (Pc_StrEqIgnoreCase(key, "manual_torque"))
-  {
-    uint16_t tq = Pc_ClampTorquePercent(Pc_ParseInt32(value, (int32_t)g_pcCmd.manualTorque));
-    g_pcCmd.manualTorque = (int16_t)tq;
-    SOEM_SetTorqueLimitPercent(tq);
-    return;
-  }
-
-  if (Pc_StrEqIgnoreCase(key, "manual_abs"))
-  {
-    g_pcCmd.manualAbsMode = Pc_ParseBool(value, g_pcCmd.manualAbsMode);
-    return;
-  }
-
-  if (Pc_StrEqIgnoreCase(key, "manual_pos"))
-  {
-    g_pcCmd.manualPosition = Pc_ParseInt32(value, g_pcCmd.manualPosition);
-    return;
-  }
-
-  if (Pc_StrEqIgnoreCase(key, "manual_apply"))
-  {
-    if (Pc_ParseBool(value, 0U) != 0U)
-    {
-      Pc_SaveManualToFlash();
-      Pc_SyncTouchGfxModel();
-      Pc_ReplyConfigSnapshot();
-    }
-    return;
-  }
-
-  if (Pc_StrEqIgnoreCase(key, "manual_stop"))
-  {
-    if (Pc_ParseBool(value, 0U) != 0U)
-    {
-      SOEM_SetTargetPositionAbs(SOEM_GetPositionActual());
-      Pc_ProgramStop();
-    }
-    return;
-  }
-
-  if (Pc_StrEqIgnoreCase(key, "manual_save"))
-  {
-    if (Pc_ParseBool(value, 0U) != 0U)
-    {
-      Pc_SaveManualToFlash();
-      Pc_SyncTouchGfxModel();
-      Pc_ReplyConfigSnapshot();
-    }
-    return;
-  }
-
-  if (Pc_StrEqIgnoreCase(key, "manual_load"))
-  {
-    if (Pc_ParseBool(value, 0U) != 0U)
-    {
-      UiFlashManualData manualData;
-      if (UiFlashStorage_LoadManual(&manualData) != 0U)
-      {
-        g_pcCmd.manualPosition = manualData.position;
-        g_pcCmd.manualSpeed = Pc_AbsMin1(manualData.speed);
-        g_pcCmd.manualTorque = (int16_t)Pc_ClampTorquePercent((int32_t)manualData.torque);
-        g_pcCmd.manualAbsMode = (manualData.absMode != 0U) ? 1U : 0U;
-        SOEM_SetProfileVelocity(g_pcCmd.manualSpeed);
-        SOEM_SetTorqueLimitPercent((uint16_t)g_pcCmd.manualTorque);
-        Pc_SyncTouchGfxModel();
-        Pc_ReplyConfigSnapshot();
-      }
-    }
-    return;
-  }
-
-  if (Pc_StrEqIgnoreCase(key, "param_jog_speed"))         { g_pcCmd.parameterValues[PC_PARAM_JOG_SPEED] = Pc_ParseInt32(value, g_pcCmd.parameterValues[PC_PARAM_JOG_SPEED]); return; }
-  if (Pc_StrEqIgnoreCase(key, "param_acc"))               { g_pcCmd.parameterValues[PC_PARAM_ACC_TIME] = Pc_ParseInt32(value, g_pcCmd.parameterValues[PC_PARAM_ACC_TIME]); return; }
-  if (Pc_StrEqIgnoreCase(key, "param_dec"))               { g_pcCmd.parameterValues[PC_PARAM_DEC_TIME] = Pc_ParseInt32(value, g_pcCmd.parameterValues[PC_PARAM_DEC_TIME]); return; }
-  if (Pc_StrEqIgnoreCase(key, "param_limit_plus"))        { g_pcCmd.parameterValues[PC_PARAM_LIMIT_PLUS] = Pc_ParseInt32(value, g_pcCmd.parameterValues[PC_PARAM_LIMIT_PLUS]); return; }
-  if (Pc_StrEqIgnoreCase(key, "param_limit_minus"))       { g_pcCmd.parameterValues[PC_PARAM_LIMIT_MINUS] = Pc_ParseInt32(value, g_pcCmd.parameterValues[PC_PARAM_LIMIT_MINUS]); return; }
-  if (Pc_StrEqIgnoreCase(key, "param_unit_scale"))        { g_pcCmd.parameterValues[PC_PARAM_UNIT_SCALE] = Pc_ParseInt32(value, g_pcCmd.parameterValues[PC_PARAM_UNIT_SCALE]); return; }
-    if (Pc_StrEqIgnoreCase(key, "param_home_offset"))       { g_pcCmd.parameterValues[PC_PARAM_HOME_OFFSET] = Pc_ParseInt32(value, g_pcCmd.parameterValues[PC_PARAM_HOME_OFFSET]); return; }
-  if (Pc_StrEqIgnoreCase(key, "param_position_gain"))     { g_pcCmd.parameterValues[PC_PARAM_POSITION_GAIN] = Pc_ParseInt32(value, g_pcCmd.parameterValues[PC_PARAM_POSITION_GAIN]); return; }
-
-  if (Pc_StrEqIgnoreCase(key, "param_write_all"))
-  {
-    if (Pc_ParseBool(value, 0U) != 0U)
-    {
-      Pc_ApplyParametersToDrive();
-      Pc_HomeDiagLog("param_write_all");
-      Pc_ReplyConfigSnapshot();
-    }
-    return;
-  }
-
-  if (Pc_StrEqIgnoreCase(key, "param_apply"))
-  {
-    if (Pc_ParseBool(value, 0U) != 0U)
-    {
-      Pc_ApplyParametersToDrive();
-      Pc_HomeDiagLog("param_apply");
-      Pc_SaveParameterToFlash();
-      Pc_SyncTouchGfxModel();
-      Pc_ReplyConfigSnapshot();
-    }
-    return;
-  }
-
-  if (Pc_StrEqIgnoreCase(key, "cfg_read"))
-  {
-    if (Pc_ParseBool(value, 0U) != 0U)
-    {
-      SOEM_RequestParameterReadAll();
-      g_pcCmd.parameterReadPending = 1U;
-      g_pcCmd.parameterReadStartMs = HAL_GetTick();
-      Pc_ReplyConfigSnapshot();
-    }
-    return;
-  }
-
-  if (Pc_StrEqIgnoreCase(key, "param_read_all"))
-  {
-    if (Pc_ParseBool(value, 0U) != 0U)
-    {
-      SOEM_RequestParameterReadAll();
-      g_pcCmd.parameterReadPending = 1U;
-      g_pcCmd.parameterReadStartMs = HAL_GetTick();
-    }
-    return;
-  }
-
-  if (Pc_StrEqIgnoreCase(key, "param_save"))
-  {
-    if (Pc_ParseBool(value, 0U) != 0U)
-    {
-      Pc_SaveParameterToFlash();
-      Pc_SyncTouchGfxModel();
-      Pc_ReplyConfigSnapshot();
-    }
-    return;
-  }
-
-  if (Pc_StrEqIgnoreCase(key, "param_load"))
-  {
-    if (Pc_ParseBool(value, 0U) != 0U)
-    {
-      UiFlashParameterData parameterData;
-      uint8_t i;
-      if (UiFlashStorage_LoadParameter(&parameterData) != 0U)
-      {
-        for (i = 0U; i < PC_PARAM_COUNT; i++)
-        {
-          g_pcCmd.parameterValues[i] = parameterData.values[i];
-        }
-        Pc_SyncTouchGfxModel();
-        Pc_ReplyConfigSnapshot();
-      }
-    }
-    return;
-  }
-
-  if (Pc_StrEqIgnoreCase(key, "prog_pos1"))          { g_pcCmd.programValues[PC_PROG_POS1] = Pc_ParseInt32(value, g_pcCmd.programValues[PC_PROG_POS1]); return; }
-  if (Pc_StrEqIgnoreCase(key, "prog_pos2"))          { g_pcCmd.programValues[PC_PROG_POS2] = Pc_ParseInt32(value, g_pcCmd.programValues[PC_PROG_POS2]); return; }
-  if (Pc_StrEqIgnoreCase(key, "prog_pos3"))          { g_pcCmd.programValues[PC_PROG_POS3] = Pc_ParseInt32(value, g_pcCmd.programValues[PC_PROG_POS3]); return; }
-  if (Pc_StrEqIgnoreCase(key, "prog_speed1"))        { g_pcCmd.programValues[PC_PROG_SPEED1] = Pc_ParseInt32(value, g_pcCmd.programValues[PC_PROG_SPEED1]); return; }
-  if (Pc_StrEqIgnoreCase(key, "prog_speed2"))        { g_pcCmd.programValues[PC_PROG_SPEED2] = Pc_ParseInt32(value, g_pcCmd.programValues[PC_PROG_SPEED2]); return; }
-  if (Pc_StrEqIgnoreCase(key, "prog_speed3"))        { g_pcCmd.programValues[PC_PROG_SPEED3] = Pc_ParseInt32(value, g_pcCmd.programValues[PC_PROG_SPEED3]); return; }
-  if (Pc_StrEqIgnoreCase(key, "prog_torque1"))       { g_pcCmd.programValues[PC_PROG_TORQUE1] = Pc_ParseInt32(value, g_pcCmd.programValues[PC_PROG_TORQUE1]); return; }
-  if (Pc_StrEqIgnoreCase(key, "prog_torque2"))       { g_pcCmd.programValues[PC_PROG_TORQUE2] = Pc_ParseInt32(value, g_pcCmd.programValues[PC_PROG_TORQUE2]); return; }
-  if (Pc_StrEqIgnoreCase(key, "prog_torque3"))       { g_pcCmd.programValues[PC_PROG_TORQUE3] = Pc_ParseInt32(value, g_pcCmd.programValues[PC_PROG_TORQUE3]); return; }
-  if (Pc_StrEqIgnoreCase(key, "prog_return_speed"))  { g_pcCmd.programValues[PC_PROG_RETURN_SPEED] = Pc_ParseInt32(value, g_pcCmd.programValues[PC_PROG_RETURN_SPEED]); return; }
-  if (Pc_StrEqIgnoreCase(key, "prog_delay_ms"))      { g_pcCmd.programValues[PC_PROG_DELAY_MS] = Pc_ParseInt32(value, g_pcCmd.programValues[PC_PROG_DELAY_MS]); return; }
-
-  if (Pc_StrEqIgnoreCase(key, "program_save"))
-  {
-    if (Pc_ParseBool(value, 0U) != 0U)
-    {
-      Pc_SaveProgramToFlash();
-      Pc_SyncTouchGfxModel();
-      Pc_ReplyConfigSnapshot();
-    }
-    return;
-  }
-
-  if (Pc_StrEqIgnoreCase(key, "program_apply"))
-  {
-    if (Pc_ParseBool(value, 0U) != 0U)
-    {
-      Pc_SaveProgramToFlash();
-      Pc_SyncTouchGfxModel();
-      Pc_ReplyConfigSnapshot();
-    }
-    return;
-  }
-
-  if (Pc_StrEqIgnoreCase(key, "program_load"))
-  {
-    if (Pc_ParseBool(value, 0U) != 0U)
-    {
-      UiFlashProgramData programData;
-      uint8_t i;
-      if (UiFlashStorage_LoadProgram(&programData) != 0U)
-      {
-        for (i = 0U; i < PC_PROG_COUNT; i++)
-        {
-          g_pcCmd.programValues[i] = programData.values[i];
-        }
-        Pc_SyncTouchGfxModel();
-        Pc_ReplyConfigSnapshot();
-      }
-    }
-    return;
-  }
-
-  if (Pc_StrEqIgnoreCase(key, "program_start"))
-  {
-    if (Pc_ParseBool(value, 0U) != 0U)
-    {
-      if (Pc_ProgramStart() == 0U)
-      {
-        Pc_CmdReply("[CMD] program_start rejected");
-      }
-    }
-    return;
-  }
-
-  if (Pc_StrEqIgnoreCase(key, "program_stop"))
-  {
-    if (Pc_ParseBool(value, 0U) != 0U)
-    {
-      Pc_ProgramStop();
-    }
-    return;
-  }
 
   {
     char msg[96];
@@ -1237,17 +418,15 @@ static void Pc_ProcessCommandLine(char *line)
 static void Pc_CommandPollUart(void)
 {
   uint8_t ch;
+  uint16_t budget = PC_UART_RX_POLL_BUDGET;
 
-  while (g_pcUartRxTail != g_pcUartRxHead)
+  /* Keep work bounded each cycle to reduce jitter on the 1ms control loop. */
+  while (g_pcUartRxTail != g_pcUartRxHead && budget > 0U)
   {
     ch = g_pcUartRxRing[g_pcUartRxTail];
     g_pcUartRxTail = (uint16_t)((g_pcUartRxTail + 1U) % PC_UART_RX_RING_SIZE);
     Pc_CommandHandleByte(ch);
-  }
-
-  while (HAL_UART_Receive(&huart4, &ch, 1U, 0U) == HAL_OK)
-  {
-    Pc_CommandHandleByte(ch);
+    budget--;
   }
 
   Pc_CommandEnsureRxArmed();
@@ -1255,34 +434,10 @@ static void Pc_CommandPollUart(void)
 
 static void Pc_CommandTick(void)
 {
-  if (g_pcCmd.parameterReadPending != 0U)
-  {
-    int32_t values[UI_FLASH_PARAMETER_VALUE_COUNT] = {0};
-    if (SOEM_FetchParameterReadAll(values, UI_FLASH_PARAMETER_VALUE_COUNT) != 0U)
-    {
-      g_pcCmd.parameterValues[PC_PARAM_ACC_TIME] = values[1];
-      g_pcCmd.parameterValues[PC_PARAM_DEC_TIME] = values[2];
-      g_pcCmd.parameterValues[PC_PARAM_LIMIT_PLUS] = values[3];
-      g_pcCmd.parameterValues[PC_PARAM_LIMIT_MINUS] = values[4];
-      g_pcCmd.parameterValues[PC_PARAM_UNIT_SCALE] = values[5];
-      g_pcCmd.parameterValues[PC_PARAM_POSITION_GAIN] = values[7];
-      g_pcCmd.parameterReadPending = 0U;
-      Pc_HomeDiagLog("param_read_all");
-      Pc_SaveParameterToFlash();
-      Pc_SyncTouchGfxModel();
-      Pc_CmdReply("[CMD] param_read_all ok");
-      Pc_ReplyConfigSnapshot();
-    }
-    else if ((HAL_GetTick() - g_pcCmd.parameterReadStartMs) > 1800U)
-    {
-      g_pcCmd.parameterReadPending = 0U;
-      Pc_CmdReply("[CMD] param_read_all timeout");
-    }
-  }
-
-  Pc_ProgramTick();
 }
 
+/* Wi-Fi/UART7/SPI4 diagnostics are disabled in this firmware branch. */
+#if 0
 static void WIFI_UART7_LoopbackSelfTest(void)
 {
 #if WIFI_UART7_LOOPBACK_TEST
@@ -1338,7 +493,7 @@ static void WIFI_UART7_LoopbackSelfTest(void)
                  (unsigned int)rxCapture[2],
                  (unsigned int)rxCapture[3],
                  (unsigned long)pass);
-  UART4_SendText(msg);
+  USART3_SendText(msg);
 #endif
 }
 
@@ -1350,7 +505,7 @@ static void WIFI_UART7_QuickAtProbe(void)
   uint32_t probeOk = 0U;
   char msg[200];
 
-  UART4_SendText("[WIFI] Switching to UART7 for MB1400...\r\n");
+  USART3_SendText("[WIFI] Switching to UART7 for MB1400...\r\n");
 
   /* Pulse CHIP_EN to wake module before first probe. */
   HAL_GPIO_WritePin(MB1400_CHIP_EN_GPIO_Port, MB1400_CHIP_EN_Pin, GPIO_PIN_RESET);
@@ -1398,7 +553,7 @@ static void WIFI_UART7_QuickAtProbe(void)
                    (unsigned int)rxBuf[1],
                    (unsigned int)rxBuf[2],
                    (unsigned int)rxBuf[3]);
-    UART4_SendText(msg);
+    USART3_SendText(msg);
 
     if (rxOk != 0U)
     {
@@ -1409,7 +564,7 @@ static void WIFI_UART7_QuickAtProbe(void)
 
   if (probeOk == 0U)
   {
-    UART4_SendText("[WIFI] Still no response on UART7. Check PE7/PE8 AF config and SB1/SB5/SB7.\r\n");
+    USART3_SendText("[WIFI] Still no response on UART7. Check PE7/PE8 AF config and SB1/SB5/SB7.\r\n");
   }
 }
 
@@ -1468,7 +623,7 @@ static void WIFI_SPI4_GpioShortSelfTest(void)
                  (unsigned long)pdHigh,
                  (unsigned long)puLow,
                  (unsigned long)pass);
-  UART4_SendText(msg);
+  USART3_SendText(msg);
 #endif
 }
 
@@ -1684,7 +839,7 @@ static void WIFI_SPI4_LoopbackSelfTest(void)
                    (unsigned int)rxPattern[2],
                    (unsigned int)rxPattern[3],
                    (unsigned long)pass);
-    UART4_SendText(msg);
+    USART3_SendText(msg);
 
     if (pass != 0U)
     {
@@ -1699,20 +854,21 @@ static void WIFI_SPI4_LoopbackSelfTest(void)
                    sizeof(msg),
                    "[WIFI] SPI4 loopback route=%s selected\\r\\n",
                    testCases[selectedCase].name);
-    UART4_SendText(msg);
+    USART3_SendText(msg);
   }
   else
   {
-    UART4_SendText("[WIFI] SPI4 loopback no valid route found\\r\\n");
+    USART3_SendText("[WIFI] SPI4 loopback no valid route found\\r\\n");
   }
 #endif
 }
 #endif
+#endif /* Wi-Fi/UART7/SPI4 diagnostics disabled */
 
-/* Called by HAL when DMA TX completes */
+/* Called by HAL when IT TX completes */
 void HAL_UART_TxCpltCallback(UART_HandleTypeDef *huart)
 {
-  if (huart->Instance == UART4)
+  if (huart->Instance == USART3)
   {
     uart_dma_busy = 0;
   }
@@ -1720,16 +876,10 @@ void HAL_UART_TxCpltCallback(UART_HandleTypeDef *huart)
 
 void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 {
-  if (huart->Instance == UART4)
+  if (huart->Instance == USART3)
   {
-    uint16_t nextHead = (uint16_t)((g_pcUartRxHead + 1U) % PC_UART_RX_RING_SIZE);
-    if (nextHead != g_pcUartRxTail)
-    {
-      g_pcUartRxRing[g_pcUartRxHead] = g_pcUartRxByte;
-      g_pcUartRxHead = nextHead;
-    }
-
-    (void)HAL_UART_Receive_IT(&huart4, &g_pcUartRxByte, 1U);
+    UartProto_FeedRxByte(g_pcUartRxByte);
+    (void)HAL_UART_Receive_IT(&huart3, &g_pcUartRxByte, 1U);
   }
 }
 
@@ -1741,697 +891,90 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
   */
 int main(void)
 {
-
-  /* USER CODE BEGIN 1 */
-
-  /* USER CODE END 1 */
-
-  /* MPU Configuration--------------------------------------------------------*/
+  /* MPU must be configured before enabling caches */
   MPU_Config();
 
-  /* Enable the CPU Cache */
-
-  /* Enable I-Cache---------------------------------------------------------*/
   SCB_EnableICache();
-
-  /* Enable D-Cache---------------------------------------------------------*/
   SCB_EnableDCache();
 
-  /* MCU Configuration--------------------------------------------------------*/
-
-  /* Update SystemCoreClock variable according to RCC registers values. */
-  SystemCoreClockUpdate();
-
-  /* Reset of all peripherals, Initializes the Flash interface and the Systick. */
   HAL_Init();
 
-  /* USER CODE BEGIN Init */
+  SystemClock_Config();
+
   SettingsPersistence_Init();
 
-  /* USER CODE END Init */
-
-  /* USER CODE BEGIN SysInit */
-
-  /* USER CODE END SysInit */
-
-  /* Initialize all configured peripherals */
   MX_GPIO_Init();
-  MX_HPDMA1_Init();
-  MX_LTDC_Init();
-  MX_CRC_Init();
-  MX_DMA2D_Init();
-  MX_JPEG_Init();
-  MX_FLASH_Init();
-  MX_I2C1_Init();
-  MX_UART4_Init();
+  MX_USART3_Init();
   Pc_CommandEnsureRxArmed();
-  MX_UART7_Init();
-  MX_GPU2D_Init();
-  MX_ICACHE_GPU2D_Init();
-  MX_GFXMMU_Init();
-  MX_TouchGFX_Init();
-  /* Call PreOsInit function */
-  MX_TouchGFX_PreOSInit();
 
-  /* Enable LCD panel power and backlight (both were left disabled for ETH-only tests). */
-  HAL_GPIO_WritePin(LCD_EN_GPIO_Port, LCD_EN_Pin, GPIO_PIN_SET);
-  HAL_GPIO_WritePin(LCD_BL_CTRL_GPIO_Port, LCD_BL_CTRL_Pin, GPIO_PIN_SET);
-  /* USER CODE BEGIN 2 */
-  // ETH init moved to EtherCAT_Task to avoid blocking
-  /* USER CODE END 2 */
+  /* ETH init deferred to EtherCAT_Task to avoid blocking main() */
 
-  /* Init scheduler */
   osKernelInitialize();
 
-  /* USER CODE BEGIN RTOS_MUTEX */
-  /* add mutexes, ... */
-  /* USER CODE END RTOS_MUTEX */
-
-  /* USER CODE BEGIN RTOS_SEMAPHORES */
-  /* add semaphores, ... */
-  /* USER CODE END RTOS_SEMAPHORES */
-
-  /* USER CODE BEGIN RTOS_TIMERS */
-  /* start timers, add new ones, ... */
-  /* USER CODE END RTOS_TIMERS */
-
-  /* USER CODE BEGIN RTOS_QUEUES */
-  /* add queues, ... */
-  /* USER CODE END RTOS_QUEUES */
-
-  /* Create the thread(s) */
-  /* creation of defaultTask */
   defaultTaskHandle = osThreadNew(StartDefaultTask, NULL, &defaultTask_attributes);
 
-  /* creation of TouchGFXTask */
-  TouchGFXTaskHandle = osThreadNew(TouchGFX_Task, NULL, &TouchGFXTask_attributes);
-
-  /* USER CODE BEGIN RTOS_THREADS */
-  /* add threads, ... */
   static const osThreadAttr_t ethercatTask_attributes = {
     .name = "EtherCATTask",
     .stack_size = 4096 * 4,
-    .priority = (osPriority_t) osPriorityRealtime,  /* Highest — 1ms cycle critical */
+    .priority = (osPriority_t) osPriorityRealtime,
   };
   osThreadNew(EtherCAT_Task, NULL, &ethercatTask_attributes);
-  /* USER CODE END RTOS_THREADS */
 
-  /* USER CODE BEGIN RTOS_EVENTS */
-  /* add events, ... */
-  /* USER CODE END RTOS_EVENTS */
-
-  /* Start scheduler */
   osKernelStart();
 
-  /* We should never get here as control is now taken by the scheduler */
-
-  /* Infinite loop */
-  /* USER CODE BEGIN WHILE */
-  while (1)
-  {
-    /* USER CODE END WHILE */
-
-    /* USER CODE BEGIN 3 */
-  }
-  /* USER CODE END 3 */
+  while (1) {}
 }
 
 /**
-  * @brief CRC Initialization Function
-  * @param None
-  * @retval None
+  * @brief USART3 Initialization (NUCLEO-H753ZI VCP: PD8=TX, PD9=RX)
   */
-static void MX_CRC_Init(void)
+static void MX_USART3_Init(void)
 {
-
-  /* USER CODE BEGIN CRC_Init 0 */
-
-  /* USER CODE END CRC_Init 0 */
-
-  /* USER CODE BEGIN CRC_Init 1 */
-
-  /* USER CODE END CRC_Init 1 */
-  hcrc.Instance = CRC;
-  hcrc.Init.DefaultPolynomialUse = DEFAULT_POLYNOMIAL_ENABLE;
-  hcrc.Init.DefaultInitValueUse = DEFAULT_INIT_VALUE_ENABLE;
-  hcrc.Init.InputDataInversionMode = CRC_INPUTDATA_INVERSION_NONE;
-  hcrc.Init.OutputDataInversionMode = CRC_OUTPUTDATA_INVERSION_DISABLE;
-  hcrc.InputDataFormat = CRC_INPUTDATA_FORMAT_BYTES;
-  if (HAL_CRC_Init(&hcrc) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  /* USER CODE BEGIN CRC_Init 2 */
-
-  /* USER CODE END CRC_Init 2 */
-
-}
-
-/**
-  * @brief UART4 Initialization Function
-  * @param None
-  * @retval None
-  */
-static void MX_UART4_Init(void)
-{
-  huart4.Instance = UART4;
-  huart4.Init.BaudRate = 115200;
-  huart4.Init.WordLength = UART_WORDLENGTH_8B;
-  huart4.Init.StopBits = UART_STOPBITS_1;
-  huart4.Init.Parity = UART_PARITY_NONE;
-  huart4.Init.Mode = UART_MODE_TX_RX;
-  huart4.Init.HwFlowCtl = UART_HWCONTROL_NONE;
-  huart4.Init.OverSampling = UART_OVERSAMPLING_16;
-  huart4.Init.OneBitSampling = UART_ONE_BIT_SAMPLE_DISABLE;
-  huart4.Init.ClockPrescaler = UART_PRESCALER_DIV1;
-  huart4.AdvancedInit.AdvFeatureInit = UART_ADVFEATURE_NO_INIT;
-  if (HAL_UART_Init(&huart4) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  if (HAL_UARTEx_SetTxFifoThreshold(&huart4, UART_TXFIFO_THRESHOLD_1_8) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  if (HAL_UARTEx_SetRxFifoThreshold(&huart4, UART_RXFIFO_THRESHOLD_1_8) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  if (HAL_UARTEx_DisableFifoMode(&huart4) != HAL_OK)
+  huart3.Instance = USART3;
+  huart3.Init.BaudRate = 921600;
+  huart3.Init.WordLength = UART_WORDLENGTH_8B;
+  huart3.Init.StopBits = UART_STOPBITS_1;
+  huart3.Init.Parity = UART_PARITY_NONE;
+  huart3.Init.Mode = UART_MODE_TX_RX;
+  huart3.Init.HwFlowCtl = UART_HWCONTROL_NONE;
+  huart3.Init.OverSampling = UART_OVERSAMPLING_16;
+  huart3.Init.OneBitSampling = UART_ONE_BIT_SAMPLE_DISABLE;
+  huart3.AdvancedInit.AdvFeatureInit = UART_ADVFEATURE_NO_INIT;
+  if (HAL_UART_Init(&huart3) != HAL_OK)
   {
     Error_Handler();
   }
 }
 
 /**
-  * @brief UART7 Initialization Function
-  * @param None
-  * @retval None
-  */
-static void MX_UART7_Init(void)
-{
-  huart7.Instance = UART7;
-  huart7.Init.BaudRate = 115200;
-  huart7.Init.WordLength = UART_WORDLENGTH_8B;
-  huart7.Init.StopBits = UART_STOPBITS_1;
-  huart7.Init.Parity = UART_PARITY_NONE;
-  huart7.Init.Mode = UART_MODE_TX_RX;
-  huart7.Init.HwFlowCtl = UART_HWCONTROL_NONE;
-  huart7.Init.OverSampling = UART_OVERSAMPLING_16;
-  huart7.Init.OneBitSampling = UART_ONE_BIT_SAMPLE_DISABLE;
-  huart7.Init.ClockPrescaler = UART_PRESCALER_DIV1;
-  huart7.AdvancedInit.AdvFeatureInit = UART_ADVFEATURE_NO_INIT;
-  if (HAL_UART_Init(&huart7) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  if (HAL_UARTEx_SetTxFifoThreshold(&huart7, UART_TXFIFO_THRESHOLD_1_8) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  if (HAL_UARTEx_SetRxFifoThreshold(&huart7, UART_RXFIFO_THRESHOLD_1_8) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  if (HAL_UARTEx_DisableFifoMode(&huart7) != HAL_OK)
-  {
-    Error_Handler();
-  }
-}
-
-/**
-  * @brief DMA2D Initialization Function
-  * @param None
-  * @retval None
-  */
-static void MX_DMA2D_Init(void)
-{
-
-  /* USER CODE BEGIN DMA2D_Init 0 */
-
-  /* USER CODE END DMA2D_Init 0 */
-
-  /* USER CODE BEGIN DMA2D_Init 1 */
-
-  /* USER CODE END DMA2D_Init 1 */
-  hdma2d.Instance = DMA2D;
-  hdma2d.Init.Mode = DMA2D_R2M;
-  hdma2d.Init.ColorMode = DMA2D_OUTPUT_RGB888;
-  hdma2d.Init.OutputOffset = 0;
-  if (HAL_DMA2D_Init(&hdma2d) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  /* USER CODE BEGIN DMA2D_Init 2 */
-
-  /* USER CODE END DMA2D_Init 2 */
-
-}
-
-/**
-  * @brief FLASH Initialization Function
-  * @param None
-  * @retval None
-  */
-static void MX_FLASH_Init(void)
-{
-
-  /* USER CODE BEGIN FLASH_Init 0 */
-
-  /* USER CODE END FLASH_Init 0 */
-
-  FLASH_OBProgramInitTypeDef pOBInit = {0};
-
-  /* USER CODE BEGIN FLASH_Init 1 */
-
-  /* USER CODE END FLASH_Init 1 */
-  HAL_FLASHEx_OBGetConfig(&pOBInit);
-  if ((pOBInit.USERConfig1 & OB_IWDG_SW) != OB_IWDG_SW||
-(pOBInit.USERConfig1 & OB_XSPI1_HSLV_ENABLE) != OB_XSPI1_HSLV_ENABLE||
-(pOBInit.USERConfig1 & OB_XSPI2_HSLV_ENABLE) != OB_XSPI2_HSLV_ENABLE||
-(pOBInit.USERConfig2 & OB_I2C_NI3C_I2C) != OB_I2C_NI3C_I2C)
-  {
-  if (HAL_FLASH_Unlock() != HAL_OK)
-  {
-    Error_Handler();
-  }
-  if (HAL_FLASH_OB_Unlock() != HAL_OK)
-  {
-    Error_Handler();
-  }
-  pOBInit.OptionType = OPTIONBYTE_USER;
-  pOBInit.USERType = OB_USER_IWDG_SW|OB_USER_XSPI1_HSLV
-                              |OB_USER_XSPI2_HSLV|OB_USER_I2C_NI3C;
-  pOBInit.USERConfig1 = OB_IWDG_SW|OB_XSPI1_HSLV_ENABLE
-                              |OB_XSPI2_HSLV_ENABLE;
-  pOBInit.USERConfig2 = OB_I2C_NI3C_I2C;
-  if (HAL_FLASHEx_OBProgram(&pOBInit) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  if (HAL_FLASH_OB_Lock() != HAL_OK)
-  {
-    Error_Handler();
-  }
-  if (HAL_FLASH_Lock() != HAL_OK)
-  {
-    Error_Handler();
-  }
-  }
-  /* USER CODE BEGIN FLASH_Init 2 */
-
-  /* USER CODE END FLASH_Init 2 */
-
-}
-
-/**
-  * @brief GFXMMU Initialization Function
-  * @param None
-  * @retval None
-  */
-static void MX_GFXMMU_Init(void)
-{
-
-  /* USER CODE BEGIN GFXMMU_Init 0 */
-
-  /* USER CODE END GFXMMU_Init 0 */
-
-  GFXMMU_PackingTypeDef pPacking = {0};
-
-  /* USER CODE BEGIN GFXMMU_Init 1 */
-
-  /* USER CODE END GFXMMU_Init 1 */
-  hgfxmmu.Instance = GFXMMU;
-  hgfxmmu.Init.BlockSize = GFXMMU_12BYTE_BLOCKS;
-  hgfxmmu.Init.DefaultValue = 0;
-  hgfxmmu.Init.AddressTranslation = DISABLE;
-  hgfxmmu.Init.Buffers.Buf0Address = 0x90000000;
-  hgfxmmu.Init.Buffers.Buf1Address = 0x90200000;
-  hgfxmmu.Init.Buffers.Buf2Address = 0;
-  hgfxmmu.Init.Buffers.Buf3Address = 0;
-  hgfxmmu.Init.Interrupts.Activation = DISABLE;
-  if (HAL_GFXMMU_Init(&hgfxmmu) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  pPacking.Buffer0Activation = ENABLE;
-  pPacking.Buffer0Mode = GFXMMU_PACKING_MSB_REMOVE;
-  pPacking.Buffer1Activation = ENABLE;
-  pPacking.Buffer1Mode = GFXMMU_PACKING_MSB_REMOVE;
-  pPacking.Buffer2Activation = DISABLE;
-  pPacking.Buffer2Mode = GFXMMU_PACKING_MSB_REMOVE;
-  pPacking.Buffer3Activation = DISABLE;
-  pPacking.Buffer3Mode = GFXMMU_PACKING_MSB_REMOVE;
-  pPacking.DefaultAlpha = 0xFF;
-  if (HAL_GFXMMU_ConfigPacking(&hgfxmmu, &pPacking) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  /* USER CODE BEGIN GFXMMU_Init 2 */
-
-  /* USER CODE END GFXMMU_Init 2 */
-
-}
-
-/**
-  * @brief GPU2D Initialization Function
-  * @param None
-  * @retval None
-  */
-static void MX_GPU2D_Init(void)
-{
-
-  /* USER CODE BEGIN GPU2D_Init 0 */
-
-  /* USER CODE END GPU2D_Init 0 */
-
-  /* USER CODE BEGIN GPU2D_Init 1 */
-
-  /* USER CODE END GPU2D_Init 1 */
-  hgpu2d.Instance = GPU2D;
-  if (HAL_GPU2D_Init(&hgpu2d) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  /* USER CODE BEGIN GPU2D_Init 2 */
-
-  /* USER CODE END GPU2D_Init 2 */
-
-}
-
-/**
-  * @brief HPDMA1 Initialization Function
-  * @param None
-  * @retval None
-  */
-static void MX_HPDMA1_Init(void)
-{
-
-  /* USER CODE BEGIN HPDMA1_Init 0 */
-
-  /* USER CODE END HPDMA1_Init 0 */
-
-  /* Peripheral clock enable */
-  __HAL_RCC_HPDMA1_CLK_ENABLE();
-
-  /* HPDMA1 interrupt Init */
-    HAL_NVIC_SetPriority(HPDMA1_Channel0_IRQn, 6, 0);
-    HAL_NVIC_EnableIRQ(HPDMA1_Channel0_IRQn);
-    HAL_NVIC_SetPriority(HPDMA1_Channel1_IRQn, 6, 0);
-    HAL_NVIC_EnableIRQ(HPDMA1_Channel1_IRQn);
-
-  /* USER CODE BEGIN HPDMA1_Init 1 */
-
-  /* USER CODE END HPDMA1_Init 1 */
-  /* USER CODE BEGIN HPDMA1_Init 2 */
-
-  /* USER CODE END HPDMA1_Init 2 */
-
-}
-
-/**
-  * @brief I2C1 Initialization Function
-  * @param None
-  * @retval None
-  */
-static void MX_I2C1_Init(void)
-{
-
-  /* USER CODE BEGIN I2C1_Init 0 */
-
-  /* USER CODE END I2C1_Init 0 */
-
-  /* USER CODE BEGIN I2C1_Init 1 */
-
-  /* USER CODE END I2C1_Init 1 */
-  hi2c1.Instance = I2C1;
-  hi2c1.Init.Timing = 0x00E063FF;
-  hi2c1.Init.OwnAddress1 = 0;
-  hi2c1.Init.AddressingMode = I2C_ADDRESSINGMODE_7BIT;
-  hi2c1.Init.DualAddressMode = I2C_DUALADDRESS_DISABLE;
-  hi2c1.Init.OwnAddress2 = 0;
-  hi2c1.Init.OwnAddress2Masks = I2C_OA2_NOMASK;
-  hi2c1.Init.GeneralCallMode = I2C_GENERALCALL_DISABLE;
-  hi2c1.Init.NoStretchMode = I2C_NOSTRETCH_DISABLE;
-  if (HAL_I2C_Init(&hi2c1) != HAL_OK)
-  {
-    Error_Handler();
-  }
-
-  /** Configure Analogue filter
-  */
-  if (HAL_I2CEx_ConfigAnalogFilter(&hi2c1, I2C_ANALOGFILTER_ENABLE) != HAL_OK)
-  {
-    Error_Handler();
-  }
-
-  /** Configure Digital filter
-  */
-  if (HAL_I2CEx_ConfigDigitalFilter(&hi2c1, 0) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  /* USER CODE BEGIN I2C1_Init 2 */
-
-  /* USER CODE END I2C1_Init 2 */
-
-}
-
-/**
-  * @brief ICACHE_GPU2D Initialization Function
-  * @param None
-  * @retval None
-  */
-static void MX_ICACHE_GPU2D_Init(void)
-{
-
-  /* USER CODE BEGIN ICACHE_GPU2D_Init 0 */
-
-  /* USER CODE END ICACHE_GPU2D_Init 0 */
-
-  /* USER CODE BEGIN ICACHE_GPU2D_Init 1 */
-
-  /* USER CODE END ICACHE_GPU2D_Init 1 */
-
-  /** Enable instruction cache (default 2-ways set associative cache)
-  */
-  if (HAL_ICACHE_Enable() != HAL_OK)
-  {
-    Error_Handler();
-  }
-  /* USER CODE BEGIN ICACHE_GPU2D_Init 2 */
-
-  /* USER CODE END ICACHE_GPU2D_Init 2 */
-
-}
-
-/**
-  * @brief JPEG Initialization Function
-  * @param None
-  * @retval None
-  */
-static void MX_JPEG_Init(void)
-{
-
-  /* USER CODE BEGIN JPEG_Init 0 */
-
-  /* USER CODE END JPEG_Init 0 */
-
-  /* USER CODE BEGIN JPEG_Init 1 */
-
-  /* USER CODE END JPEG_Init 1 */
-  hjpeg.Instance = JPEG;
-  if (HAL_JPEG_Init(&hjpeg) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  /* USER CODE BEGIN JPEG_Init 2 */
-
-  /* USER CODE END JPEG_Init 2 */
-
-}
-
-/**
-  * @brief LTDC Initialization Function
-  * @param None
-  * @retval None
-  */
-static void MX_LTDC_Init(void)
-{
-
-  /* USER CODE BEGIN LTDC_Init 0 */
-
-  /* USER CODE END LTDC_Init 0 */
-
-  LTDC_LayerCfgTypeDef pLayerCfg = {0};
-
-  /* USER CODE BEGIN LTDC_Init 1 */
-
-  /* USER CODE END LTDC_Init 1 */
-  hltdc.Instance = LTDC;
-  hltdc.Init.HSPolarity = LTDC_HSPOLARITY_AL;
-  hltdc.Init.VSPolarity = LTDC_VSPOLARITY_AL;
-  hltdc.Init.DEPolarity = LTDC_DEPOLARITY_AL;
-  hltdc.Init.PCPolarity = LTDC_PCPOLARITY_IPC;
-  hltdc.Init.HorizontalSync = 4;
-  hltdc.Init.VerticalSync = 4;
-  hltdc.Init.AccumulatedHBP = 12;
-  hltdc.Init.AccumulatedVBP = 12;
-  hltdc.Init.AccumulatedActiveW = 812;
-  hltdc.Init.AccumulatedActiveH = 492;
-  hltdc.Init.TotalWidth = 820;
-  hltdc.Init.TotalHeigh = 506;
-  hltdc.Init.Backcolor.Blue = 0;
-  hltdc.Init.Backcolor.Green = 0;
-  hltdc.Init.Backcolor.Red = 0;
-  if (HAL_LTDC_Init(&hltdc) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  pLayerCfg.WindowX0 = 0;
-  pLayerCfg.WindowX1 = 800;
-  pLayerCfg.WindowY0 = 0;
-  pLayerCfg.WindowY1 = 480;
-  pLayerCfg.PixelFormat = LTDC_PIXEL_FORMAT_ARGB8888;
-  pLayerCfg.Alpha = 255;
-  pLayerCfg.Alpha0 = 0;
-  pLayerCfg.BlendingFactor1 = LTDC_BLENDING_FACTOR1_CA;
-  pLayerCfg.BlendingFactor2 = LTDC_BLENDING_FACTOR2_CA;
-  pLayerCfg.FBStartAdress = GFXMMU_VIRTUAL_BUFFER0_BASE;
-  pLayerCfg.ImageWidth = 800;
-  pLayerCfg.ImageHeight = 480;
-  pLayerCfg.Backcolor.Blue = 0;
-  pLayerCfg.Backcolor.Green = 0;
-  pLayerCfg.Backcolor.Red = 0;
-  if (HAL_LTDC_ConfigLayer(&hltdc, &pLayerCfg, 0) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  /* USER CODE BEGIN LTDC_Init 2 */
-  // Reconfigure pixelformat since TouchGFX project generator does not allow setting different format for LTDC and remaining configuration
-  // This way TouchGFX runs 32BPP mode but the LTDC accesses the real framebuffer in 24BPP
-  pLayerCfg.PixelFormat = LTDC_PIXEL_FORMAT_RGB888;
-  if (HAL_LTDC_ConfigLayer(&hltdc, &pLayerCfg, 0) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  /* USER CODE END LTDC_Init 2 */
-
-}
-
-/**
-  * @brief GPIO Initialization Function
-  * @param None
-  * @retval None
+  * @brief GPIO Initialization (NUCLEO-H753ZI: LEDs PB0/PE1/PB14 + ETH port clocks)
   */
 static void MX_GPIO_Init(void)
 {
-  GPIO_InitTypeDef GPIO_InitStruct = {0};
-  /* USER CODE BEGIN MX_GPIO_Init_1 */
-  /* USER CODE END MX_GPIO_Init_1 */
+  GPIO_InitTypeDef gpio = {0};
 
-  /* GPIO Ports Clock Enable */
-  __HAL_RCC_GPIOF_CLK_ENABLE();
-  __HAL_RCC_GPIOG_CLK_ENABLE();
-  __HAL_RCC_GPIOB_CLK_ENABLE();
-  __HAL_RCC_GPIOE_CLK_ENABLE();
   __HAL_RCC_GPIOA_CLK_ENABLE();
+  __HAL_RCC_GPIOB_CLK_ENABLE();
+  __HAL_RCC_GPIOC_CLK_ENABLE();
   __HAL_RCC_GPIOD_CLK_ENABLE();
-  __HAL_RCC_GPIOO_CLK_ENABLE();  /* For user LEDs LD1(PO1), LD2(PO5) */
+  __HAL_RCC_GPIOE_CLK_ENABLE();
+  __HAL_RCC_GPIOG_CLK_ENABLE();
 
-  /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOF, FRAME_RATE_Pin|RENDER_TIME_Pin|MCU_ACTIVE_Pin|VSYNC_FREQ_Pin, GPIO_PIN_RESET);
+  /* User LEDs OFF initially */
+  HAL_GPIO_WritePin(LED_GREEN_PORT,  LED_GREEN_PIN,  GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(LED_YELLOW_PORT, LED_YELLOW_PIN, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(LED_RED_PORT,    LED_RED_PIN,    GPIO_PIN_RESET);
 
-  /*Configure GPIO pin Output Level - LCD DISABLED */
-  HAL_GPIO_WritePin(LCD_EN_GPIO_Port, LCD_EN_Pin, GPIO_PIN_RESET);
+  /* LD1 Green (PB0), LD3 Red (PB14) */
+  gpio.Pin   = LED_GREEN_PIN | LED_RED_PIN;
+  gpio.Mode  = GPIO_MODE_OUTPUT_PP;
+  gpio.Pull  = GPIO_NOPULL;
+  gpio.Speed = GPIO_SPEED_FREQ_LOW;
+  HAL_GPIO_Init(GPIOB, &gpio);
 
-  /*Configure GPIO pin Output Level - LCD Backlight DISABLED */
-  HAL_GPIO_WritePin(LCD_BL_CTRL_GPIO_Port, LCD_BL_CTRL_Pin, GPIO_PIN_RESET);
-
-  /*Configure GPIO pin Output Level - MB1400 reset deasserted (active low). */
-  HAL_GPIO_WritePin(MB1400_RESET_GPIO_Port, MB1400_RESET_Pin, GPIO_PIN_SET);
-  /*Configure GPIO pin Output Level - MB1400 RTS asserted (active low) to allow module TX. */
-  HAL_GPIO_WritePin(MB1400_RTS_GPIO_Port, MB1400_RTS_Pin, GPIO_PIN_RESET);
-  /*Configure GPIO pin Output Level - MB1400 CHIP_EN asserted (active high). */
-  HAL_GPIO_WritePin(MB1400_CHIP_EN_GPIO_Port, MB1400_CHIP_EN_Pin, GPIO_PIN_SET);
-  
-  /*Configure GPIO pin Output Level - User LEDs OFF */
-  HAL_GPIO_WritePin(GPIOO, GPIO_PIN_1 | GPIO_PIN_5, GPIO_PIN_RESET);
-
-  /*Configure GPIO pins : FRAME_RATE_Pin RENDER_TIME_Pin VSYNC_FREQ_Pin */
-  GPIO_InitStruct.Pin = FRAME_RATE_Pin|RENDER_TIME_Pin|VSYNC_FREQ_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
-  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_MEDIUM;
-  HAL_GPIO_Init(GPIOF, &GPIO_InitStruct);
-
-  /*Configure GPIO pin : MCU_ACTIVE_Pin */
-  GPIO_InitStruct.Pin = MCU_ACTIVE_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
-  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-  HAL_GPIO_Init(MCU_ACTIVE_GPIO_Port, &GPIO_InitStruct);
-  
-  /*Configure GPIO pins : PO1 (LD1 Green), PO5 (LD2 Orange) - User LEDs */
-  GPIO_InitStruct.Pin = GPIO_PIN_1 | GPIO_PIN_5;
-  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
-  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-  HAL_GPIO_Init(GPIOO, &GPIO_InitStruct);
-
-  /*Configure GPIO pin : LCD_EN_Pin */
-  GPIO_InitStruct.Pin = LCD_EN_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
-  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-  HAL_GPIO_Init(LCD_EN_GPIO_Port, &GPIO_InitStruct);
-
-  /*Configure GPIO pin : TP_IRQ_Pin */
-  GPIO_InitStruct.Pin = TP_IRQ_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_IT_FALLING;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
-  HAL_GPIO_Init(TP_IRQ_GPIO_Port, &GPIO_InitStruct);
-
-  /*Configure GPIO pin : LCD_BL_CTRL_Pin */
-  GPIO_InitStruct.Pin = LCD_BL_CTRL_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
-  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-  HAL_GPIO_Init(LCD_BL_CTRL_GPIO_Port, &GPIO_InitStruct);
-
-  /*Configure GPIO pin : MB1400_RESET_Pin */
-  GPIO_InitStruct.Pin = MB1400_RESET_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
-  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-  HAL_GPIO_Init(MB1400_RESET_GPIO_Port, &GPIO_InitStruct);
-
-  /*Configure GPIO pin : MB1400_RTS_Pin */
-  GPIO_InitStruct.Pin = MB1400_RTS_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
-  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-  HAL_GPIO_Init(MB1400_RTS_GPIO_Port, &GPIO_InitStruct);
-
-  /*Configure GPIO pin : MB1400_CHIP_EN_Pin */
-  GPIO_InitStruct.Pin = MB1400_CHIP_EN_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
-  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-  HAL_GPIO_Init(MB1400_CHIP_EN_GPIO_Port, &GPIO_InitStruct);
-
-  /*Configure GPIO pin : MB1400_INT_Pin */
-  GPIO_InitStruct.Pin = MB1400_INT_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
-  HAL_GPIO_Init(MB1400_INT_GPIO_Port, &GPIO_InitStruct);
-
-  /* EXTI interrupt init*/
-  HAL_NVIC_SetPriority(TP_IRQ_EXTI_IRQn, 7, 0);
-  HAL_NVIC_EnableIRQ(TP_IRQ_EXTI_IRQn);
-
-  /* USER CODE BEGIN MX_GPIO_Init_2 */
-  /* USER CODE END MX_GPIO_Init_2 */
+  /* LD2 Yellow (PE1) */
+  gpio.Pin = LED_YELLOW_PIN;
+  HAL_GPIO_Init(GPIOE, &gpio);
 }
 
 /* USER CODE BEGIN 4 */
@@ -2498,7 +1041,7 @@ static void MX_ETH_Init(void)
 
   g_soemErrorCode = 100;  /* Starting ETH init (10%) */
 
-  /* Note: Clock configuration is done in HAL_ETH_MspInit (stm32h7rsxx_hal_msp.c) */
+  /* Note: Clock configuration is done in HAL_ETH_MspInit (stm32h7xx_hal_msp.c) */
   
   HAL_StatusTypeDef status = HAL_ETH_Init(&heth);
   g_soemErrorCode = 120;  /* HAL_ETH_Init returned (12%) */
@@ -2593,11 +1136,11 @@ void EtherCAT_Task(void *argument)
 {
   (void)argument;
 
-  /* User LED defines: LD1 (Green) = PO1, LD2 (Orange) = PO5 */
-  #define LD1_PORT GPIOO
-  #define LD1_PIN  GPIO_PIN_1
-  #define LD2_PORT GPIOO
-  #define LD2_PIN  GPIO_PIN_5
+  /* NUCLEO-H753ZI: LD1 Green = PB0, LD2 Yellow = PE1 */
+  #define LD1_PORT LED_GREEN_PORT
+  #define LD1_PIN  LED_GREEN_PIN
+  #define LD2_PORT LED_YELLOW_PORT
+  #define LD2_PIN  LED_YELLOW_PIN
 
   /* Wait for system to stabilize */
   osDelay(500);
@@ -2611,7 +1154,7 @@ void EtherCAT_Task(void *argument)
     osDelay(100);
   }
 
-  UART4_SendText("[ETH] task start\r\n");
+  USART3_SendText("[ETH] task start\r\n");
 
   /* Initialize ETH in this task to avoid blocking main() */
   MX_ETH_Init();
@@ -2831,7 +1374,7 @@ void EtherCAT_Task(void *argument)
                            (unsigned long)txd3);
         if (len > 0)
         {
-          (void)HAL_UART_Transmit(&huart4, (uint8_t *)line, (uint16_t)len, 100);
+          (void)HAL_UART_Transmit(&huart3, (uint8_t *)line, (uint16_t)len, 100);
         }
         uartMsgCount = 1U;  /* Prevent future output */
       }
@@ -2846,16 +1389,36 @@ void EtherCAT_Task(void *argument)
   extern void osal_dwt_init(void);
   osal_dwt_init();
 
-  UART4_SendText("\r\n[SOEM] Initializing EtherCAT master...\r\n");
+  USART3_SendText("\r\n[SOEM] Initializing EtherCAT master...\r\n");
   
   /* Set up SOEM logging to UART */
-  SOEM_PortSetLog(UART4_SendText);
+  SOEM_PortSetLog(USART3_SendText);
   
   /* Initialize SOEM */
   SOEM_PortInit();
   Pc_CommandInit();
-  
-  UART4_SendText("[SOEM] Starting cyclic processing\r\n");
+  UartProto_Init(USART3_SendBinary);
+
+  /* Route SOEM log to SLIP-framed LOG packets so they appear in the Web HMI
+   * LOG panel.  Must be called after UartProto_Init so g_tx_fn is valid. */
+  SOEM_PortSetLog(UartProto_SendLog);
+
+  /* Initialize Phase 1+2 modules */
+  InterlockManager_Init();
+  PressStateMachine_Init();
+  RecipeManager_Init();
+  CycleLogger_Init();
+  AlarmManager_Init();
+  UserAuth_Init();
+  MaintCounter_Init();
+  RecipeManager_ApplyActive();
+  USART3_SendText("[PSM] Press SM + Recipe + Logger + Alarm + Auth + Maint initialized\r\n");
+
+  /* Interpolation engine — must init after AxisConfig_InitDefaults() */
+  Interp_Init();
+  USART3_SendText("[INTERP] Interpolation engine ready\r\n");
+
+  USART3_SendText("[SOEM] Starting cyclic processing\r\n");
   g_soemErrorCode = 310;  /* SOEM running */
 
   /* Precise 1ms cycle using vTaskDelayUntil */
@@ -2871,13 +1434,17 @@ void EtherCAT_Task(void *argument)
   uint64_t cyc_sum  = 0U;
   uint32_t cyc_cnt  = 0U;
   uint32_t cyc_poll_max = 0U;  /* max SOEM_PortPoll() time */
-  uint32_t tel_tick = 0U;       /* telemetry decimation counter (1 tick = 1ms cycle) */
 
   /* Main EtherCAT cycle */
   while (1)
   {
     /* Handle PC-side command lines from UART4 (LCD clone control). */
     Pc_CommandPollUart();
+
+    /* Run interpolator BEFORE SOEM poll so the new target positions are
+     * already in g_rt[ax].target_hw_out when soem_update_target_output
+     * writes them to the PDO.                                          */
+    Interp_Tick();
 
     /* Measure SOEM_PortPoll execution time */
     uint32_t poll_start = *DWT_CYCCNT_PTR;
@@ -2886,27 +1453,126 @@ void EtherCAT_Task(void *argument)
     SOEM_PortPoll();
     Pc_CommandTick();
 
-    /* Stream compact telemetry for PC GUI every 50ms. */
-    if ((tel_tick++ % 50U) == 0U)
+    /* Update interlock state and notify drive status */
+    InterlockManager_Update();
     {
-      const int32_t pos = SOEM_GetPositionActual();
-      const int32_t vel = SOEM_GetVelocityActual();
-      const int16_t tq = SOEM_GetTorqueActual();
-      const uint16_t sw = SOEM_GetStatusword();
-      const uint8_t pdo = SOEM_GetPdoReady();
-      const uint8_t run = SOEM_GetRunEnable();
-      char tel[160];
+      const uint16_t sw = SOEM_GetStatusword_Legacy();
+      uint8_t drive_op = (((sw & 0x006FU) == 0x0027U) &&
+                          (SOEM_GetRunEnable_Legacy() != 0U) &&
+                          (SOEM_GetPdoReady_Legacy() != 0U)) ? 1U : 0U;
+      PressStateMachine_NotifyDriveState(drive_op);
+    }
 
-      (void)snprintf(tel,
-                     sizeof(tel),
-                     "TEL,pos=%ld,vel=%ld,torque=%d,status=0x%04X,pdo=%u,run=%u\r\n",
-                     (long)pos,
-                     (long)vel,
-                     (int)tq,
-                     (unsigned int)sw,
-                     (unsigned int)pdo,
-                     (unsigned int)run);
-      UART4_SendText(tel);
+    /* Press state machine tick (runs only in AUTO mode) */
+    PressStateMachine_Tick();
+
+    /* ── Graph sampling (every GRAPH_SAMPLE_DIV ms) ─────────────────── */
+    g_graphDivCnt++;
+    if (g_graphDivCnt >= GRAPH_SAMPLE_DIV) {
+        g_graphDivCnt = 0U;
+        if (g_graphActive && (g_graphCount < GRAPH_BUF_MAX)) {
+            uint32_t elapsed = HAL_GetTick() - g_graphStartMs;
+            g_graphBuf[g_graphCount].pos      = (int32_t)SOEM_GetPositionActual();
+            g_graphBuf[g_graphCount].torque   = (int16_t)SOEM_GetTorqueActual();
+            g_graphBuf[g_graphCount].velocity = (int16_t)SOEM_GetVelocityActual();
+            g_graphBuf[g_graphCount].ms       = (uint16_t)(elapsed > 0xFFFFU ? 0xFFFFU : elapsed);
+            g_graphBuf[g_graphCount].step     = (uint8_t)PressStateMachine_GetState();
+            g_graphCount++;
+        }
+    }
+
+    /* Alarm manager tick: watch interlock + consecutive NG */
+    AlarmManager_Tick();
+
+    /* User auth session timeout tick */
+    UserAuth_Tick();
+
+    /* Auto-record cycle result when state transitions to CYCLE_END or CYCLE_NG */
+    {
+      static PressState_t s_prev_state = PRESS_STATE_IDLE;
+      PressState_t s_now = PressStateMachine_GetState();
+      if (s_prev_state != s_now)
+      {
+        /* ── Graph capture start/stop ─────────────────────────────────── */
+        /* Start on any transition OUT of a "rest" state (IDLE or CYCLE_NG).
+         * This handles the case where APPROACH→CONTACT happens in the same
+         * PSM_Tick() call as CycleStart(), making APPROACH invisible here. */
+        {
+            uint8_t prev_rest = (s_prev_state == PRESS_STATE_IDLE) ||
+                                (s_prev_state == PRESS_STATE_CYCLE_NG);
+            uint8_t now_active = (s_now != PRESS_STATE_IDLE) &&
+                                 (s_now != PRESS_STATE_CYCLE_NG) &&
+                                 (s_now != PRESS_STATE_CYCLE_END);
+            if (prev_rest && now_active) {
+                {
+                    char gdbg2[64];
+                    snprintf(gdbg2, sizeof(gdbg2),
+                             "[GRF] cap_start prev=%d now=%d old_cnt=%u pend=%u\r\n",
+                             (int)s_prev_state, (int)s_now,
+                             (unsigned)g_graphCount, (unsigned)g_graphSendPend);
+                    USART3_SendText(gdbg2);
+                }
+                g_graphCount    = 0U;
+                g_graphDivCnt   = 0U;
+                g_graphActive   = 1U;
+                g_graphSendPend = 0U;
+                g_graphStartMs  = HAL_GetTick();
+            }
+        }
+        if ((s_now == PRESS_STATE_CYCLE_END) ||
+            (s_now == PRESS_STATE_CYCLE_NG)  ||
+            (s_now == PRESS_STATE_ABORT)) {
+            if (g_graphActive) {
+                char gdbg3[48];
+                snprintf(gdbg3, sizeof(gdbg3), "[GRF] cap_stop state=%d cnt=%u\r\n",
+                         (int)s_now, (unsigned)g_graphCount);
+                USART3_SendText(gdbg3);
+            }
+            g_graphActive = 0U;
+        }
+
+        /* Record when CYCLE_END exits: psm_tick_cycle_end() has already called
+         * psm_record_result(), so g_last_result holds THIS cycle's values. */
+        if (((s_prev_state == PRESS_STATE_CYCLE_END) &&
+             ((s_now == PRESS_STATE_IDLE) || (s_now == PRESS_STATE_CYCLE_NG))) ||
+            ((s_prev_state == PRESS_STATE_ABORT) && (s_now == PRESS_STATE_IDLE)))
+        {
+          const PressResult_t  *res = PressStateMachine_GetLastResult();
+          const RecipeData_t   *rcp = RecipeManager_GetActive();
+          CycleRecord_t rec;
+          rec.boot_ms        = HAL_GetTick();
+          rec.cycle_number   = res->cycle_number;
+          rec.recipe_idx     = RecipeManager_GetActiveIdx();
+          rec.recipe_id      = (uint8_t)rcp->recipe_id;
+          rec.op_mode        = (uint8_t)PressStateMachine_GetMode();
+          rec._pad           = 0U;
+          rec.result         = res->result;
+          rec.peak_force_pct = res->peak_force_pct;
+          rec.end_position   = res->end_position;
+          rec.cycle_time_ms  = res->cycle_time_ms;
+          rec.alarm_id       = (uint16_t)AlarmManager_GetActive();
+          CycleLogger_Record(&rec);
+          MaintCounter_IncrementCycle();
+          /* Send RST first so PC_GUI has _lastResult before GRFE arrives */
+          Pc_CmdReply("RST,cycle=%lu,result=%d,force=%u,pos=%ld,ms=%lu",
+                      (unsigned long)res->cycle_number,
+                      (int)res->result,
+                      (unsigned int)res->peak_force_pct,
+                      (long)res->end_position,
+                      (unsigned long)res->cycle_time_ms);
+          /* Freeze sample count then start streaming AFTER RST */
+          g_graphStreamCount = g_graphCount;
+          g_graphSendPend    = 1U;
+          g_graphSendIdx     = 0U;
+          g_graphStreamDiv   = 0U;
+          {
+            char gdbg[48];
+            snprintf(gdbg, sizeof(gdbg), "[GRF] stream n=%u\r\n", (unsigned)g_graphStreamCount);
+            USART3_SendText(gdbg);
+          }
+        }
+      }
+      s_prev_state = s_now;
     }
 
     uint32_t poll_elapsed = *DWT_CYCCNT_PTR - poll_start;
@@ -2924,11 +1590,11 @@ void EtherCAT_Task(void *argument)
         char msg[128];
         snprintf(msg, sizeof(msg), "[SOEM] Slave %d: State=%d AL=0x%04X\r\n", 
                  i, current_state, soem_context.slavelist[i].ALstatuscode);
-        UART4_SendText(msg);
+        USART3_SendText(msg);
         
         if (current_state == 8)  /* EC_STATE_OPERATIONAL */
         {
-          UART4_SendText("[SOEM] Slave reached OPERATIONAL state\r\n");
+          USART3_SendText("[SOEM] Slave reached OPERATIONAL state\r\n");
           HAL_GPIO_WritePin(LD1_PORT, LD1_PIN, GPIO_PIN_SET);
         }
       }
@@ -2937,6 +1603,37 @@ void EtherCAT_Task(void *argument)
     g_slaveCount = (uint8_t)soem_context.slavecount;
     #endif
     
+    /* ── Graph streaming (1 ASCII line per GRAPH_STREAM_DIV ms) ────────── */
+    if (g_graphSendPend) {
+        g_graphStreamDiv++;
+        if (g_graphStreamDiv >= GRAPH_STREAM_DIV) {
+            g_graphStreamDiv = 0U;
+            char gline[48];
+            if (g_graphSendIdx == 0U) {
+                /* Header — use frozen count to avoid race with next cycle */
+                snprintf(gline, sizeof(gline), "GRFS,n=%u\r\n", (unsigned)g_graphStreamCount);
+                USART3_SendText(gline);
+                g_graphSendIdx = 1U;
+            } else if (g_graphSendIdx <= g_graphStreamCount) {
+                /* Data line: ms,pos,torque,velocity,step */
+                uint16_t i = g_graphSendIdx - 1U;
+                snprintf(gline, sizeof(gline), "%u,%ld,%d,%d,%u\r\n",
+                         (unsigned)g_graphBuf[i].ms,
+                         (long)    g_graphBuf[i].pos,
+                         (int)     g_graphBuf[i].torque,
+                         (int)     g_graphBuf[i].velocity,
+                         (unsigned)g_graphBuf[i].step);
+                USART3_SendText(gline);
+                g_graphSendIdx++;
+            } else {
+                /* Footer */
+                USART3_SendText("GRFE\r\n");
+                g_graphSendPend = 0U;
+                g_graphSendIdx  = 0U;
+            }
+        }
+    }
+
     /* Flush UART ring buffer (non-blocking via IT) */
     UART_LogFlush();
 
@@ -2969,7 +1666,7 @@ void EtherCAT_Task(void *argument)
                (unsigned long)avg_us, (unsigned long)min_us,
                (unsigned long)max_us, (long)jitter,
                (unsigned long)poll_us);
-      UART4_SendText(tbuf);
+      UartProto_SendLog(tbuf);
       /* Reset stats for next window */
       cyc_min = 0xFFFFFFFFU;
       cyc_max = 0U;
@@ -3159,224 +1856,160 @@ error_loop:
 void StartDefaultTask(void *argument)
 {
   /* USER CODE BEGIN 5 */
-  char wifiMsg[240];
-  const char* wifiDiag;
-  int32_t wifiDiagCode;
+  uint32_t lastWebTelMs  = 0U;
+  uint32_t lastWebPstMs  = 0U;
+  uint32_t lastSentCycle = 0U;
+  char webTel[128];
+  char webPst[192];
+  char webRst[128];
 
-#if WIFI_SPI4_LOOPBACK_TEST
-  UART4_SendText("[WIFI] SPI4 loopback mode start (set SB2/SB6/SB8 ON, short CN3 pin2(PE14 MOSI)<->pin3(PE13 MISO))\r\n");
-  WIFI_SPI4_LoopbackSelfTest();
-  UART4_SendText("[WIFI] SPI4 loopback mode done, Wi-Fi init skipped\r\n");
-  for(;;)
-  {
-    osDelay(1000);
-  }
-#endif
+  /* Wi-Fi runtime is intentionally disabled.
+   * Keep this task alive without touching EMW3080/UART7 paths. */
+  // char wifiMsg[240];
+  // const char* wifiDiag;
+  // int32_t wifiDiagCode;
+  //
+  // #if WIFI_SPI4_LOOPBACK_TEST
+  // USART3_SendText("[WIFI] SPI4 loopback mode start (set SB2/SB6/SB8 ON, short CN3 pin2(PE14 MOSI)<->pin3(PE13 MISO))\r\n");
+  // WIFI_SPI4_LoopbackSelfTest();
+  // USART3_SendText("[WIFI] SPI4 loopback mode done, Wi-Fi init skipped\r\n");
+  // for(;;)
+  // {
+  //   osDelay(1000);
+  // }
+  // #endif
+  //
+  // /* MB1400 UART mode uses UART7 on STM32H7S78-DK STMod+ routing. */
+  // USART3_SendText("[WIFI] init starting (UART7 AT sync ~14s timeout)...\r\n");
+  // WIFI_UART7_LoopbackSelfTest();
+  // WIFI_UART7_QuickAtProbe();
+  // Emw3080WebServer_Init();
+  //
+  // wifiDiag = Emw3080WebServer_GetDiagMessage();
+  // if (wifiDiag == NULL)
+  // {
+  //   wifiDiag = "n/a";
+  // }
+  //
+  // wifiDiagCode = Emw3080WebServer_GetDiagCode();
+  // if (Emw3080WebServer_IsRunning() != 0U)
+  // {
+  //   (void)snprintf(wifiMsg,
+  //                  sizeof(wifiMsg),
+  //                  "[WIFI] AP up code=%ld uart=%lu baud=%lu mux=%u msg=%s\r\n",
+  //                  (long)wifiDiagCode,
+  //                  (unsigned long)Emw3080WebServer_GetDiagActiveUart(),
+  //                  (unsigned long)Emw3080WebServer_GetDiagBaud(),
+  //                  (unsigned int)Emw3080WebServer_GetDiagMultiConnMode(),
+  //                  wifiDiag);
+  // }
+  // else
+  // {
+  //   (void)snprintf(wifiMsg,
+  //                  sizeof(wifiMsg),
+  //                  "[WIFI] AP failed code=%ld uart=%lu msg=%s (check SB1/SB5/SB7 and UART7 PE7/PE8 route)\r\n",
+  //                  (long)wifiDiagCode,
+  //                  (unsigned long)Emw3080WebServer_GetDiagActiveUart(),
+  //                  wifiDiag);
+  // }
+  // USART3_SendText(wifiMsg);
 
-  /* MB1400 UART mode uses UART7 on STM32H7S78-DK STMod+ routing. */
-  UART4_SendText("[WIFI] init starting (UART7 AT sync ~14s timeout)...\r\n");
-  WIFI_UART7_LoopbackSelfTest();
-  WIFI_UART7_QuickAtProbe();
-  Emw3080WebServer_Init();
-
-  wifiDiag = Emw3080WebServer_GetDiagMessage();
-  if (wifiDiag == NULL)
-  {
-    wifiDiag = "n/a";
-  }
-
-  wifiDiagCode = Emw3080WebServer_GetDiagCode();
-  if (Emw3080WebServer_IsRunning() != 0U)
-  {
-    (void)snprintf(wifiMsg,
-                   sizeof(wifiMsg),
-                   "[WIFI] AP up code=%ld uart=%lu baud=%lu mux=%u msg=%s\r\n",
-                   (long)wifiDiagCode,
-                   (unsigned long)Emw3080WebServer_GetDiagActiveUart(),
-                   (unsigned long)Emw3080WebServer_GetDiagBaud(),
-                   (unsigned int)Emw3080WebServer_GetDiagMultiConnMode(),
-                   wifiDiag);
-  }
-  else
-  {
-    (void)snprintf(wifiMsg,
-                   sizeof(wifiMsg),
-                   "[WIFI] AP failed code=%ld uart=%lu msg=%s (check SB1/SB5/SB7 and UART7 PE7/PE8 route)\r\n",
-                   (long)wifiDiagCode,
-                   (unsigned long)Emw3080WebServer_GetDiagActiveUart(),
-                   wifiDiag);
-  }
-  UART4_SendText(wifiMsg);
+  USART3_SendText("[WEBUI] ST-LINK UART4 bridge active\r\n");
 
   /* Infinite loop */
   for(;;)
   {
-    if (Emw3080WebServer_IsRunning() != 0U)
+    /* Drain binary SLIP RX ring and dispatch any complete packets (10ms budget) */
+    UartProto_PollRx();
+
+    /* Send 3-axis STATUS frame every 10ms (matches osDelay period below) */
+    UartProto_SendStatus();
+
+    /* ASCII telemetry disabled — binary SLIP STATUS replaces it */
+    (void)lastWebTelMs; (void)lastWebPstMs; (void)lastSentCycle;
+    (void)webTel; (void)webPst; (void)webRst;
+
+    /* Async flash save — runs here in DefaultTask, NOT in EtherCAT_Task.
+     * Flash sector erase can take >1s and would block the 1ms PDO loop.
+     * All save types collapse into one RobotFlash_Save() call that atomically
+     * writes the full 3-axis AxisParam_t[] image (home offsets included).   */
+    if (g_flashSavePending != 0U)
     {
-      Emw3080WebServer_SetCurrentPosition(SOEM_GetPositionActual());
-      Emw3080WebServer_Process();
+      g_flashSavePending = 0U;
+      (void)RobotFlash_Save();
     }
+
     osDelay(10);
   }
   /* USER CODE END 5 */
 }
 
- /* MPU Configuration */
-
+/* MPU Configuration for NUCLEO-H753ZI
+ * Region 0: ETH DMA descriptors at 0x24070000 (AXI SRAM, non-cacheable)
+ *           ETH DMA uses AXI bus → can access AXI SRAM (0x24000000)
+ *           Non-cacheable required for DMA coherency without cache flush.
+ */
 static void MPU_Config(void)
 {
-  MPU_Region_InitTypeDef MPU_InitStruct = {0};
+  MPU_Region_InitTypeDef MPU_Init = {0};
 
-  /* Disables the MPU */
   HAL_MPU_Disable();
 
-  /* Disables all MPU regions */
-  for(uint8_t i=0; i<__MPU_REGIONCOUNT; i++)
-  {
-    HAL_MPU_DisableRegion(i);
-  }
+  MPU_Init.Enable           = MPU_REGION_ENABLE;
+  MPU_Init.Number           = MPU_REGION_NUMBER0;
+  MPU_Init.BaseAddress      = 0x24070000U; /* .eth_dma section in linker script */
+  MPU_Init.Size             = MPU_REGION_SIZE_64KB;
+  MPU_Init.SubRegionDisable = 0x00U;
+  MPU_Init.TypeExtField     = MPU_TEX_LEVEL1;
+  MPU_Init.AccessPermission = MPU_REGION_FULL_ACCESS;
+  MPU_Init.DisableExec      = MPU_INSTRUCTION_ACCESS_DISABLE;
+  MPU_Init.IsShareable      = MPU_ACCESS_NOT_SHAREABLE;
+  MPU_Init.IsCacheable      = MPU_ACCESS_NOT_CACHEABLE;
+  MPU_Init.IsBufferable     = MPU_ACCESS_NOT_BUFFERABLE;
+  HAL_MPU_ConfigRegion(&MPU_Init);
 
-  /** Initializes and configures the Region and the memory to be protected
-  */
-  MPU_InitStruct.Enable = MPU_REGION_ENABLE;
-  MPU_InitStruct.Number = MPU_REGION_NUMBER0;
-  MPU_InitStruct.BaseAddress = 0x0;
-  MPU_InitStruct.Size = MPU_REGION_SIZE_4GB;
-  MPU_InitStruct.SubRegionDisable = 0x87;
-  MPU_InitStruct.TypeExtField = MPU_TEX_LEVEL0;
-  MPU_InitStruct.AccessPermission = MPU_REGION_NO_ACCESS;
-  MPU_InitStruct.DisableExec = MPU_INSTRUCTION_ACCESS_DISABLE;
-  MPU_InitStruct.IsShareable = MPU_ACCESS_SHAREABLE;
-  MPU_InitStruct.IsCacheable = MPU_ACCESS_NOT_CACHEABLE;
-  MPU_InitStruct.IsBufferable = MPU_ACCESS_NOT_BUFFERABLE;
-
-  HAL_MPU_ConfigRegion(&MPU_InitStruct);
-
-  /** Initializes and configures the Region and the memory to be protected
-  */
-  MPU_InitStruct.Number = MPU_REGION_NUMBER1;
-  MPU_InitStruct.BaseAddress = 0x70000000;
-  MPU_InitStruct.Size = MPU_REGION_SIZE_128MB;
-  MPU_InitStruct.SubRegionDisable = 0x0;
-  MPU_InitStruct.TypeExtField = MPU_TEX_LEVEL1;
-  MPU_InitStruct.AccessPermission = MPU_REGION_FULL_ACCESS;
-  MPU_InitStruct.IsShareable = MPU_ACCESS_NOT_SHAREABLE;
-  MPU_InitStruct.IsCacheable = MPU_ACCESS_CACHEABLE;
-  MPU_InitStruct.IsBufferable = MPU_ACCESS_BUFFERABLE;
-
-  HAL_MPU_ConfigRegion(&MPU_InitStruct);
-
-  /** Initializes and configures the Region and the memory to be protected
-  */
-  MPU_InitStruct.Number = MPU_REGION_NUMBER2;
-  MPU_InitStruct.Size = MPU_REGION_SIZE_2MB;
-  MPU_InitStruct.DisableExec = MPU_INSTRUCTION_ACCESS_ENABLE;
-
-  HAL_MPU_ConfigRegion(&MPU_InitStruct);
-
-  /** Initializes and configures the Region and the memory to be protected
-  */
-  MPU_InitStruct.Number = MPU_REGION_NUMBER3;
-  MPU_InitStruct.BaseAddress = 0x90000000;
-  MPU_InitStruct.Size = MPU_REGION_SIZE_32MB;
-  MPU_InitStruct.DisableExec = MPU_INSTRUCTION_ACCESS_DISABLE;
-  MPU_InitStruct.IsCacheable = MPU_ACCESS_NOT_CACHEABLE;
-  MPU_InitStruct.IsBufferable = MPU_ACCESS_NOT_BUFFERABLE;
-
-  HAL_MPU_ConfigRegion(&MPU_InitStruct);
-
-  /** Initializes and configures the Region and the memory to be protected
-  */
-  MPU_InitStruct.Number = MPU_REGION_NUMBER4;
-  MPU_InitStruct.BaseAddress = 0x20000000;
-  MPU_InitStruct.Size = MPU_REGION_SIZE_64KB;
-
-  HAL_MPU_ConfigRegion(&MPU_InitStruct);
-
-  /** Initializes and configures the Region and the memory to be protected
-  */
-  MPU_InitStruct.Number = MPU_REGION_NUMBER5;
-  MPU_InitStruct.BaseAddress = 0x24000000;
-  MPU_InitStruct.Size = MPU_REGION_SIZE_512KB;
-  MPU_InitStruct.IsShareable = MPU_ACCESS_SHAREABLE;
-  MPU_InitStruct.IsCacheable = MPU_ACCESS_CACHEABLE;
-  MPU_InitStruct.IsBufferable = MPU_ACCESS_BUFFERABLE;
-
-  HAL_MPU_ConfigRegion(&MPU_InitStruct);
-
-  /** Initializes and configures the Region and the memory to be protected
-  */
-  MPU_InitStruct.Number = MPU_REGION_NUMBER6;
-  MPU_InitStruct.BaseAddress = 0x24068000;
-  MPU_InitStruct.Size = MPU_REGION_SIZE_32KB;
-  MPU_InitStruct.TypeExtField = MPU_TEX_LEVEL1;  /* TEX=1: Normal memory */
-  MPU_InitStruct.IsShareable = MPU_ACCESS_NOT_SHAREABLE;
-  MPU_InitStruct.IsCacheable = MPU_ACCESS_NOT_CACHEABLE;   /* C=0 */
-  MPU_InitStruct.IsBufferable = MPU_ACCESS_NOT_BUFFERABLE; /* B=0 */
-  /* TEX=1,C=0,B=0 = Normal Non-cacheable (allows unaligned access) */
-
-  HAL_MPU_ConfigRegion(&MPU_InitStruct);
-
-  /** Initializes and configures the Region and the memory to be protected
-  */
-  MPU_InitStruct.Number = MPU_REGION_NUMBER7;
-  MPU_InitStruct.BaseAddress = 0x24070000;
-  MPU_InitStruct.Size = MPU_REGION_SIZE_8KB;
-
-  HAL_MPU_ConfigRegion(&MPU_InitStruct);
-
-  /** Initializes and configures the Region and the memory to be protected
-  */
-  MPU_InitStruct.Number = MPU_REGION_NUMBER8;
-  MPU_InitStruct.BaseAddress = 0x25000000;
-  MPU_InitStruct.Size = MPU_REGION_SIZE_16MB;
-  MPU_InitStruct.TypeExtField = MPU_TEX_LEVEL1;
-  MPU_InitStruct.IsShareable = MPU_ACCESS_NOT_SHAREABLE;
-  MPU_InitStruct.IsBufferable = MPU_ACCESS_NOT_BUFFERABLE;
-
-  HAL_MPU_ConfigRegion(&MPU_InitStruct);
-
-  /** Initializes and configures the Region for ETH DMA descriptors (SRAM_AHB)
-  *   Must be Device memory or Non-Cacheable for DMA coherency
-  */
-  MPU_InitStruct.Number = MPU_REGION_NUMBER9;
-  MPU_InitStruct.BaseAddress = 0x30000000;
-  MPU_InitStruct.Size = MPU_REGION_SIZE_32KB;
-  MPU_InitStruct.SubRegionDisable = 0x0;
-  MPU_InitStruct.TypeExtField = MPU_TEX_LEVEL0;
-  MPU_InitStruct.AccessPermission = MPU_REGION_FULL_ACCESS;
-  MPU_InitStruct.DisableExec = MPU_INSTRUCTION_ACCESS_DISABLE;
-  MPU_InitStruct.IsShareable = MPU_ACCESS_SHAREABLE;
-  MPU_InitStruct.IsCacheable = MPU_ACCESS_NOT_CACHEABLE;
-  MPU_InitStruct.IsBufferable = MPU_ACCESS_NOT_BUFFERABLE;
-
-  HAL_MPU_ConfigRegion(&MPU_InitStruct);
-
-  /* Enables the MPU */
   HAL_MPU_Enable(MPU_PRIVILEGED_DEFAULT);
-
 }
 
-/**
-  * @brief  Period elapsed callback in non blocking mode
-  * @note   This function is called  when TIM6 interrupt took place, inside
-  * HAL_TIM_IRQHandler(). It makes a direct call to HAL_IncTick() to increment
-  * a global variable "uwTick" used as application time base.
-  * @param  htim TIM handle
-  * @retval None
-  */
-void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
+/* SystemClock_Config: HSE 8 MHz → PLL1 → 480 MHz SYSCLK (NUCLEO-H753ZI) */
+static void SystemClock_Config(void)
 {
-  /* USER CODE BEGIN Callback 0 */
+  RCC_OscInitTypeDef osc = {0};
+  RCC_ClkInitTypeDef clk = {0};
 
-  /* USER CODE END Callback 0 */
-  if (htim->Instance == TIM6) {
-    HAL_IncTick();
-  }
-  /* USER CODE BEGIN Callback 1 */
+  HAL_PWREx_ConfigSupply(PWR_LDO_SUPPLY);
+  __HAL_PWR_VOLTAGESCALING_CONFIG(PWR_REGULATOR_VOLTAGE_SCALE1);
+  while (!__HAL_PWR_GET_FLAG(PWR_FLAG_VOSRDY)) {}
 
-  /* USER CODE END Callback 1 */
+  /* HSE + PLL1: 8 / 4 * 480 / 2 = 480 MHz */
+  osc.OscillatorType = RCC_OSCILLATORTYPE_HSE;
+  osc.HSEState       = RCC_HSE_ON;
+  osc.PLL.PLLState   = RCC_PLL_ON;
+  osc.PLL.PLLSource  = RCC_PLLSOURCE_HSE;
+  osc.PLL.PLLM       = 4U;
+  osc.PLL.PLLN       = 480U;
+  osc.PLL.PLLP       = 2U;
+  osc.PLL.PLLQ       = 4U;
+  osc.PLL.PLLR       = 2U;
+  osc.PLL.PLLRGE     = RCC_PLL1VCIRANGE_2;
+  osc.PLL.PLLVCOSEL  = RCC_PLL1VCOWIDE;
+  osc.PLL.PLLFRACN   = 0U;
+  if (HAL_RCC_OscConfig(&osc) != HAL_OK) { Error_Handler(); }
+
+  clk.ClockType      = RCC_CLOCKTYPE_HCLK | RCC_CLOCKTYPE_SYSCLK |
+                       RCC_CLOCKTYPE_PCLK1 | RCC_CLOCKTYPE_PCLK2 |
+                       RCC_CLOCKTYPE_D3PCLK1 | RCC_CLOCKTYPE_D1PCLK1;
+  clk.SYSCLKSource   = RCC_SYSCLKSOURCE_PLLCLK;
+  clk.SYSCLKDivider  = RCC_SYSCLK_DIV1;   /* D1 core = 480 MHz */
+  clk.AHBCLKDivider  = RCC_HCLK_DIV2;     /* AHB = 240 MHz */
+  clk.APB3CLKDivider = RCC_APB3_DIV2;     /* 120 MHz */
+  clk.APB1CLKDivider = RCC_APB1_DIV2;     /* 120 MHz */
+  clk.APB2CLKDivider = RCC_APB2_DIV2;     /* 120 MHz */
+  clk.APB4CLKDivider = RCC_APB4_DIV2;     /* 120 MHz */
+  if (HAL_RCC_ClockConfig(&clk, FLASH_LATENCY_4) != HAL_OK) { Error_Handler(); }
 }
+
+/* HAL_TIM_PeriodElapsedCallback defined in stm32h7xx_hal_timebase_tim.c */
 
 /**
   * @brief  This function is executed in case of error occurrence.

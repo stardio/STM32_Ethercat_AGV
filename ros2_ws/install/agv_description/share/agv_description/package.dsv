@@ -1,0 +1,6 @@
+source;share/agv_description/hook/pythonpath.ps1
+source;share/agv_description/hook/pythonpath.dsv
+source;share/agv_description/hook/pythonpath.sh
+source;../../build/agv_description/share/agv_description/hook/pythonpath_develop.ps1
+source;../../build/agv_description/share/agv_description/hook/pythonpath_develop.dsv
+source;../../build/agv_description/share/agv_description/hook/pythonpath_develop.sh

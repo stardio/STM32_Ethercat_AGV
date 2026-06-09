@@ -1,0 +1,160 @@
+[0.751s] DEBUG:colcon:Command line arguments: ['/usr/bin/colcon', 'build', '--packages-select', 'agv_description', '--symlink-install']
+[0.752s] DEBUG:colcon:Parsed command line arguments: Namespace(log_base=None, log_level=None, verb_name='build', build_base='build', install_base='install', merge_install=False, symlink_install=True, test_result_base=None, continue_on_error=False, executor='parallel', parallel_workers=16, event_handlers=None, ignore_user_meta=False, metas=['./colcon.meta'], base_paths=['.'], packages_ignore=None, packages_ignore_regex=None, paths=None, packages_up_to=None, packages_up_to_regex=None, packages_above=None, packages_above_and_dependencies=None, packages_above_depth=None, packages_select_by_dep=None, packages_skip_by_dep=None, packages_skip_up_to=None, packages_select_build_failed=False, packages_skip_build_finished=False, packages_select_test_failures=False, packages_skip_test_passed=False, packages_select=['agv_description'], packages_skip=None, packages_select_regex=None, packages_skip_regex=None, packages_start=None, packages_end=None, allow_overriding=[], cmake_args=None, cmake_target=None, cmake_target_skip_unavailable=False, cmake_clean_cache=False, cmake_clean_first=False, cmake_force_configure=False, ament_cmake_args=None, catkin_cmake_args=None, catkin_skip_building_tests=False, verb_parser=<colcon_defaults.argument_parser.defaults.DefaultArgumentsDecorator object at 0x7856074582b0>, verb_extension=<colcon_core.verb.build.BuildVerb object at 0x7856075cc9a0>, main=<bound method BuildVerb.main of <colcon_core.verb.build.BuildVerb object at 0x7856075cc9a0>>)
+[1.223s] Level 1:colcon.colcon_core.package_discovery:discover_packages(colcon_meta) check parameters
+[1.223s] Level 1:colcon.colcon_core.package_discovery:discover_packages(recursive) check parameters
+[1.224s] Level 1:colcon.colcon_core.package_discovery:discover_packages(ignore) check parameters
+[1.224s] Level 1:colcon.colcon_core.package_discovery:discover_packages(path) check parameters
+[1.224s] Level 1:colcon.colcon_core.package_discovery:discover_packages(colcon_meta) discover
+[1.224s] Level 1:colcon.colcon_core.package_discovery:discover_packages(recursive) discover
+[1.224s] INFO:colcon.colcon_core.package_discovery:Crawling recursively for packages in '/mnt/d/Ethercat_N753-6AX_AGV/ros2_ws'
+[1.226s] Level 1:colcon.colcon_core.package_identification:_identify(.) by extensions ['ignore', 'ignore_ament_install']
+[1.226s] Level 1:colcon.colcon_core.package_identification:_identify(.) by extension 'ignore'
+[1.226s] Level 1:colcon.colcon_core.package_identification:_identify(.) by extension 'ignore_ament_install'
+[1.227s] Level 1:colcon.colcon_core.package_identification:_identify(.) by extensions ['colcon_pkg']
+[1.227s] Level 1:colcon.colcon_core.package_identification:_identify(.) by extension 'colcon_pkg'
+[1.227s] Level 1:colcon.colcon_core.package_identification:_identify(.) by extensions ['colcon_meta']
+[1.228s] Level 1:colcon.colcon_core.package_identification:_identify(.) by extension 'colcon_meta'
+[1.228s] Level 1:colcon.colcon_core.package_identification:_identify(.) by extensions ['ros']
+[1.228s] Level 1:colcon.colcon_core.package_identification:_identify(.) by extension 'ros'
+[1.243s] Level 1:colcon.colcon_core.package_identification:_identify(.) by extensions ['cmake', 'python']
+[1.243s] Level 1:colcon.colcon_core.package_identification:_identify(.) by extension 'cmake'
+[1.243s] Level 1:colcon.colcon_core.package_identification:_identify(.) by extension 'python'
+[1.244s] Level 1:colcon.colcon_core.package_identification:_identify(.) by extensions ['python_setup_py']
+[1.244s] Level 1:colcon.colcon_core.package_identification:_identify(.) by extension 'python_setup_py'
+[1.246s] Level 1:colcon.colcon_core.package_identification:_identify(build) by extensions ['ignore', 'ignore_ament_install']
+[1.246s] Level 1:colcon.colcon_core.package_identification:_identify(build) by extension 'ignore'
+[1.247s] Level 1:colcon.colcon_core.package_identification:_identify(build) ignored
+[1.250s] Level 1:colcon.colcon_core.package_identification:_identify(install) by extensions ['ignore', 'ignore_ament_install']
+[1.250s] Level 1:colcon.colcon_core.package_identification:_identify(install) by extension 'ignore'
+[1.251s] Level 1:colcon.colcon_core.package_identification:_identify(install) ignored
+[1.254s] Level 1:colcon.colcon_core.package_identification:_identify(log) by extensions ['ignore', 'ignore_ament_install']
+[1.254s] Level 1:colcon.colcon_core.package_identification:_identify(log) by extension 'ignore'
+[1.255s] Level 1:colcon.colcon_core.package_identification:_identify(log) ignored
+[1.257s] Level 1:colcon.colcon_core.package_identification:_identify(src) by extensions ['ignore', 'ignore_ament_install']
+[1.257s] Level 1:colcon.colcon_core.package_identification:_identify(src) by extension 'ignore'
+[1.258s] Level 1:colcon.colcon_core.package_identification:_identify(src) by extension 'ignore_ament_install'
+[1.259s] Level 1:colcon.colcon_core.package_identification:_identify(src) by extensions ['colcon_pkg']
+[1.259s] Level 1:colcon.colcon_core.package_identification:_identify(src) by extension 'colcon_pkg'
+[1.260s] Level 1:colcon.colcon_core.package_identification:_identify(src) by extensions ['colcon_meta']
+[1.260s] Level 1:colcon.colcon_core.package_identification:_identify(src) by extension 'colcon_meta'
+[1.261s] Level 1:colcon.colcon_core.package_identification:_identify(src) by extensions ['ros']
+[1.261s] Level 1:colcon.colcon_core.package_identification:_identify(src) by extension 'ros'
+[1.264s] Level 1:colcon.colcon_core.package_identification:_identify(src) by extensions ['cmake', 'python']
+[1.264s] Level 1:colcon.colcon_core.package_identification:_identify(src) by extension 'cmake'
+[1.265s] Level 1:colcon.colcon_core.package_identification:_identify(src) by extension 'python'
+[1.265s] Level 1:colcon.colcon_core.package_identification:_identify(src) by extensions ['python_setup_py']
+[1.265s] Level 1:colcon.colcon_core.package_identification:_identify(src) by extension 'python_setup_py'
+[1.269s] Level 1:colcon.colcon_core.package_identification:_identify(src/agv_bringup) by extensions ['ignore', 'ignore_ament_install']
+[1.269s] Level 1:colcon.colcon_core.package_identification:_identify(src/agv_bringup) by extension 'ignore'
+[1.270s] Level 1:colcon.colcon_core.package_identification:_identify(src/agv_bringup) by extension 'ignore_ament_install'
+[1.272s] Level 1:colcon.colcon_core.package_identification:_identify(src/agv_bringup) by extensions ['colcon_pkg']
+[1.273s] Level 1:colcon.colcon_core.package_identification:_identify(src/agv_bringup) by extension 'colcon_pkg'
+[1.274s] Level 1:colcon.colcon_core.package_identification:_identify(src/agv_bringup) by extensions ['colcon_meta']
+[1.274s] Level 1:colcon.colcon_core.package_identification:_identify(src/agv_bringup) by extension 'colcon_meta'
+[1.275s] Level 1:colcon.colcon_core.package_identification:_identify(src/agv_bringup) by extensions ['ros']
+[1.275s] Level 1:colcon.colcon_core.package_identification:_identify(src/agv_bringup) by extension 'ros'
+[1.294s] DEBUG:colcon.colcon_core.package_identification:Failed to parse potential ROS package manifest in'src/agv_bringup': Error(s) in package 'src/agv_bringup/package.xml':
+Invalid email "agv@local" for person "AGV Team"
+[1.295s] Level 1:colcon.colcon_core.package_identification:_identify(src/agv_bringup) by extensions ['cmake', 'python']
+[1.295s] Level 1:colcon.colcon_core.package_identification:_identify(src/agv_bringup) by extension 'cmake'
+[1.296s] Level 1:colcon.colcon_core.package_identification:_identify(src/agv_bringup) by extension 'python'
+[1.298s] Level 1:colcon.colcon_core.package_identification:_identify(src/agv_bringup) by extensions ['python_setup_py']
+[1.298s] Level 1:colcon.colcon_core.package_identification:_identify(src/agv_bringup) by extension 'python_setup_py'
+[2.151s] DEBUG:colcon.colcon_core.package_identification:Package 'src/agv_bringup' with type 'python' and name 'agv_bringup'
+[2.154s] Level 1:colcon.colcon_core.package_identification:_identify(src/agv_description) by extensions ['ignore', 'ignore_ament_install']
+[2.155s] Level 1:colcon.colcon_core.package_identification:_identify(src/agv_description) by extension 'ignore'
+[2.156s] Level 1:colcon.colcon_core.package_identification:_identify(src/agv_description) by extension 'ignore_ament_install'
+[2.158s] Level 1:colcon.colcon_core.package_identification:_identify(src/agv_description) by extensions ['colcon_pkg']
+[2.158s] Level 1:colcon.colcon_core.package_identification:_identify(src/agv_description) by extension 'colcon_pkg'
+[2.159s] Level 1:colcon.colcon_core.package_identification:_identify(src/agv_description) by extensions ['colcon_meta']
+[2.159s] Level 1:colcon.colcon_core.package_identification:_identify(src/agv_description) by extension 'colcon_meta'
+[2.160s] Level 1:colcon.colcon_core.package_identification:_identify(src/agv_description) by extensions ['ros']
+[2.161s] Level 1:colcon.colcon_core.package_identification:_identify(src/agv_description) by extension 'ros'
+[2.177s] DEBUG:colcon.colcon_core.package_identification:Failed to parse potential ROS package manifest in'src/agv_description': Error(s) in package 'src/agv_description/package.xml':
+Invalid email "agv@local" for person "AGV Team"
+[2.178s] Level 1:colcon.colcon_core.package_identification:_identify(src/agv_description) by extensions ['cmake', 'python']
+[2.179s] Level 1:colcon.colcon_core.package_identification:_identify(src/agv_description) by extension 'cmake'
+[2.180s] Level 1:colcon.colcon_core.package_identification:_identify(src/agv_description) by extension 'python'
+[2.182s] Level 1:colcon.colcon_core.package_identification:_identify(src/agv_description) by extensions ['python_setup_py']
+[2.182s] Level 1:colcon.colcon_core.package_identification:_identify(src/agv_description) by extension 'python_setup_py'
+[3.116s] DEBUG:colcon.colcon_core.package_identification:Package 'src/agv_description' with type 'python' and name 'agv_description'
+[3.116s] Level 1:colcon.colcon_core.package_discovery:discover_packages(recursive) using defaults
+[3.117s] Level 1:colcon.colcon_core.package_discovery:discover_packages(ignore) discover
+[3.117s] Level 1:colcon.colcon_core.package_discovery:discover_packages(ignore) using defaults
+[3.117s] Level 1:colcon.colcon_core.package_discovery:discover_packages(path) discover
+[3.117s] Level 1:colcon.colcon_core.package_discovery:discover_packages(path) using defaults
+[3.218s] INFO:colcon.colcon_core.package_selection:Skipping not selected package 'agv_bringup' in 'src/agv_bringup'
+[3.219s] Level 1:colcon.colcon_core.package_discovery:discover_packages(prefix_path) check parameters
+[3.219s] Level 1:colcon.colcon_core.package_discovery:discover_packages(prefix_path) discover
+[3.261s] DEBUG:colcon.colcon_installed_package_information.package_discovery:Found 2 installed packages in /home/son/ros2_ws/install
+[3.262s] DEBUG:colcon.colcon_installed_package_information.package_discovery:Found 351 installed packages in /opt/ros/humble
+[3.270s] Level 1:colcon.colcon_core.package_discovery:discover_packages(prefix_path) using defaults
+[3.314s] WARNING:colcon.colcon_core.package_selection:Some selected packages are already built in one or more underlay workspaces:
+	'agv_description' is in: /home/son/ros2_ws/install/agv_description
+If a package in a merged underlay workspace is overridden and it installs headers, then all packages in the overlay must sort their include directories by workspace order. Failure to do so may result in build failures or undefined behavior at run time.
+If the overridden package is used by another package in any underlay, then the overriding package in the overlay must be API and ABI compatible or undefined behavior at run time may occur.
+
+If you understand the risks and want to override a package anyways, add the following to the command line:
+	--allow-overriding agv_description
+
+This may be promoted to an error in a future release of colcon-override-check.
+[3.315s] Level 5:colcon.colcon_core.verb:set package 'agv_description' build argument 'cmake_args' from command line to 'None'
+[3.315s] Level 5:colcon.colcon_core.verb:set package 'agv_description' build argument 'cmake_target' from command line to 'None'
+[3.316s] Level 5:colcon.colcon_core.verb:set package 'agv_description' build argument 'cmake_target_skip_unavailable' from command line to 'False'
+[3.316s] Level 5:colcon.colcon_core.verb:set package 'agv_description' build argument 'cmake_clean_cache' from command line to 'False'
+[3.316s] Level 5:colcon.colcon_core.verb:set package 'agv_description' build argument 'cmake_clean_first' from command line to 'False'
+[3.316s] Level 5:colcon.colcon_core.verb:set package 'agv_description' build argument 'cmake_force_configure' from command line to 'False'
+[3.316s] Level 5:colcon.colcon_core.verb:set package 'agv_description' build argument 'ament_cmake_args' from command line to 'None'
+[3.316s] Level 5:colcon.colcon_core.verb:set package 'agv_description' build argument 'catkin_cmake_args' from command line to 'None'
+[3.317s] Level 5:colcon.colcon_core.verb:set package 'agv_description' build argument 'catkin_skip_building_tests' from command line to 'False'
+[3.317s] DEBUG:colcon.colcon_core.verb:Building package 'agv_description' with the following arguments: {'ament_cmake_args': None, 'build_base': '/mnt/d/Ethercat_N753-6AX_AGV/ros2_ws/build/agv_description', 'catkin_cmake_args': None, 'catkin_skip_building_tests': False, 'cmake_args': None, 'cmake_clean_cache': False, 'cmake_clean_first': False, 'cmake_force_configure': False, 'cmake_target': None, 'cmake_target_skip_unavailable': False, 'install_base': '/mnt/d/Ethercat_N753-6AX_AGV/ros2_ws/install/agv_description', 'merge_install': False, 'path': '/mnt/d/Ethercat_N753-6AX_AGV/ros2_ws/src/agv_description', 'symlink_install': True, 'test_result_base': None}
+[3.317s] INFO:colcon.colcon_core.executor:Executing jobs using 'parallel' executor
+[3.318s] DEBUG:colcon.colcon_parallel_executor.executor.parallel:run_until_complete
+[3.318s] INFO:colcon.colcon_core.task.python.build:Building Python package in '/mnt/d/Ethercat_N753-6AX_AGV/ros2_ws/src/agv_description'
+[3.335s] INFO:colcon.colcon_core.plugin_system:Skipping extension 'colcon_core.shell.bat': Not used on non-Windows systems
+[3.335s] INFO:colcon.colcon_core.shell:Skip shell extension 'powershell' for command environment: Not usable outside of PowerShell
+[3.335s] DEBUG:colcon.colcon_core.shell:Skip shell extension 'dsv' for command environment
+[6.286s] DEBUG:colcon.colcon_core.event_handler.log_command:Invoking command in '/mnt/d/Ethercat_N753-6AX_AGV/ros2_ws/build/agv_description': PYTHONPATH=/mnt/d/Ethercat_N753-6AX_AGV/ros2_ws/build/agv_description/prefix_override:/usr/lib/python3/dist-packages/colcon_core/task/python/colcon_distutils_commands:/mnt/d/Ethercat_N753-6AX_AGV/ros2_ws/install/agv_description/lib/python3.10/site-packages:${PYTHONPATH} /usr/bin/python3 -W ignore:setup.py install is deprecated -W ignore:easy_install command is deprecated setup.py develop --editable --build-directory /mnt/d/Ethercat_N753-6AX_AGV/ros2_ws/build/agv_description/build --no-deps symlink_data
+[8.254s] Level 1:colcon.colcon_core.shell:create_environment_hook('agv_description', 'pythonpath_develop')
+[8.254s] INFO:colcon.colcon_core.shell:Creating environment hook '/mnt/d/Ethercat_N753-6AX_AGV/ros2_ws/build/agv_description/share/agv_description/hook/pythonpath_develop.ps1'
+[8.262s] DEBUG:colcon.colcon_core.event_handler.log_command:Invoked command in '/mnt/d/Ethercat_N753-6AX_AGV/ros2_ws/build/agv_description' returned '0': PYTHONPATH=/mnt/d/Ethercat_N753-6AX_AGV/ros2_ws/build/agv_description/prefix_override:/usr/lib/python3/dist-packages/colcon_core/task/python/colcon_distutils_commands:/mnt/d/Ethercat_N753-6AX_AGV/ros2_ws/install/agv_description/lib/python3.10/site-packages:${PYTHONPATH} /usr/bin/python3 -W ignore:setup.py install is deprecated -W ignore:easy_install command is deprecated setup.py develop --editable --build-directory /mnt/d/Ethercat_N753-6AX_AGV/ros2_ws/build/agv_description/build --no-deps symlink_data
+[8.275s] INFO:colcon.colcon_core.shell:Creating environment descriptor '/mnt/d/Ethercat_N753-6AX_AGV/ros2_ws/build/agv_description/share/agv_description/hook/pythonpath_develop.dsv'
+[8.286s] INFO:colcon.colcon_core.shell:Creating environment hook '/mnt/d/Ethercat_N753-6AX_AGV/ros2_ws/build/agv_description/share/agv_description/hook/pythonpath_develop.sh'
+[8.315s] Level 1:colcon.colcon_core.environment:checking '/mnt/d/Ethercat_N753-6AX_AGV/ros2_ws/install/agv_description' for CMake module files
+[8.358s] Level 1:colcon.colcon_core.environment:checking '/mnt/d/Ethercat_N753-6AX_AGV/ros2_ws/install/agv_description' for CMake config files
+[8.439s] Level 1:colcon.colcon_core.environment:checking '/mnt/d/Ethercat_N753-6AX_AGV/ros2_ws/install/agv_description/lib'
+[8.443s] Level 1:colcon.colcon_core.environment:checking '/mnt/d/Ethercat_N753-6AX_AGV/ros2_ws/install/agv_description/bin'
+[8.444s] Level 1:colcon.colcon_core.environment:checking '/mnt/d/Ethercat_N753-6AX_AGV/ros2_ws/install/agv_description/lib/pkgconfig/agv_description.pc'
+[8.445s] Level 1:colcon.colcon_core.environment:checking '/mnt/d/Ethercat_N753-6AX_AGV/ros2_ws/install/agv_description/lib/python3.10/site-packages'
+[8.447s] Level 1:colcon.colcon_core.shell:create_environment_hook('agv_description', 'pythonpath')
+[8.447s] INFO:colcon.colcon_core.shell:Creating environment hook '/mnt/d/Ethercat_N753-6AX_AGV/ros2_ws/install/agv_description/share/agv_description/hook/pythonpath.ps1'
+[8.459s] INFO:colcon.colcon_core.shell:Creating environment descriptor '/mnt/d/Ethercat_N753-6AX_AGV/ros2_ws/install/agv_description/share/agv_description/hook/pythonpath.dsv'
+[8.470s] INFO:colcon.colcon_core.shell:Creating environment hook '/mnt/d/Ethercat_N753-6AX_AGV/ros2_ws/install/agv_description/share/agv_description/hook/pythonpath.sh'
+[8.481s] Level 1:colcon.colcon_core.environment:checking '/mnt/d/Ethercat_N753-6AX_AGV/ros2_ws/install/agv_description/bin'
+[8.482s] Level 1:colcon.colcon_core.environment:create_environment_scripts_only(agv_description)
+[8.483s] INFO:colcon.colcon_core.shell:Creating package script '/mnt/d/Ethercat_N753-6AX_AGV/ros2_ws/install/agv_description/share/agv_description/package.ps1'
+[8.493s] INFO:colcon.colcon_core.shell:Creating package descriptor '/mnt/d/Ethercat_N753-6AX_AGV/ros2_ws/install/agv_description/share/agv_description/package.dsv'
+[8.502s] INFO:colcon.colcon_core.shell:Creating package script '/mnt/d/Ethercat_N753-6AX_AGV/ros2_ws/install/agv_description/share/agv_description/package.sh'
+[8.512s] INFO:colcon.colcon_core.shell:Creating package script '/mnt/d/Ethercat_N753-6AX_AGV/ros2_ws/install/agv_description/share/agv_description/package.bash'
+[8.522s] INFO:colcon.colcon_core.shell:Creating package script '/mnt/d/Ethercat_N753-6AX_AGV/ros2_ws/install/agv_description/share/agv_description/package.zsh'
+[8.532s] Level 1:colcon.colcon_core.environment:create_file_with_runtime_dependencies(/mnt/d/Ethercat_N753-6AX_AGV/ros2_ws/install/agv_description/share/colcon-core/packages/agv_description)
+[8.539s] DEBUG:colcon.colcon_parallel_executor.executor.parallel:closing loop
+[8.540s] DEBUG:colcon.colcon_parallel_executor.executor.parallel:loop closed
+[8.540s] DEBUG:colcon.colcon_parallel_executor.executor.parallel:run_until_complete finished with '0'
+[8.540s] DEBUG:colcon.colcon_core.event_reactor:joining thread
+[8.624s] INFO:colcon.colcon_core.plugin_system:Skipping extension 'colcon_notification.desktop_notification.notify_send': Could not find 'notify-send'
+[8.625s] INFO:colcon.colcon_core.plugin_system:Skipping extension 'colcon_notification.desktop_notification.terminal_notifier': Not used on non-Darwin systems
+[8.625s] INFO:colcon.colcon_core.plugin_system:Skipping extension 'colcon_notification.desktop_notification.win32': Not used on non-Windows systems
+[8.625s] INFO:colcon.colcon_notification.desktop_notification:Sending desktop notification using 'notify2'
+[8.626s] DEBUG:colcon.colcon_notification.desktop_notification.notify2:Failed to initialize notify2: org.freedesktop.DBus.Error.FileNotFound: Failed to connect to socket /run/user/1000/bus: No such file or directory
+[8.626s] DEBUG:colcon.colcon_core.event_reactor:joined thread
+[8.626s] INFO:colcon.colcon_core.shell:Creating prefix script '/mnt/d/Ethercat_N753-6AX_AGV/ros2_ws/install/local_setup.ps1'
+[8.631s] INFO:colcon.colcon_core.shell:Creating prefix util module '/mnt/d/Ethercat_N753-6AX_AGV/ros2_ws/install/_local_setup_util_ps1.py'
+[8.636s] INFO:colcon.colcon_core.shell:Creating prefix chain script '/mnt/d/Ethercat_N753-6AX_AGV/ros2_ws/install/setup.ps1'
+[8.652s] INFO:colcon.colcon_core.shell:Creating prefix script '/mnt/d/Ethercat_N753-6AX_AGV/ros2_ws/install/local_setup.sh'
+[8.657s] INFO:colcon.colcon_core.shell:Creating prefix util module '/mnt/d/Ethercat_N753-6AX_AGV/ros2_ws/install/_local_setup_util_sh.py'
+[8.661s] INFO:colcon.colcon_core.shell:Creating prefix chain script '/mnt/d/Ethercat_N753-6AX_AGV/ros2_ws/install/setup.sh'
+[8.677s] INFO:colcon.colcon_core.shell:Creating prefix script '/mnt/d/Ethercat_N753-6AX_AGV/ros2_ws/install/local_setup.bash'
+[8.681s] INFO:colcon.colcon_core.shell:Creating prefix chain script '/mnt/d/Ethercat_N753-6AX_AGV/ros2_ws/install/setup.bash'
+[8.697s] INFO:colcon.colcon_core.shell:Creating prefix script '/mnt/d/Ethercat_N753-6AX_AGV/ros2_ws/install/local_setup.zsh'
+[8.702s] INFO:colcon.colcon_core.shell:Creating prefix chain script '/mnt/d/Ethercat_N753-6AX_AGV/ros2_ws/install/setup.zsh'

@@ -1,0 +1,26 @@
+[1.077s] Invoking command in '/mnt/d/Ethercat_N753-6AX_AGV/ros2_ws/build/agv_description': PYTHONPATH=/mnt/d/Ethercat_N753-6AX_AGV/ros2_ws/build/agv_description/prefix_override:/usr/lib/python3/dist-packages/colcon_core/task/python/colcon_distutils_commands:/mnt/d/Ethercat_N753-6AX_AGV/ros2_ws/install/agv_description/lib/python3.10/site-packages: /usr/bin/python3 -W ignore:setup.py install is deprecated -W ignore:easy_install command is deprecated setup.py develop --editable --build-directory /mnt/d/Ethercat_N753-6AX_AGV/ros2_ws/build/agv_description/build --no-deps symlink_data
+[1.596s] running develop
+[1.713s] running egg_info
+[1.714s] creating agv_description.egg-info
+[1.715s] writing agv_description.egg-info/PKG-INFO
+[1.720s] writing dependency_links to agv_description.egg-info/dependency_links.txt
+[1.723s] writing requirements to agv_description.egg-info/requires.txt
+[1.725s] writing top-level names to agv_description.egg-info/top_level.txt
+[1.728s] writing manifest file 'agv_description.egg-info/SOURCES.txt'
+[1.765s] reading manifest file 'agv_description.egg-info/SOURCES.txt'
+[1.800s] writing manifest file 'agv_description.egg-info/SOURCES.txt'
+[1.810s] running build_ext
+[1.810s] Creating /mnt/d/Ethercat_N753-6AX_AGV/ros2_ws/install/agv_description/lib/python3.10/site-packages/agv-description.egg-link (link to .)
+[1.826s] 
+[1.827s] Installed /mnt/d/Ethercat_N753-6AX_AGV/ros2_ws/build/agv_description
+[1.829s] running symlink_data
+[1.835s] creating /mnt/d/Ethercat_N753-6AX_AGV/ros2_ws/install/agv_description/share/ament_index
+[1.836s] creating /mnt/d/Ethercat_N753-6AX_AGV/ros2_ws/install/agv_description/share/ament_index/resource_index
+[1.838s] creating /mnt/d/Ethercat_N753-6AX_AGV/ros2_ws/install/agv_description/share/ament_index/resource_index/packages
+[1.850s] symbolically linking /mnt/d/Ethercat_N753-6AX_AGV/ros2_ws/build/agv_description/resource/agv_description -> /mnt/d/Ethercat_N753-6AX_AGV/ros2_ws/install/agv_description/share/ament_index/resource_index/packages
+[1.862s] symbolically linking /mnt/d/Ethercat_N753-6AX_AGV/ros2_ws/build/agv_description/package.xml -> /mnt/d/Ethercat_N753-6AX_AGV/ros2_ws/install/agv_description/share/agv_description
+[1.869s] creating /mnt/d/Ethercat_N753-6AX_AGV/ros2_ws/install/agv_description/share/agv_description/urdf
+[1.880s] symbolically linking /mnt/d/Ethercat_N753-6AX_AGV/ros2_ws/build/agv_description/urdf/agv.urdf.xacro -> /mnt/d/Ethercat_N753-6AX_AGV/ros2_ws/install/agv_description/share/agv_description/urdf
+[1.887s] creating /mnt/d/Ethercat_N753-6AX_AGV/ros2_ws/install/agv_description/share/agv_description/launch
+[1.897s] symbolically linking /mnt/d/Ethercat_N753-6AX_AGV/ros2_ws/build/agv_description/launch/description.launch.py -> /mnt/d/Ethercat_N753-6AX_AGV/ros2_ws/install/agv_description/share/agv_description/launch
+[1.916s] Invoked command in '/mnt/d/Ethercat_N753-6AX_AGV/ros2_ws/build/agv_description' returned '0': PYTHONPATH=/mnt/d/Ethercat_N753-6AX_AGV/ros2_ws/build/agv_description/prefix_override:/usr/lib/python3/dist-packages/colcon_core/task/python/colcon_distutils_commands:/mnt/d/Ethercat_N753-6AX_AGV/ros2_ws/install/agv_description/lib/python3.10/site-packages: /usr/bin/python3 -W ignore:setup.py install is deprecated -W ignore:easy_install command is deprecated setup.py develop --editable --build-directory /mnt/d/Ethercat_N753-6AX_AGV/ros2_ws/build/agv_description/build --no-deps symlink_data

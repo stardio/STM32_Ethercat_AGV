@@ -1,0 +1,15 @@
+[3.355s] Invoking command in '/mnt/d/Ethercat_N753-6AX_AGV/ros2_ws/build/agv_description': PYTHONPATH=/mnt/d/Ethercat_N753-6AX_AGV/ros2_ws/build/agv_description/prefix_override:/usr/lib/python3/dist-packages/colcon_core/task/python/colcon_distutils_commands:/mnt/d/Ethercat_N753-6AX_AGV/ros2_ws/install/agv_description/lib/python3.10/site-packages:${PYTHONPATH} /usr/bin/python3 -W ignore:setup.py install is deprecated -W ignore:easy_install command is deprecated setup.py develop --editable --build-directory /mnt/d/Ethercat_N753-6AX_AGV/ros2_ws/build/agv_description/build --no-deps symlink_data
+[4.439s] running develop
+[4.768s] running egg_info
+[4.769s] writing agv_description.egg-info/PKG-INFO
+[4.773s] writing dependency_links to agv_description.egg-info/dependency_links.txt
+[4.778s] writing requirements to agv_description.egg-info/requires.txt
+[4.780s] writing top-level names to agv_description.egg-info/top_level.txt
+[4.825s] reading manifest file 'agv_description.egg-info/SOURCES.txt'
+[4.883s] writing manifest file 'agv_description.egg-info/SOURCES.txt'
+[4.901s] running build_ext
+[4.901s] Creating /mnt/d/Ethercat_N753-6AX_AGV/ros2_ws/install/agv_description/lib/python3.10/site-packages/agv-description.egg-link (link to .)
+[4.920s] 
+[4.921s] Installed /mnt/d/Ethercat_N753-6AX_AGV/ros2_ws/build/agv_description
+[4.923s] running symlink_data
+[5.026s] Invoked command in '/mnt/d/Ethercat_N753-6AX_AGV/ros2_ws/build/agv_description' returned '0': PYTHONPATH=/mnt/d/Ethercat_N753-6AX_AGV/ros2_ws/build/agv_description/prefix_override:/usr/lib/python3/dist-packages/colcon_core/task/python/colcon_distutils_commands:/mnt/d/Ethercat_N753-6AX_AGV/ros2_ws/install/agv_description/lib/python3.10/site-packages:${PYTHONPATH} /usr/bin/python3 -W ignore:setup.py install is deprecated -W ignore:easy_install command is deprecated setup.py develop --editable --build-directory /mnt/d/Ethercat_N753-6AX_AGV/ros2_ws/build/agv_description/build --no-deps symlink_data

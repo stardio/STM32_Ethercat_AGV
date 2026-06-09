@@ -1,6 +1,6 @@
-﻿{
-    "FlashedAtUtc":  "2026-03-20T07:51:02.5544342Z",
-    "BinPath":  "D:\\Ethercat_STM32SP\\build\\Debug\\Appli\\LCD_Test_Appli.bin",
-    "BinHash":  "538C7FDF2FDF86B24853EC1848B60136CE0E07369C3B5A8CD8CB002EBAF42B6C",
-    "Address":  "0x70000000"
+{
+  "BinHash": "58BA96117C1FFEC440F4DC93919F553C28DD4EB770C9D23F482CBF945E7CAD58",
+  "Address": "0x70000000",
+  "FlashedAtUtc": "2026-05-18T14:34:12.7372828+09:00",
+  "BinPath": "D:\\Ethercat_STM32SP\\build\\Debug\\Appli\\LCD_Test_Appli.bin"
 }

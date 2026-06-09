@@ -1,0 +1,35 @@
+# Dockerfile.build — Windows에서 Linux 실행파일 크로스빌드용
+#
+# 사용법 (Windows PowerShell / CMD):
+#   docker build -f Dockerfile.build -t robot-bridge-builder .
+#   docker run --rm -v ${PWD}/dist:/out robot-bridge-builder
+#
+# 결과: dist/robot-bridge (Linux x86_64 실행파일)
+
+FROM python:3.11-slim-bookworm
+
+WORKDIR /build
+
+# 시스템 패키지
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    binutils \
+    && rm -rf /var/lib/apt/lists/*
+
+# Python 패키지
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# 소스 파일 복사
+COPY bridge.py       .
+COPY packet_defs.py  .
+COPY slip_codec.py   .
+COPY index.html      .
+COPY robot_bridge.spec .
+
+# PyInstaller 빌드
+RUN pyinstaller robot_bridge.spec
+
+# 결과물을 /out 으로 복사 (볼륨 마운트 지점)
+RUN mkdir -p /out && cp dist/robot-bridge /out/
+
+CMD ["sh", "-c", "cp dist/robot-bridge /out/ && echo 'Build complete: /out/robot-bridge'"]

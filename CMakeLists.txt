@@ -12,7 +12,7 @@ if(NOT CMAKE_BUILD_TYPE)
 endif()
 
 # Set the project name
-project(LCD_Test C CXX ASM)
+project(Servo_Press_H753 C CXX ASM)
 message("Build type: " ${CMAKE_BUILD_TYPE})
 
 set(CMAKE_EXECUTABLE_SUFFIX_C .elf)
@@ -37,5 +37,4 @@ endif()
 set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} ${MCU_FLAGS} -Wl,--gc-sections -Wl,--print-memory-usage")
 
 # Add subdirectories
-add_subdirectory(Boot)
 add_subdirectory(Appli)

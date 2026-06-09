@@ -1,0 +1,17 @@
+[2.616s] Invoking command in '/mnt/d/Ethercat_N753-6AX_AGV/ros2_ws/build/agv_bringup': PYTHONPATH=/mnt/d/Ethercat_N753-6AX_AGV/ros2_ws/build/agv_bringup/prefix_override:/usr/lib/python3/dist-packages/colcon_core/task/python/colcon_distutils_commands:/mnt/d/Ethercat_N753-6AX_AGV/ros2_ws/install/agv_bringup/lib/python3.10/site-packages:${PYTHONPATH} /usr/bin/python3 -W ignore:setup.py install is deprecated -W ignore:easy_install command is deprecated setup.py develop --editable --build-directory /mnt/d/Ethercat_N753-6AX_AGV/ros2_ws/build/agv_bringup/build --no-deps symlink_data
+[3.652s] running develop
+[3.940s] running egg_info
+[3.941s] writing agv_bringup.egg-info/PKG-INFO
+[3.944s] writing dependency_links to agv_bringup.egg-info/dependency_links.txt
+[3.948s] writing entry points to agv_bringup.egg-info/entry_points.txt
+[3.950s] writing requirements to agv_bringup.egg-info/requires.txt
+[3.953s] writing top-level names to agv_bringup.egg-info/top_level.txt
+[4.035s] reading manifest file 'agv_bringup.egg-info/SOURCES.txt'
+[4.132s] writing manifest file 'agv_bringup.egg-info/SOURCES.txt'
+[4.148s] running build_ext
+[4.149s] Creating /mnt/d/Ethercat_N753-6AX_AGV/ros2_ws/install/agv_bringup/lib/python3.10/site-packages/agv-bringup.egg-link (link to .)
+[4.166s] Installing stm32_bridge_node script to /mnt/d/Ethercat_N753-6AX_AGV/ros2_ws/install/agv_bringup/lib/agv_bringup
+[4.180s] 
+[4.181s] Installed /mnt/d/Ethercat_N753-6AX_AGV/ros2_ws/build/agv_bringup
+[4.183s] running symlink_data
+[4.400s] Invoked command in '/mnt/d/Ethercat_N753-6AX_AGV/ros2_ws/build/agv_bringup' returned '0': PYTHONPATH=/mnt/d/Ethercat_N753-6AX_AGV/ros2_ws/build/agv_bringup/prefix_override:/usr/lib/python3/dist-packages/colcon_core/task/python/colcon_distutils_commands:/mnt/d/Ethercat_N753-6AX_AGV/ros2_ws/install/agv_bringup/lib/python3.10/site-packages:${PYTHONPATH} /usr/bin/python3 -W ignore:setup.py install is deprecated -W ignore:easy_install command is deprecated setup.py develop --editable --build-directory /mnt/d/Ethercat_N753-6AX_AGV/ros2_ws/build/agv_bringup/build --no-deps symlink_data

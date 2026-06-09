@@ -1,0 +1,12 @@
+source;share/agv_bringup/hook/path.ps1
+source;share/agv_bringup/hook/path.dsv
+source;share/agv_bringup/hook/path.sh
+source;share/agv_bringup/hook/pythonpath.ps1
+source;share/agv_bringup/hook/pythonpath.dsv
+source;share/agv_bringup/hook/pythonpath.sh
+source;share/agv_bringup/hook/pythonscriptspath.ps1
+source;share/agv_bringup/hook/pythonscriptspath.dsv
+source;share/agv_bringup/hook/pythonscriptspath.sh
+source;../../build/agv_bringup/share/agv_bringup/hook/pythonpath_develop.ps1
+source;../../build/agv_bringup/share/agv_bringup/hook/pythonpath_develop.dsv
+source;../../build/agv_bringup/share/agv_bringup/hook/pythonpath_develop.sh

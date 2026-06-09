@@ -1,2018 +1,1320 @@
+/**
+ * @file    soem_port.c
+ * @brief   3-axis EtherCAT CSP master implementation
+ *
+ * Architecture
+ * ────────────
+ *  EtherCAT_Task (1ms, Realtime)
+ *    └─ SOEM_PeriodicPoll()
+ *         ├─ ecx_send_processdata / ecx_receive_processdata
+ *         └─ for each active axis:
+ *              ├─ soem_cia402_step(ax)         CiA 402 FSM
+ *              ├─ soem_apply_pending_sdo(ax)   SDO parameter writes
+ *              ├─ soem_update_target_output(ax) ramp generator
+ *              └─ soem_update_shadows(ax)       volatile g_shadow[]
+ *
+ *  DefaultTask (low priority)
+ *    └─ SOEM_Set*(ax, …) APIs  → set pending flags / values
+ *
+ * Per-axis state is in g_rt[ax] (AxisRuntime_t).
+ * Volatile read-only shadow is in g_shadow[ax] (axis_types.h).
+ *
+ * All SDO calls use ecx_SDOwrite/read with slave = ax + 1.
+ */
+
 #include "soem_port.h"
 
 #ifdef SOEM_ENABLED
 
 #include "soem/ec_main.h"
 #include "soem/ec_type.h"
-#include "stm32h7rsxx.h"  /* For SCB_CleanDCache_by_Addr, __DSB, __ISB */
+#include "axis_config.h"
+#include "robot_config.h"
+#include "stm32h7xx.h"
 #include <limits.h>
+#include <stdarg.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <stdbool.h>
 #include <stdio.h>
 #include <string.h>
 
-#ifndef SOEM_IFNAME
-#define SOEM_IFNAME "st_eth"
-#endif
-
-#ifndef SOEM_ENABLE_PERIODIC_PDO_DEBUG
-#define SOEM_ENABLE_PERIODIC_PDO_DEBUG 0
-#endif
-
-#ifndef SOEM_ENABLE_CMD_DEBUG_LOG
-#define SOEM_ENABLE_CMD_DEBUG_LOG 0
-#endif
-
-#ifndef SOEM_TARGET_REACHED_TOLERANCE_HW
-#define SOEM_TARGET_REACHED_TOLERANCE_HW 5
-#endif
-
+/* ── Vendor SDO index defaults (override via compiler -D if drive differs) ── */
 #ifndef SOEM_POSITION_GAIN1_INDEX
 #define SOEM_POSITION_GAIN1_INDEX 0x2101U
 #endif
-
 #ifndef SOEM_POSITION_GAIN2_INDEX
 #define SOEM_POSITION_GAIN2_INDEX 0x2105U
 #endif
 
-#ifndef SOEM_POSITION_GAIN_SUBINDEX
-#define SOEM_POSITION_GAIN_SUBINDEX 0U
-#endif
+/* ── PDO structures ──────────────────────────────────────────────────────── */
 
-#ifndef SOEM_ACCDEC_MAX_MS
-#define SOEM_ACCDEC_MAX_MS 10000U
-#endif
+typedef struct __attribute__((packed)) {
+    uint16_t controlword;
+    int32_t  target_velocity;   /* CSV: 0x60FF TargetVelocity [HW counts/s] */
+} RxPDO_t;  /* Master → Slave (6 bytes) */
 
-#ifndef SOEM_SW_LIMIT_ABS_MAX_UU
-#define SOEM_SW_LIMIT_ABS_MAX_UU 1073741823L
-#endif
+typedef struct __attribute__((packed)) {
+    uint16_t statusword;
+    int32_t  position_actual;
+    int32_t  velocity_actual;
+    int16_t  torque_actual;
+} TxPDO_t;  /* Slave → Master (12 bytes) */
 
-/* Forward declaration */
-static void soem_log(const char *msg);
-static int32_t soem_clamp_hw_position(int32_t hwPos);
+/* ── Per-axis runtime state ──────────────────────────────────────────────── */
+
+typedef struct {
+    /* PDO pointers (set after ec_config_map) */
+    RxPDO_t  *rxpdo;
+    TxPDO_t  *txpdo;
+
+    /* Motion target */
+    int32_t  target_hw;         /* position ramp destination (HW counts) — unused in CSV */
+    int32_t  target_hw_out;     /* position ramp output — unused in CSV                  */
+    volatile int32_t target_vel_hw;  /* CSV target velocity [HW counts/s]                */
+
+    /* CiA 402 FSM */
+    Cia402Stage_t cia402_stage;
+    uint16_t cia402_hold_cnt;
+    uint16_t cia402_timeout_cnt;
+    uint8_t  fault_active;
+    uint16_t last_controlword;
+    uint16_t last_statusword;
+    uint8_t  last_cia402_state;
+
+    /* Run enable gate */
+    volatile uint8_t run_enable;
+
+    /* Motion profile (with SDO pending flags) */
+    volatile int32_t  ramp_velocity;              /* local ramp, no SDO   */
+    volatile int32_t  profile_velocity;
+    volatile uint8_t  profile_velocity_pending;
+    volatile int32_t  profile_accel_ms;
+    volatile uint8_t  profile_accel_pending;
+    volatile int32_t  profile_decel_ms;
+    volatile uint8_t  profile_decel_pending;
+    volatile uint16_t torque_limit;
+    volatile uint8_t  torque_limit_pending;
+
+    /* Unit scaling */
+    volatile uint8_t  unit_scale_pending;
+
+    /* Home offset */
+    volatile uint8_t  home_offset_pending;
+
+    /* Software limits */
+    volatile uint8_t  limits_pending;
+
+    /* Position gain */
+    volatile int32_t  position_gain;
+    volatile uint8_t  position_gain_pending;
+    volatile uint8_t  position_gain_read_pending;
+    volatile uint8_t  position_gain_read_done;
+    volatile int32_t  position_gain_readback;
+    volatile int32_t  position_gain_read_status;
+
+    /* Parameter bulk read */
+    volatile uint8_t  param_read_pending;
+    volatile uint8_t  param_read_done;
+    volatile int32_t  param_read_values[SOEM_PARAM_READ_COUNT];
+
+    /* SDO stability gate counter */
+    uint16_t stable_cycles;
+
+    /* Interpolator active flag — suppresses soft-limit clamp in update_target */
+    volatile uint8_t interp_active;
+
+    /* External fault-reset request (set by DefaultTask, cleared by EtherCAT_Task) */
+    volatile uint8_t fault_reset_pending;
+} AxisRuntime_t;
+
+/* ── Module globals ──────────────────────────────────────────────────────── */
 
 ecx_contextt soem_context;
-/* Keep IOmap in AXI SRAM non-cacheable region (RAM_CMD) for ETH DMA coherency.
- * ETH DMA uses AXI bus — cannot access SRAMAHB (AHB-only). */
-static uint8 soem_iomap[4096] __attribute__((section(".eth_dma"), aligned(32)));
-static uint8 soem_group = 0;
-static uint8 soem_initialized = 0;
-static uint8 soem_configured = 0;
-static uint8 soem_pdo_ready = 0;
+
+/* IOmap in non-cacheable AXI SRAM (ETH DMA coherency, MPU Region 0). */
+static uint8_t soem_iomap[4096] __attribute__((section(".eth_dma"), aligned(32)));
+static uint8_t soem_group = 0;
+
+static uint8_t g_initialized  = 0U;
+static uint8_t g_configured   = 0U;
+static uint8_t g_active_axes  = 0U;  /* how many slaves found */
+
+static AxisRuntime_t g_rt[AXIS_COUNT];
+
 static void (*soem_log_fn)(const char *msg) = NULL;
 
-typedef struct __attribute__((packed))
-{
-  uint16 controlword;
-  int32 target_position;
-} soem_rxpdo_t;
-
-typedef struct __attribute__((packed))
-{
-  uint16 statusword;
-  int32 position_actual;
-  int32 velocity_actual;
-  int16 torque_actual;
-} soem_txpdo_t;
-
-static soem_rxpdo_t *soem_rxpdo = NULL;
-static soem_txpdo_t *soem_txpdo = NULL;
-static uint16 soem_last_statusword = 0xFFFFU;
-static uint16 soem_last_controlword = 0xFFFFU;
-static int32 soem_target_position = 0;
-static int32 soem_target_position_output = 0;
-static uint8 soem_last_state = 0xFFU;
-
-/* Volatile shadow copies for safe UI access (TouchGFX) */
-static volatile int32_t  soem_shadow_position = 0;
-static volatile int32_t  soem_shadow_velocity = 0;
-static volatile int16_t  soem_shadow_torque   = 0;
-static volatile uint16_t soem_shadow_statusword = 0;
-static volatile uint8_t  soem_shadow_pdo_ready  = 0;
-static volatile uint8_t  soem_shadow_run_enable = 0;
-static volatile int32_t  soem_profile_velocity = 0;
-static volatile uint16_t soem_torque_limit_percent = 0;
-static volatile uint8_t  soem_profile_velocity_pending = 0U;
-static volatile uint8_t  soem_torque_limit_pending = 0U;
-static volatile int32_t  soem_profile_acceleration = 0;
-static volatile int32_t  soem_profile_deceleration = 0;
-static volatile uint8_t  soem_profile_acceleration_pending = 0U;
-static volatile uint8_t  soem_profile_deceleration_pending = 0U;
-static volatile int32_t  soem_limit_plus_user = INT32_MAX;
-static volatile int32_t  soem_limit_minus_user = INT32_MIN;
-static volatile int32_t  soem_limit_plus_hw = INT32_MAX;
-static volatile int32_t  soem_limit_minus_hw = INT32_MIN;
-static volatile uint8_t  soem_software_limits_pending = 0U;
-static volatile uint8_t  soem_software_limits_enabled = 0U;
-static volatile uint8_t  soem_software_limits_blocked = 0U;
-static volatile int32_t  soem_unit_scale = 1;
-static volatile uint8_t  soem_unit_scale_pending = 0U;
-static volatile uint8_t  soem_home_offset_pending = 0U;
-static volatile int32_t  soem_position_gain = 0;
-static volatile uint8_t  soem_position_gain_pending = 0U;
-static volatile uint8_t  soem_position_gain_read_pending = 0U;
-static volatile uint8_t  soem_position_gain_read_updated = 0U;
-static volatile int32_t  soem_position_gain_readback = 0;
-static volatile int32_t  soem_position_gain_read_status = 0;
-static volatile uint8_t  soem_parameter_read_all_pending = 0U;
-static volatile uint8_t  soem_parameter_read_all_updated = 0U;
-static volatile int32_t  soem_parameter_read_all_values[SOEM_PARAMETER_PAGE_VALUE_COUNT] = {0};
-
-static int soem_try_write_position_gain(uint16 index, int32_t gain, uint8_t *used16bit)
-{
-  uint32 gain32 = (uint32)gain;
-  int wkc = ecx_SDOwrite(&soem_context,
-                         1,
-                         index,
-                         SOEM_POSITION_GAIN_SUBINDEX,
-                         FALSE,
-                         sizeof(gain32),
-                         &gain32,
-                         EC_TIMEOUTRXM);
-  if (wkc > 0)
-  {
-    if (used16bit != NULL)
-    {
-      *used16bit = 0U;
-    }
-    return wkc;
-  }
-
-  uint16 gain16 = (gain > 65535) ? 65535U : (uint16)gain;
-  wkc = ecx_SDOwrite(&soem_context,
-                     1,
-                     index,
-                     SOEM_POSITION_GAIN_SUBINDEX,
-                     FALSE,
-                     sizeof(gain16),
-                     &gain16,
-                     EC_TIMEOUTRXM);
-  if ((wkc > 0) && (used16bit != NULL))
-  {
-    *used16bit = 1U;
-  }
-
-  return wkc;
-}
-
-static int soem_try_read_position_gain(uint16 index, int32_t *gainOut, uint8_t *used16bit)
-{
-  if (gainOut == NULL)
-  {
-    return 0;
-  }
-
-  uint32 gain32 = 0U;
-  int readSize = (int)sizeof(gain32);
-  int wkc = ecx_SDOread(&soem_context,
-                        1,
-                        index,
-                        SOEM_POSITION_GAIN_SUBINDEX,
-                        FALSE,
-                        &readSize,
-                        &gain32,
-                        EC_TIMEOUTRXM);
-  if (wkc > 0)
-  {
-    if ((readSize > 0) && (readSize <= (int)sizeof(uint16)))
-    {
-      *gainOut = (int32_t)((uint16)gain32);
-      if (used16bit != NULL)
-      {
-        *used16bit = 1U;
-      }
-    }
-    else
-    {
-      *gainOut = (int32_t)gain32;
-      if (used16bit != NULL)
-      {
-        *used16bit = 0U;
-      }
-    }
-    return wkc;
-  }
-
-  uint16 gain16 = 0U;
-  readSize = (int)sizeof(gain16);
-  wkc = ecx_SDOread(&soem_context,
-                    1,
-                    index,
-                    SOEM_POSITION_GAIN_SUBINDEX,
-                    FALSE,
-                    &readSize,
-                    &gain16,
-                    EC_TIMEOUTRXM);
-  if (wkc > 0)
-  {
-    *gainOut = (int32_t)gain16;
-    if (used16bit != NULL)
-    {
-      *used16bit = 1U;
-    }
-  }
-
-  return wkc;
-}
-
-static int soem_read_int32_object(uint16 index, uint8 subindex, int32_t *valueOut)
-{
-  if (valueOut == NULL)
-  {
-    return 0;
-  }
-
-  int32_t value = 0;
-  int readSize = (int)sizeof(value);
-  int wkc = ecx_SDOread(&soem_context,
-                        1,
-                        index,
-                        subindex,
-                        FALSE,
-                        &readSize,
-                        &value,
-                        EC_TIMEOUTRXM);
-  if (wkc > 0)
-  {
-    *valueOut = value;
-  }
-  return wkc;
-}
-
-static int soem_read_uint32_object(uint16 index, uint8 subindex, uint32_t *valueOut)
-{
-  if (valueOut == NULL)
-  {
-    return 0;
-  }
-
-  uint32_t value = 0U;
-  int readSize = (int)sizeof(value);
-  int wkc = ecx_SDOread(&soem_context,
-                        1,
-                        index,
-                        subindex,
-                        FALSE,
-                        &readSize,
-                        &value,
-                        EC_TIMEOUTRXM);
-  if (wkc > 0)
-  {
-    *valueOut = value;
-  }
-  return wkc;
-}
-
-static int soem_write_uint16_object(uint16 index, uint8 subindex, uint16_t value)
-{
-  return ecx_SDOwrite(&soem_context,
-                      1,
-                      index,
-                      subindex,
-                      FALSE,
-                      sizeof(value),
-                      &value,
-                      EC_TIMEOUTRXM);
-}
-
-static int soem_read_uint16_object(uint16 index, uint8 subindex, uint16_t *valueOut)
-{
-  if (valueOut == NULL)
-  {
-    return 0;
-  }
-
-  uint16_t value = 0U;
-  int readSize = (int)sizeof(value);
-  int wkc = ecx_SDOread(&soem_context,
-                        1,
-                        index,
-                        subindex,
-                        FALSE,
-                        &readSize,
-                        &value,
-                        EC_TIMEOUTRXM);
-  if (wkc > 0)
-  {
-    *valueOut = value;
-  }
-  return wkc;
-}
-
-/* Home offset: set by SOEM_SetHomePosition().
- * All position reads are relative to this origin.
- * All target writes are translated back to absolute hardware counts. */
-static volatile int32_t  soem_home_offset = 0;
-
-static void soem_latch_target_to_actual(const char *reason)
-{
-  soem_target_position = soem_clamp_hw_position((int32_t)soem_shadow_position);
-  soem_target_position_output = soem_target_position;
-  if ((reason != NULL) && (reason[0] != '\0'))
-  {
-    soem_log(reason);
-  }
-}
-
-static void soem_log_fault_diagnostics(uint16 statusword)
-{
-  char line[96];
-  uint16 faultCode = 0U;
-  uint8 faultReg = 0U;
-  int okCode = ecx_SDOread(&soem_context, 1, 0x603F, 0, FALSE, (int[]){ (int)sizeof(faultCode) }, &faultCode, EC_TIMEOUTRXM);
-  int okReg = ecx_SDOread(&soem_context, 1, 0x1001, 0, FALSE, (int[]){ (int)sizeof(faultReg) }, &faultReg, EC_TIMEOUTRXM);
-
-  if (okCode > 0)
-  {
-    (void)snprintf(line, sizeof(line), "CIA402: fault code=0x%04X status=0x%04X", faultCode, statusword);
-    soem_log(line);
-  }
-  else
-  {
-    (void)snprintf(line, sizeof(line), "CIA402: fault code read failed status=0x%04X", statusword);
-    soem_log(line);
-  }
-
-  if (okReg > 0)
-  {
-    (void)snprintf(line, sizeof(line), "CIA402: fault register=0x%02X", faultReg);
-    soem_log(line);
-  }
-
-  (void)snprintf(line, sizeof(line), "CIA402: actual=%ld target=%ld hwLimits=[%ld,%ld]",
-                 (long)soem_shadow_position,
-                 (long)soem_target_position,
-                 (long)soem_limit_minus_hw,
-                 (long)soem_limit_plus_hw);
-  soem_log(line);
-
-  (void)snprintf(line, sizeof(line), "CIA402: userLimits=[%ld,%ld] unit=%ld home=%ld limits=%s",
-                 (long)soem_limit_minus_user,
-                 (long)soem_limit_plus_user,
-                 (long)soem_unit_scale,
-                 (long)soem_home_offset,
-                 (soem_software_limits_enabled != 0U) ? "on" : "off");
-  soem_log(line);
-}
-
-/* SOEM_PortPoll is called every ~100 ms in main task. */
-#define SOEM_CIA402_HOLD_CYCLES 5U      /* ~500 ms */
-#define SOEM_CIA402_TIMEOUT_CYCLES 50U  /* ~5 s */
-
-typedef enum
-{
-  SOEM_CIA402_STAGE_SEND_SHUTDOWN = 0,
-  SOEM_CIA402_STAGE_WAIT_READY,
-  SOEM_CIA402_STAGE_SEND_SWITCH_ON,
-  SOEM_CIA402_STAGE_WAIT_SWITCHED_ON,
-  SOEM_CIA402_STAGE_SEND_ENABLE_OP,
-  SOEM_CIA402_STAGE_WAIT_OPERATION_ENABLED,
-  SOEM_CIA402_STAGE_OPERATION_ENABLED
-} soem_cia402_stage_t;
-
-static soem_cia402_stage_t soem_cia402_stage = SOEM_CIA402_STAGE_SEND_SHUTDOWN;
-static uint16 soem_cia402_hold_counter = 0U;
-static uint16 soem_cia402_timeout_counter = 0U;
-static uint8 soem_fault_active = 0U;
-
-/* Manual 1st PDO mapping: RxPDO=0x1600, TxPDO=0x1A00 */
-#define SOEM_RXPDO_ASSIGN_INDEX 0x1600U
-#define SOEM_TXPDO_ASSIGN_INDEX 0x1A00U
-#define SOEM_DC_CYCLE_NS 100000000U /* 100 ms */
-#define SOEM_DC_SHIFT_NS 0
-
-static int soem_apply_manual_pdo_mapping(uint16 slave)
-{
-  int wkc;
-  uint8 u8val;
-  uint16 u16val;
-  uint32 u32val;
-
-  /* [Step 1] Clear SM2/SM3 assignment lists */
-  u8val = 0;
-  wkc = ecx_SDOwrite(&soem_context, slave, 0x1C12, 0, FALSE, sizeof(u8val), &u8val, EC_TIMEOUTRXM);
-  if (wkc <= 0) { soem_log("PDO: SM2 clear fail"); return 0; }
-  wkc = ecx_SDOwrite(&soem_context, slave, 0x1C13, 0, FALSE, sizeof(u8val), &u8val, EC_TIMEOUTRXM);
-  if (wkc <= 0) { soem_log("PDO: SM3 clear fail"); return 0; }
-  soem_log("PDO: SM assignment cleared");
-
-  /* Small delay for slave internal processing */
-  for (volatile int d = 0; d < 500000; d++) { }
-
-  /* [Step 2] Configure RxPDO 0x1600: Controlword(16) + Target Position(32) = 6 bytes */
-  u8val = 0;
-  wkc = ecx_SDOwrite(&soem_context, slave, 0x1600, 0, FALSE, sizeof(u8val), &u8val, EC_TIMEOUTRXM);
-  if (wkc <= 0) { soem_log("PDO: 0x1600 sub0 clear fail"); return 0; }
-  u32val = 0x60400010U;  /* Controlword, 16-bit */
-  wkc = ecx_SDOwrite(&soem_context, slave, 0x1600, 1, FALSE, sizeof(u32val), &u32val, EC_TIMEOUTRXM);
-  if (wkc <= 0) { soem_log("PDO: 0x1600 sub1 fail"); return 0; }
-  u32val = 0x607A0020U;  /* Target Position, 32-bit */
-  wkc = ecx_SDOwrite(&soem_context, slave, 0x1600, 2, FALSE, sizeof(u32val), &u32val, EC_TIMEOUTRXM);
-  if (wkc <= 0) { soem_log("PDO: 0x1600 sub2 fail"); return 0; }
-  u8val = 2;
-  wkc = ecx_SDOwrite(&soem_context, slave, 0x1600, 0, FALSE, sizeof(u8val), &u8val, EC_TIMEOUTRXM);
-  if (wkc <= 0) { soem_log("PDO: 0x1600 sub0 set fail"); return 0; }
-  soem_log("PDO: RxPDO 0x1600 configured (6 bytes)");
-
-  /* [Step 3] Configure TxPDO 0x1A00: Statusword(16) + Position(32) + Velocity(32) + Torque(16) = 12 bytes */
-  u8val = 0;
-  wkc = ecx_SDOwrite(&soem_context, slave, 0x1A00, 0, FALSE, sizeof(u8val), &u8val, EC_TIMEOUTRXM);
-  if (wkc <= 0) { soem_log("PDO: 0x1A00 sub0 clear fail"); return 0; }
-  u32val = 0x60410010U;  /* Statusword, 16-bit */
-  wkc = ecx_SDOwrite(&soem_context, slave, 0x1A00, 1, FALSE, sizeof(u32val), &u32val, EC_TIMEOUTRXM);
-  if (wkc <= 0) { soem_log("PDO: 0x1A00 sub1 fail"); return 0; }
-  u32val = 0x60640020U;  /* Actual Position, 32-bit */
-  wkc = ecx_SDOwrite(&soem_context, slave, 0x1A00, 2, FALSE, sizeof(u32val), &u32val, EC_TIMEOUTRXM);
-  if (wkc <= 0) { soem_log("PDO: 0x1A00 sub2 fail"); return 0; }
-  u32val = 0x606C0020U;  /* Actual Velocity, 32-bit */
-  wkc = ecx_SDOwrite(&soem_context, slave, 0x1A00, 3, FALSE, sizeof(u32val), &u32val, EC_TIMEOUTRXM);
-  if (wkc <= 0) { soem_log("PDO: 0x1A00 sub3 fail"); return 0; }
-  u32val = 0x60770010U;  /* Actual Torque, 16-bit */
-  wkc = ecx_SDOwrite(&soem_context, slave, 0x1A00, 4, FALSE, sizeof(u32val), &u32val, EC_TIMEOUTRXM);
-  if (wkc <= 0) { soem_log("PDO: 0x1A00 sub4 fail"); return 0; }
-  u8val = 4;
-  wkc = ecx_SDOwrite(&soem_context, slave, 0x1A00, 0, FALSE, sizeof(u8val), &u8val, EC_TIMEOUTRXM);
-  if (wkc <= 0) { soem_log("PDO: 0x1A00 sub0 set fail"); return 0; }
-  soem_log("PDO: TxPDO 0x1A00 configured (12 bytes)");
-
-  /* [Step 4] Assign PDOs to SM2/SM3 */
-  u16val = 0x1600U;
-  wkc = ecx_SDOwrite(&soem_context, slave, 0x1C12, 1, FALSE, sizeof(u16val), &u16val, EC_TIMEOUTRXM);
-  if (wkc <= 0) { soem_log("PDO: SM2 assign fail"); return 0; }
-  u16val = 0x1A00U;
-  wkc = ecx_SDOwrite(&soem_context, slave, 0x1C13, 1, FALSE, sizeof(u16val), &u16val, EC_TIMEOUTRXM);
-  if (wkc <= 0) { soem_log("PDO: SM3 assign fail"); return 0; }
-
-  /* Small delay before activation */
-  for (volatile int d = 0; d < 500000; d++) { }
-
-  /* [Step 5] Activate: set count = 1 */
-  u8val = 1;
-  wkc = ecx_SDOwrite(&soem_context, slave, 0x1C12, 0, FALSE, sizeof(u8val), &u8val, EC_TIMEOUTRXM);
-  if (wkc <= 0) { soem_log("PDO: SM2 activate fail"); return 0; }
-  wkc = ecx_SDOwrite(&soem_context, slave, 0x1C13, 0, FALSE, sizeof(u8val), &u8val, EC_TIMEOUTRXM);
-  if (wkc <= 0) { soem_log("PDO: SM3 activate fail"); return 0; }
-
-  soem_log("PDO: Manual mapping complete (Rx=6B, Tx=12B)");
-  return 1;
-}
-
-static uint8 soem_decode_cia402_state(uint16 statusword)
-{
-  uint16 masked = (uint16)(statusword & 0x006FU);
-
-  switch (masked)
-  {
-    case 0x0000U:
-      return 0U; /* Not ready to switch on */
-    case 0x0040U:
-      return 1U; /* Switch on disabled */
-    case 0x0021U:
-      return 2U; /* Ready to switch on */
-    case 0x0023U:
-      return 3U; /* Switched on */
-    case 0x0027U:
-      return 4U; /* Operation enabled */
-    case 0x0007U:
-      return 5U; /* Quick stop active */
-    case 0x000FU:
-      return 6U; /* Fault reaction active */
-    case 0x0008U:
-      return 7U; /* Fault */
-    default:
-      return 255U; /* Unknown */
-  }
-}
+/* ── Logging helpers ─────────────────────────────────────────────────────── */
 
 static void soem_log(const char *msg)
 {
-  if (soem_log_fn != NULL)
-  {
+    if (soem_log_fn == NULL) return;
     size_t n = strlen(msg);
-    if ((n > 0U) && ((msg[n - 1U] == '\n') || (msg[n - 1U] == '\r')))
-    {
-      soem_log_fn(msg);
+    if ((n > 0U) && (msg[n - 1U] == '\n' || msg[n - 1U] == '\r')) {
+        soem_log_fn(msg);
+    } else {
+        char buf[200];
+        (void)snprintf(buf, sizeof(buf), "%s\r\n", msg);
+        soem_log_fn(buf);
     }
-    else
-    {
-      char line[192];
-      (void)snprintf(line, sizeof(line), "%s\r\n", msg);
-      soem_log_fn(line);
-    }
-  }
 }
 
-static void soem_log_cia402_state(uint8 state)
+static void soem_logf(const char *fmt, ...)
 {
-  switch (state)
-  {
-    case 0U:
-      soem_log("CIA402: Not ready to switch on");
-      break;
-    case 1U:
-      soem_log("CIA402: Switch on disabled");
-      break;
-    case 2U:
-      soem_log("CIA402: Ready to switch on");
-      break;
-    case 3U:
-      soem_log("CIA402: Switched on");
-      break;
-    case 4U:
-      soem_log("CIA402: Operation enabled");
-      break;
-    case 5U:
-      soem_log("CIA402: Quick stop active");
-      break;
-    case 6U:
-      soem_log("CIA402: Fault reaction active");
-      break;
-    case 7U:
-      soem_log("CIA402: Fault");
-      break;
-    default:
-      soem_log("CIA402: Unknown state");
-      break;
-  }
+    if (soem_log_fn == NULL) return;
+    char buf[200];
+    va_list ap;
+    va_start(ap, fmt);
+    (void)vsnprintf(buf, sizeof(buf), fmt, ap);
+    va_end(ap);
+    soem_log(buf);
 }
 
-static int32_t soem_saturated_user_to_hw(int32_t userPos)
+/* ── SDO helpers (slave index = ax + 1) ─────────────────────────────────── */
+
+static int ax_sdo_wr16(uint8_t ax, uint16_t idx, uint8_t sub, uint16_t val)
 {
-  int32_t scale = (soem_unit_scale > 0) ? soem_unit_scale : 1;
-  int64_t hw = (int64_t)userPos * (int64_t)scale + (int64_t)soem_home_offset;
-  if (hw > (int64_t)INT32_MAX)
-  {
-    hw = (int64_t)INT32_MAX;
-  }
-  else if (hw < (int64_t)INT32_MIN)
-  {
-    hw = (int64_t)INT32_MIN;
-  }
-  return (int32_t)hw;
+    return ecx_SDOwrite(&soem_context, ROBOT_SLAVE_IDX(ax),
+                        idx, sub, FALSE, sizeof(val), &val, EC_TIMEOUTRXM);
 }
 
-static int32_t soem_hw_to_user(int32_t hwPos)
+static int ax_sdo_wr32(uint8_t ax, uint16_t idx, uint8_t sub, uint32_t val)
 {
-  int32_t scale = (soem_unit_scale > 0) ? soem_unit_scale : 1;
-  int64_t user = ((int64_t)hwPos - (int64_t)soem_home_offset) / (int64_t)scale;
-  if (user > (int64_t)INT32_MAX)
-  {
-    user = (int64_t)INT32_MAX;
-  }
-  else if (user < (int64_t)INT32_MIN)
-  {
-    user = (int64_t)INT32_MIN;
-  }
-  return (int32_t)user;
+    return ecx_SDOwrite(&soem_context, ROBOT_SLAVE_IDX(ax),
+                        idx, sub, FALSE, sizeof(val), &val, EC_TIMEOUTRXM);
 }
 
-static int32_t soem_clamp_user_position(int32_t userPos)
+static int ax_sdo_wri32(uint8_t ax, uint16_t idx, uint8_t sub, int32_t val)
 {
-  if (soem_software_limits_enabled == 0U)
-  {
-    return userPos;
-  }
-
-  if (userPos > soem_limit_plus_user)
-  {
-    return soem_limit_plus_user;
-  }
-  if (userPos < soem_limit_minus_user)
-  {
-    return soem_limit_minus_user;
-  }
-  return userPos;
+    return ecx_SDOwrite(&soem_context, ROBOT_SLAVE_IDX(ax),
+                        idx, sub, FALSE, sizeof(val), &val, EC_TIMEOUTRXM);
 }
 
-static int32_t soem_clamp_hw_position(int32_t hwPos)
+static int ax_sdo_rd16(uint8_t ax, uint16_t idx, uint8_t sub, uint16_t *out)
 {
-  if (soem_software_limits_enabled == 0U)
-  {
-    return hwPos;
-  }
-
-  if (hwPos > soem_limit_plus_hw)
-  {
-    return soem_limit_plus_hw;
-  }
-  if (hwPos < soem_limit_minus_hw)
-  {
-    return soem_limit_minus_hw;
-  }
-  return hwPos;
+    int sz = (int)sizeof(*out);
+    return ecx_SDOread(&soem_context, ROBOT_SLAVE_IDX(ax),
+                       idx, sub, FALSE, &sz, out, EC_TIMEOUTRXM);
 }
 
-static int32_t soem_get_target_step_hw_per_cycle(void)
+static int ax_sdo_rd32(uint8_t ax, uint16_t idx, uint8_t sub, uint32_t *out)
 {
-  int64_t velocityUser = (int64_t)((soem_profile_velocity < 0) ? -soem_profile_velocity : soem_profile_velocity);
-  int64_t scale = (int64_t)((soem_unit_scale > 0) ? soem_unit_scale : 1);
-  int64_t velocityHwPerSec = velocityUser * scale;
-  int64_t stepHwPerCycle = velocityHwPerSec / 1000LL; /* 1 ms cycle */
-
-  if (stepHwPerCycle < 1LL)
-  {
-    stepHwPerCycle = 1LL;
-  }
-  else if (stepHwPerCycle > (int64_t)INT32_MAX)
-  {
-    stepHwPerCycle = (int64_t)INT32_MAX;
-  }
-
-  return (int32_t)stepHwPerCycle;
+    int sz = (int)sizeof(*out);
+    return ecx_SDOread(&soem_context, ROBOT_SLAVE_IDX(ax),
+                       idx, sub, FALSE, &sz, out, EC_TIMEOUTRXM);
 }
 
-static void soem_update_target_position_output(void)
+static int ax_sdo_rdi32(uint8_t ax, uint16_t idx, uint8_t sub, int32_t *out)
 {
-  int32_t command = soem_target_position;
-  int32_t output = soem_target_position_output;
-
-  int64_t errorToActual = (int64_t)command - (int64_t)soem_shadow_position;
-  if (errorToActual < 0)
-  {
-    errorToActual = -errorToActual;
-  }
-
-  if (errorToActual <= (int64_t)SOEM_TARGET_REACHED_TOLERANCE_HW)
-  {
-    /* Keep commanded target fixed to avoid cumulative drift across cycles.
-     * Only settle output to the command when we are inside tolerance. */
-    soem_target_position_output = soem_clamp_hw_position(command);
-    return;
-  }
-
-  if (output == command)
-  {
-    return;
-  }
-
-  const int32_t step = soem_get_target_step_hw_per_cycle();
-  const int64_t diff = (int64_t)command - (int64_t)output;
-
-  if (diff > (int64_t)step)
-  {
-    output += step;
-  }
-  else if (diff < -(int64_t)step)
-  {
-    output -= step;
-  }
-  else
-  {
-    output = command;
-  }
-
-  soem_target_position_output = soem_clamp_hw_position(output);
+    int sz = (int)sizeof(*out);
+    return ecx_SDOread(&soem_context, ROBOT_SLAVE_IDX(ax),
+                       idx, sub, FALSE, &sz, out, EC_TIMEOUTRXM);
 }
 
-static void soem_refresh_hw_limits(void)
+/* Position gain: try u32 first, fall back to u16. */
+static int ax_write_gain(uint8_t ax, uint16_t idx, int32_t gain)
 {
-  /* Treat zero-width or inverted ranges as disabled.
-   * This avoids immediate servo faults when uninitialized UI parameters save
-   * Limit+ = 0 and Limit- = 0, which would otherwise force the allowed range
-   * to a single point at the origin. */
-  if ((soem_limit_plus_user <= soem_limit_minus_user) ||
-      ((soem_limit_plus_user == 0) && (soem_limit_minus_user == 0)))
-  {
-    soem_limit_plus_hw = INT32_MAX;
-    soem_limit_minus_hw = INT32_MIN;
-    soem_software_limits_enabled = 0U;
-    soem_software_limits_blocked = 0U;
-  }
-  else
-  {
-    soem_software_limits_enabled = 1U;
-    soem_software_limits_blocked = 0U;
-    if (soem_limit_plus_user >= (INT32_MAX / 2))
-    {
-      soem_limit_plus_hw = INT32_MAX;
-    }
-    else
-    {
-      soem_limit_plus_hw = soem_saturated_user_to_hw(soem_limit_plus_user);
-    }
-
-    if (soem_limit_minus_user <= (INT32_MIN / 2))
-    {
-      soem_limit_minus_hw = INT32_MIN;
-    }
-    else
-    {
-      soem_limit_minus_hw = soem_saturated_user_to_hw(soem_limit_minus_user);
-    }
-  }
-
-  if (soem_limit_minus_hw > soem_limit_plus_hw)
-  {
-    int32_t tmp = soem_limit_minus_hw;
-    soem_limit_minus_hw = soem_limit_plus_hw;
-    soem_limit_plus_hw = tmp;
-  }
-
-  if (soem_software_limits_enabled != 0U)
-  {
-    const int32_t actualHw = (int32_t)soem_shadow_position;
-    const int32_t targetHw = soem_target_position;
-
-    if ((actualHw < soem_limit_minus_hw) || (actualHw > soem_limit_plus_hw) ||
-        (targetHw < soem_limit_minus_hw) || (targetHw > soem_limit_plus_hw))
-    {
-      soem_limit_plus_hw = INT32_MAX;
-      soem_limit_minus_hw = INT32_MIN;
-      soem_software_limits_enabled = 0U;
-      soem_software_limits_blocked = 1U;
-    }
-  }
-
-  soem_target_position = soem_clamp_hw_position(soem_target_position);
-  soem_target_position_output = soem_clamp_hw_position(soem_target_position_output);
+    uint32_t v32 = (uint32_t)gain;
+    int wkc = ecx_SDOwrite(&soem_context, ROBOT_SLAVE_IDX(ax),
+                            idx, 0, FALSE, sizeof(v32), &v32, EC_TIMEOUTRXM);
+    if (wkc > 0) return wkc;
+    uint16_t v16 = (gain > 65535) ? 65535U : (uint16_t)gain;
+    return ecx_SDOwrite(&soem_context, ROBOT_SLAVE_IDX(ax),
+                        idx, 0, FALSE, sizeof(v16), &v16, EC_TIMEOUTRXM);
 }
 
-static uint8_t soem_allow_parameter_sdo_writes(void)
+static int ax_read_gain(uint8_t ax, uint16_t idx, int32_t *out)
 {
-  int32_t velocityAbs = soem_shadow_velocity;
-  int64_t positionError = (int64_t)soem_target_position_output - (int64_t)soem_shadow_position;
-
-  if (soem_cia402_stage != SOEM_CIA402_STAGE_OPERATION_ENABLED)
-  {
-    return 1U;
-  }
-
-  if (velocityAbs < 0)
-  {
-    velocityAbs = -velocityAbs;
-  }
-  if (positionError < 0)
-  {
-    positionError = -positionError;
-  }
-
-  return ((velocityAbs <= 1) &&
-          (positionError <= (int64_t)SOEM_TARGET_REACHED_TOLERANCE_HW)) ? 1U : 0U;
+    uint32_t v32 = 0;
+    int sz = (int)sizeof(v32);
+    int wkc = ecx_SDOread(&soem_context, ROBOT_SLAVE_IDX(ax),
+                           idx, 0, FALSE, &sz, &v32, EC_TIMEOUTRXM);
+    if (wkc > 0) {
+        *out = (sz <= (int)sizeof(uint16_t))
+               ? (int32_t)(uint16_t)v32 : (int32_t)v32;
+        return wkc;
+    }
+    uint16_t v16 = 0;
+    sz = (int)sizeof(v16);
+    wkc = ecx_SDOread(&soem_context, ROBOT_SLAVE_IDX(ax),
+                       idx, 0, FALSE, &sz, &v16, EC_TIMEOUTRXM);
+    if (wkc > 0) *out = (int32_t)v16;
+    return wkc;
 }
 
-static void soem_apply_pending_motion_settings(void)
+/* ── CiA 402 state decoder ───────────────────────────────────────────────── */
+
+static Cia402State_t decode_cia402(uint16_t sw)
 {
-  if ((soem_profile_velocity_pending == 0U) &&
-      (soem_torque_limit_pending == 0U) &&
-      (soem_profile_acceleration_pending == 0U) &&
-      (soem_profile_deceleration_pending == 0U) &&
-      (soem_software_limits_pending == 0U) &&
-      (soem_unit_scale_pending == 0U) &&
-      (soem_home_offset_pending == 0U) &&
-      (soem_position_gain_pending == 0U) &&
-      (soem_parameter_read_all_pending == 0U) &&
-      (soem_position_gain_read_pending == 0U))
-  {
-    return;
-  }
+    switch (sw & 0x006FU) {
+        case 0x0000U: return CIA402_STATE_NOT_READY;
+        case 0x0040U: return CIA402_STATE_SW_DISABLED;
+        case 0x0021U: return CIA402_STATE_READY;
+        case 0x0023U: return CIA402_STATE_SWITCHED_ON;
+        case 0x0027U: return CIA402_STATE_OP_ENABLED;
+        case 0x0007U: return CIA402_STATE_QUICK_STOP;
+        case 0x000FU: return CIA402_STATE_FAULT_REACT;
+        case 0x0008U: return CIA402_STATE_FAULT;
+        default:      return CIA402_STATE_UNKNOWN;
+    }
+}
 
-  if (soem_context.slavecount < 1)
-  {
-    if (soem_position_gain_read_pending != 0U)
-    {
-      soem_position_gain_read_pending = 0U;
-      soem_position_gain_read_status = -20;
-      soem_log("SOEM: position gain read failed (no slave)");
-    }
-    if (soem_parameter_read_all_pending != 0U)
-    {
-      soem_parameter_read_all_pending = 0U;
-      soem_log("SOEM: parameter read-all failed (no slave)");
-    }
-    return;
-  }
+static void log_cia402_state(uint8_t ax, Cia402State_t st)
+{
+    static const char *names[] = {
+        "NotReady", "SwDisabled", "Ready", "SwitchedOn",
+        "OpEnabled", "QuickStop", "FaultReact", "Fault", "Unknown"
+    };
+    uint8_t idx = (st <= CIA402_STATE_FAULT) ? (uint8_t)st : 8U;
+    soem_logf("[Ax%s] CIA402: %s", robot_axis_name(ax), names[idx]);
+}
 
-  const uint8 allowSdoWrites = soem_allow_parameter_sdo_writes();
+/* ── Soft-limit helpers ──────────────────────────────────────────────────── */
 
-  if ((allowSdoWrites != 0U) && (soem_profile_velocity_pending != 0U))
-  {
-    uint32 velocity = (uint32)soem_profile_velocity;
-    int wkc = ecx_SDOwrite(&soem_context, 1, 0x6081, 0, FALSE, sizeof(velocity), &velocity, EC_TIMEOUTRXM);
-    if (wkc > 0)
-    {
-      soem_profile_velocity_pending = 0U;
-      soem_log("SOEM: profile velocity applied");
-    }
-    else
-    {
-      soem_profile_velocity_pending = 0U;
-      soem_log("SOEM: profile velocity apply failed");
-    }
-  }
+static void refresh_hw_limits(uint8_t ax)
+{
+    AxisParam_t *p = &g_axis_param[ax];
 
-  if ((allowSdoWrites != 0U) && (soem_torque_limit_pending != 0U))
-  {
-    /* 0x6072 is per-mille (1000 = 100.0%). */
-    uint16 torquePermille = (uint16)(soem_torque_limit_percent * 10U);
-    int wkc = ecx_SDOwrite(&soem_context, 1, 0x6072, 0, FALSE, sizeof(torquePermille), &torquePermille, EC_TIMEOUTRXM);
-    if (wkc > 0)
-    {
-      soem_torque_limit_pending = 0U;
-      soem_log("SOEM: torque limit applied");
+    /* Disable only when neither limit has been configured (both at default 0). */
+    if (p->limit_plus_user == 0 && p->limit_minus_user == 0) {
+        p->limit_plus_hw  = INT32_MAX;
+        p->limit_minus_hw = INT32_MIN;
+        p->limits_enabled = 0U;
+        p->limits_blocked = 0U;
+        return;
     }
-    else
-    {
-      soem_torque_limit_pending = 0U;
-      soem_log("SOEM: torque limit apply failed");
-    }
-  }
 
-  if ((allowSdoWrites != 0U) && (soem_profile_acceleration_pending != 0U))
-  {
-    uint16_t acceleration = (uint16_t)soem_profile_acceleration;
-    uint16_t accelerationRead = 0U;
-    int wkc = soem_write_uint16_object(0x2301, 0, acceleration);
-    if ((wkc > 0) && (soem_read_uint16_object(0x2301, 0, &accelerationRead) > 0))
-    {
-      soem_profile_acceleration = (int32_t)accelerationRead;
-      soem_profile_acceleration_pending = 0U;
-      if (accelerationRead != acceleration)
-      {
-        char line[120];
-        (void)snprintf(line,
-                       sizeof(line),
-                       "SOEM: profile acceleration adjusted req=%lu act=%lu",
-                       (unsigned long)acceleration,
-                       (unsigned long)accelerationRead);
-        soem_log(line);
-      }
-      else
-      {
-        soem_log("SOEM: profile acceleration applied (u16)");
-      }
-    }
-    else
-    {
-      soem_profile_acceleration_pending = 0U;
-      soem_log("SOEM: profile acceleration apply failed");
-    }
-  }
+    /* Always activate limits once any non-zero value is configured.
+     * limit_hw values are already computed by the calling Set* function.
+     * No "outside" trap: limits must not be silently disabled just because
+     * the axis is currently outside the intended range.                   */
+    p->limits_enabled = 1U;
+    p->limits_blocked = 0U;
+}
 
-  if ((allowSdoWrites != 0U) && (soem_profile_deceleration_pending != 0U))
-  {
-    uint16_t deceleration = (uint16_t)soem_profile_deceleration;
-    uint16_t decelerationRead = 0U;
-    int wkc = soem_write_uint16_object(0x2302, 0, deceleration);
-    if ((wkc > 0) && (soem_read_uint16_object(0x2302, 0, &decelerationRead) > 0))
-    {
-      soem_profile_deceleration = (int32_t)decelerationRead;
-      soem_profile_deceleration_pending = 0U;
-      if (decelerationRead != deceleration)
-      {
-        char line[120];
-        (void)snprintf(line,
-                       sizeof(line),
-                       "SOEM: profile deceleration adjusted req=%lu act=%lu",
-                       (unsigned long)deceleration,
-                       (unsigned long)decelerationRead);
-        soem_log(line);
-      }
-      else
-      {
-        soem_log("SOEM: profile deceleration applied (u16)");
-      }
-    }
-    else
-    {
-      soem_profile_deceleration_pending = 0U;
-      soem_log("SOEM: profile deceleration apply failed");
-    }
-  }
+/* ── Ramp generator ──────────────────────────────────────────────────────── */
 
-  if ((allowSdoWrites != 0U) && (soem_software_limits_pending != 0U))
-  {
-    if ((soem_limit_plus_user <= soem_limit_minus_user) ||
-        ((soem_limit_plus_user == 0) && (soem_limit_minus_user == 0)))
-    {
-      soem_software_limits_pending = 0U;
-      soem_log("SOEM: software limits invalid (0x607D write skipped)");
+static int32_t step_per_cycle(uint8_t ax)
+{
+    /* velocity source: ramp_velocity overrides profile_velocity for JOG */
+    int32_t vel = g_rt[ax].ramp_velocity;
+    if (vel == 0) vel = g_rt[ax].profile_velocity;
+    if (vel < 0)  vel = -vel;
+    if (vel <= 0) vel = 1;
+
+    int32_t scale = (g_axis_param[ax].unit_scale > 0)
+                    ? g_axis_param[ax].unit_scale : 1;
+    int64_t step = ((int64_t)vel * (int64_t)scale) / 1000LL; /* /1000 = per ms */
+    if (step < 1LL)           step = 1LL;
+    if (step > (int64_t)INT32_MAX) step = (int64_t)INT32_MAX;
+    return (int32_t)step;
+}
+
+static void soem_update_target_output(uint8_t ax)
+{
+    int32_t cmd    = g_rt[ax].target_hw;
+    int32_t output = g_rt[ax].target_hw_out;
+    int32_t actual = (int32_t)g_shadow[ax].pos_hw;
+
+    int64_t err_actual = (int64_t)cmd - (int64_t)actual;
+    if (err_actual < 0) err_actual = -err_actual;
+
+    if (err_actual <= (int64_t)ROBOT_TARGET_TOLERANCE_HW) {
+        /* During interpolation skip soft-limit clamp so arcs aren't cut short */
+        g_rt[ax].target_hw_out = g_rt[ax].interp_active
+                                 ? cmd
+                                 : axis_clamp_hw(ax, cmd);
+        g_shadow[ax].target_reached = 1U;
+        return;
     }
-    else
-    {
-      int32_t minLimit = soem_limit_minus_user;
-      int32_t maxLimit = soem_limit_plus_user;
-      int wkcMax = ecx_SDOwrite(&soem_context, 1, 0x607D, 2, FALSE, sizeof(maxLimit), &maxLimit, EC_TIMEOUTRXM);
-      int wkcMin = ecx_SDOwrite(&soem_context, 1, 0x607D, 1, FALSE, sizeof(minLimit), &minLimit, EC_TIMEOUTRXM);
-      int32_t minRead = 0;
-      int32_t maxRead = 0;
-      int okMinRead = soem_read_int32_object(0x607D, 1, &minRead);
-      int okMaxRead = soem_read_int32_object(0x607D, 2, &maxRead);
-      if ((wkcMin > 0) && (wkcMax > 0) && (okMinRead > 0) && (okMaxRead > 0))
-      {
-        soem_software_limits_pending = 0U;
-        if ((minRead != minLimit) || (maxRead != maxLimit))
-        {
-          char line[144];
-          (void)snprintf(line,
-                         sizeof(line),
-                         "SOEM: software limits adjusted req=[%ld,%ld] act=[%ld,%ld]",
-                         (long)minLimit,
-                         (long)maxLimit,
-                         (long)minRead,
-                         (long)maxRead);
-          soem_log(line);
+
+    g_shadow[ax].target_reached = 0U;
+
+    if (output == cmd) return;
+
+    const int32_t step = step_per_cycle(ax);
+    const int64_t diff = (int64_t)cmd - (int64_t)output;
+
+    if      (diff >  (int64_t)step) output += step;
+    else if (diff < -(int64_t)step) output -= step;
+    else                             output  = cmd;
+
+    g_rt[ax].target_hw_out = axis_clamp_hw(ax, output);
+}
+
+/* ── SDO stability gate ──────────────────────────────────────────────────── */
+
+static uint8_t allow_sdo(uint8_t ax)
+{
+    if (g_rt[ax].cia402_stage != CIA402_STAGE_OP_ENABLED) {
+        g_rt[ax].stable_cycles = 0U;
+        return 1U;  /* allow SDO during init/config phases */
+    }
+
+    int32_t vel = (int32_t)g_shadow[ax].velocity;
+    if (vel < 0) vel = -vel;
+    int64_t pos_err = (int64_t)g_rt[ax].target_hw_out
+                      - (int64_t)g_shadow[ax].pos_hw;
+    if (pos_err < 0) pos_err = -pos_err;
+
+    if ((vel <= 1) && (pos_err <= (int64_t)ROBOT_TARGET_TOLERANCE_HW)) {
+        if (g_rt[ax].stable_cycles < ROBOT_SDO_STABLE_CYCLES_MIN) {
+            g_rt[ax].stable_cycles++;
+            return 0U;
         }
+        return 1U;
+    }
+
+    g_rt[ax].stable_cycles = 0U;
+    return 0U;
+}
+
+/* ── Pending SDO writer ──────────────────────────────────────────────────── */
+
+static void soem_apply_pending_sdo(uint8_t ax)
+{
+    uint8_t ok = allow_sdo(ax);
+
+    /* Profile velocity → 0x6081 */
+    if (ok && g_rt[ax].profile_velocity_pending) {
+        uint32_t v = (uint32_t)((g_rt[ax].profile_velocity > 0)
+                                ? g_rt[ax].profile_velocity : 1);
+        if (ax_sdo_wr32(ax, 0x6081, 0, v) > 0)
+            soem_logf("[Ax%s] vel=%lu", robot_axis_name(ax), (unsigned long)v);
+        g_rt[ax].profile_velocity_pending = 0U;
+    }
+
+    /* Torque limit → 0x6072 */
+    if (ok && g_rt[ax].torque_limit_pending) {
+        uint16_t t = g_rt[ax].torque_limit;
+        if (ax_sdo_wr16(ax, 0x6072, 0, t) > 0)
+            soem_logf("[Ax%s] torque=%u", robot_axis_name(ax), t);
+        g_rt[ax].torque_limit_pending = 0U;
+    }
+
+    /* Acceleration → 0x2301 (vendor-specific, u16) */
+    if (ok && g_rt[ax].profile_accel_pending) {
+        uint16_t a = (uint16_t)g_rt[ax].profile_accel_ms;
+        uint16_t readback = 0U;
+        if (ax_sdo_wr16(ax, 0x2301, 0, a) > 0) {
+            (void)ax_sdo_rd16(ax, 0x2301, 0, &readback);
+            g_rt[ax].profile_accel_ms = (int32_t)readback;
+            soem_logf("[Ax%s] accel=%u", robot_axis_name(ax), readback);
+        }
+        g_rt[ax].profile_accel_pending = 0U;
+    }
+
+    /* Deceleration → 0x2302 */
+    if (ok && g_rt[ax].profile_decel_pending) {
+        uint16_t d = (uint16_t)g_rt[ax].profile_decel_ms;
+        uint16_t readback = 0U;
+        if (ax_sdo_wr16(ax, 0x2302, 0, d) > 0) {
+            (void)ax_sdo_rd16(ax, 0x2302, 0, &readback);
+            g_rt[ax].profile_decel_ms = (int32_t)readback;
+            soem_logf("[Ax%s] decel=%u", robot_axis_name(ax), readback);
+        }
+        g_rt[ax].profile_decel_pending = 0U;
+    }
+
+    /* Software limits → 0x607D sub1 (min), sub2 (max), user units */
+    if (ok && g_rt[ax].limits_pending) {
+        AxisParam_t *p = &g_axis_param[ax];
+        bool inv = (p->limit_plus_user <= p->limit_minus_user)
+                || (p->limit_plus_user == 0 && p->limit_minus_user == 0);
+        if (!inv) {
+            (void)ax_sdo_wri32(ax, 0x607D, 1, p->limit_minus_user);
+            (void)ax_sdo_wri32(ax, 0x607D, 2, p->limit_plus_user);
+            soem_logf("[Ax%s] limits=[%ld,%ld]", robot_axis_name(ax),
+                      (long)p->limit_minus_user, (long)p->limit_plus_user);
+        }
+        g_rt[ax].limits_pending = 0U;
+    }
+
+    /* Unit scale → 0x6092 sub1 (feed constant), sub2=1 */
+    if (ok && g_rt[ax].unit_scale_pending) {
+        int32_t sc = g_axis_param[ax].unit_scale;
+        uint32_t feed = (uint32_t)((sc > 0) ? sc : 1);
+        uint32_t revs = 1U;
+        if (ax_sdo_wr32(ax, 0x6092, 1, feed) > 0 &&
+            ax_sdo_wr32(ax, 0x6092, 2, revs) > 0)
+            soem_logf("[Ax%s] unit_scale=%lu", robot_axis_name(ax), (unsigned long)feed);
+        g_rt[ax].unit_scale_pending = 0U;
+    }
+
+    /* Home offset → 0x607C */
+    if (ok && g_rt[ax].home_offset_pending) {
+        int32_t ho = g_axis_param[ax].home_offset;
+        if (ax_sdo_wri32(ax, 0x607C, 0, ho) > 0)
+            soem_logf("[Ax%s] home_offset=%ld", robot_axis_name(ax), (long)ho);
+        g_rt[ax].home_offset_pending = 0U;
+    }
+
+    /* Position gain → 0x2101 then 0x2105 */
+    if (ok && g_rt[ax].position_gain_pending) {
+        int32_t gain = g_rt[ax].position_gain;
+        if (gain > 0) {
+            int wkc1 = ax_write_gain(ax, SOEM_POSITION_GAIN1_INDEX, gain);
+            int wkc2 = ax_write_gain(ax, SOEM_POSITION_GAIN2_INDEX, gain);
+            soem_logf("[Ax%s] pos_gain=%ld [2101:%s 2105:%s]",
+                      robot_axis_name(ax), (long)gain,
+                      wkc1 > 0 ? "ok" : "fail", wkc2 > 0 ? "ok" : "fail");
+        }
+        g_rt[ax].position_gain_pending = 0U;
+    }
+
+    /* Position gain read */
+    if (g_rt[ax].position_gain_read_pending) {
+        int32_t gain = 0;
+        int wkc = ax_read_gain(ax, SOEM_POSITION_GAIN1_INDEX, &gain);
+        if (wkc <= 0) wkc = ax_read_gain(ax, SOEM_POSITION_GAIN2_INDEX, &gain);
+        g_rt[ax].position_gain_read_pending = 0U;
+        if (wkc > 0) {
+            g_rt[ax].position_gain_readback   = gain;
+            g_rt[ax].position_gain            = gain;
+            g_rt[ax].position_gain_read_status = 20;
+            g_rt[ax].position_gain_read_done   = 1U;
+            soem_logf("[Ax%s] gain_read=%ld", robot_axis_name(ax), (long)gain);
+        } else {
+            g_rt[ax].position_gain_read_status = -30;
+        }
+    }
+
+    /* Parameter bulk read */
+    if (g_rt[ax].param_read_pending) {
+        uint16_t acc = 0, dec = 0;
+        uint32_t feed = 1, revs = 1;
+        int32_t  lim_min = 0, lim_max = 0, gain = 0;
+
+        int okA  = ax_sdo_rd16(ax, 0x2301, 0, &acc);
+        int okD  = ax_sdo_rd16(ax, 0x2302, 0, &dec);
+        int okF  = ax_sdo_rd32(ax, 0x6092, 1, &feed);
+        int okR  = ax_sdo_rd32(ax, 0x6092, 2, &revs);
+        int okLn = ax_sdo_rdi32(ax, 0x607D, 1, &lim_min);
+        int okLp = ax_sdo_rdi32(ax, 0x607D, 2, &lim_max);
+        int okG  = ax_read_gain(ax, SOEM_POSITION_GAIN1_INDEX, &gain);
+        if (okG <= 0) okG = ax_read_gain(ax, SOEM_POSITION_GAIN2_INDEX, &gain);
+
+        g_rt[ax].param_read_pending = 0U;
+
+        if (okA > 0 && okD > 0 && okF > 0 && okLn > 0 && okLp > 0 && okG > 0) {
+            int32_t scale = (okR > 0 && revs > 0U)
+                            ? (int32_t)(feed / revs) : (int32_t)feed;
+            if (scale <= 0) scale = 1;
+
+            volatile int32_t *v = g_rt[ax].param_read_values;
+            v[0] = 0;               /* jog speed placeholder */
+            v[1] = (int32_t)acc;
+            v[2] = (int32_t)dec;
+            v[3] = lim_max;
+            v[4] = lim_min;
+            v[5] = scale;
+            v[6] = g_axis_param[ax].home_offset / scale;
+            v[7] = gain;
+            g_rt[ax].param_read_done = 1U;
+            soem_logf("[Ax%s] param_read ok", robot_axis_name(ax));
+        } else {
+            soem_logf("[Ax%s] param_read failed", robot_axis_name(ax));
+        }
+    }
+}
+
+/* ── CiA 402 FSM (per axis) ──────────────────────────────────────────────── */
+
+static void log_fault_diag(uint8_t ax, uint16_t sw)
+{
+    uint16_t fc = 0; uint8_t fr = 0;
+    (void)ax_sdo_rd16(ax, 0x603F, 0, &fc);
+    ecx_SDOread(&soem_context, ROBOT_SLAVE_IDX(ax), 0x1001, 0, FALSE,
+                (int[]){1}, &fr, EC_TIMEOUTRXM);
+    soem_logf("[Ax%s] FAULT sw=0x%04X code=0x%04X reg=0x%02X pos=%ld",
+              robot_axis_name(ax), sw, fc, fr,
+              (long)g_shadow[ax].pos_hw);
+}
+
+static void latch_target_to_actual(uint8_t ax)
+{
+    int32_t actual = (int32_t)g_shadow[ax].pos_hw;
+    g_rt[ax].interp_active  = 0U;
+    g_rt[ax].target_hw      = axis_clamp_hw(ax, actual);
+    g_rt[ax].target_hw_out  = g_rt[ax].target_hw;
+    g_rt[ax].target_vel_hw  = 0;   /* CSV: stop wheel on any latch */
+}
+
+static void soem_cia402_step(uint8_t ax)
+{
+    if (g_rt[ax].rxpdo == NULL || g_rt[ax].txpdo == NULL) return;
+
+    uint16_t sw  = g_rt[ax].txpdo->statusword;
+    uint16_t cw  = g_rt[ax].last_controlword;
+
+    /* Log statusword transitions */
+    if (sw != g_rt[ax].last_statusword) {
+        g_rt[ax].last_statusword = sw;
+        soem_logf("[Ax%s] SW=0x%04X", robot_axis_name(ax), sw);
+        Cia402State_t st = decode_cia402(sw);
+        if ((uint8_t)st != g_rt[ax].last_cia402_state) {
+            g_rt[ax].last_cia402_state = (uint8_t)st;
+            log_cia402_state(ax, st);
+        }
+        g_shadow[ax].cia402_state = (uint8_t)decode_cia402(sw);
+    }
+
+    /* Wait for first valid (non-zero) statusword */
+    if (sw == 0U) {
+        g_rt[ax].rxpdo->controlword      = 0U;
+        g_rt[ax].rxpdo->target_velocity  = 0;
+        return;
+    }
+
+    /* External fault-reset: clear fault state and restart enable sequence */
+    if (g_rt[ax].fault_reset_pending) {
+        g_rt[ax].fault_reset_pending = 0U;
+        g_rt[ax].fault_active        = 0U;
+        latch_target_to_actual(ax);
+        g_rt[ax].cia402_stage       = CIA402_STAGE_SEND_SHUTDOWN;
+        g_rt[ax].cia402_hold_cnt    = 0U;
+        g_rt[ax].cia402_timeout_cnt = ROBOT_CIA402_TIMEOUT_CYCLES;
+        soem_logf("[Ax%s] FaultReset", robot_axis_name(ax));
+    }
+
+    /* RUN gate: run_enable=0 → hold at Shutdown, never advance to OP_ENABLED */
+    if (g_rt[ax].run_enable == 0U) {
+        cw = 0x0006U;
+        g_rt[ax].target_vel_hw      = 0;
+        g_rt[ax].cia402_stage       = CIA402_STAGE_WAIT_READY;
+        g_rt[ax].cia402_hold_cnt    = 0U;
+        g_rt[ax].cia402_timeout_cnt = ROBOT_CIA402_TIMEOUT_CYCLES;
+        goto write_pdo;
+    }
+
+    /* Fault recovery (independent per axis) */
+    if ((sw & 0x0008U) != 0U) {
+        if (!g_rt[ax].fault_active) {
+            g_rt[ax].fault_active = 1U;
+            log_fault_diag(ax, sw);
+        }
+        latch_target_to_actual(ax);
+        cw = 0x0080U;
+        g_rt[ax].cia402_stage       = CIA402_STAGE_SEND_SHUTDOWN;
+        g_rt[ax].cia402_hold_cnt    = 0U;
+        g_rt[ax].cia402_timeout_cnt = 0U;
+        goto write_pdo;
+    }
+
+    g_rt[ax].fault_active = 0U;
+
+    switch (g_rt[ax].cia402_stage) {
+        case CIA402_STAGE_SEND_SHUTDOWN:
+            cw = 0x0006U;
+            g_rt[ax].cia402_hold_cnt    = ROBOT_CIA402_HOLD_CYCLES;
+            g_rt[ax].cia402_timeout_cnt = ROBOT_CIA402_TIMEOUT_CYCLES;
+            g_rt[ax].cia402_stage       = CIA402_STAGE_WAIT_READY;
+            soem_logf("[Ax%s] Shutdown(0x0006)", robot_axis_name(ax));
+            break;
+
+        case CIA402_STAGE_WAIT_READY:
+            cw = 0x0006U;
+            if (g_rt[ax].cia402_hold_cnt > 0U) {
+                g_rt[ax].cia402_hold_cnt--;
+            } else if ((sw & 0x006FU) == 0x0021U) {
+                g_rt[ax].cia402_stage = CIA402_STAGE_SEND_SWITCH_ON;
+            } else if (g_rt[ax].cia402_timeout_cnt > 0U) {
+                g_rt[ax].cia402_timeout_cnt--;
+            } else {
+                soem_logf("[Ax%s] timeout waiting Ready", robot_axis_name(ax));
+                g_rt[ax].cia402_stage = CIA402_STAGE_SEND_SHUTDOWN;
+            }
+            break;
+
+        case CIA402_STAGE_SEND_SWITCH_ON:
+            cw = 0x0007U;
+            g_rt[ax].cia402_hold_cnt    = ROBOT_CIA402_HOLD_CYCLES;
+            g_rt[ax].cia402_timeout_cnt = ROBOT_CIA402_TIMEOUT_CYCLES;
+            g_rt[ax].cia402_stage       = CIA402_STAGE_WAIT_SWITCHED_ON;
+            soem_logf("[Ax%s] SwitchOn(0x0007)", robot_axis_name(ax));
+            break;
+
+        case CIA402_STAGE_WAIT_SWITCHED_ON:
+            cw = 0x0007U;
+            if (g_rt[ax].cia402_hold_cnt > 0U) {
+                g_rt[ax].cia402_hold_cnt--;
+            } else if ((sw & 0x006FU) == 0x0023U) {
+                g_rt[ax].cia402_stage = CIA402_STAGE_SEND_ENABLE_OP;
+            } else if (g_rt[ax].cia402_timeout_cnt > 0U) {
+                g_rt[ax].cia402_timeout_cnt--;
+            } else {
+                soem_logf("[Ax%s] timeout waiting SwitchedOn", robot_axis_name(ax));
+                g_rt[ax].cia402_stage = CIA402_STAGE_SEND_SWITCH_ON;
+            }
+            break;
+
+        case CIA402_STAGE_SEND_ENABLE_OP:
+            latch_target_to_actual(ax);  /* prevent following error on first PDO */
+            cw = 0x000FU;
+            g_rt[ax].cia402_hold_cnt    = ROBOT_CIA402_HOLD_CYCLES;
+            g_rt[ax].cia402_timeout_cnt = ROBOT_CIA402_TIMEOUT_CYCLES;
+            g_rt[ax].cia402_stage       = CIA402_STAGE_WAIT_OP_ENABLED;
+            soem_logf("[Ax%s] EnableOp(0x000F)", robot_axis_name(ax));
+            break;
+
+        case CIA402_STAGE_WAIT_OP_ENABLED:
+            cw = 0x000FU;
+            if (g_rt[ax].cia402_hold_cnt > 0U) {
+                g_rt[ax].cia402_hold_cnt--;
+            } else if ((sw & 0x006FU) == 0x0027U) {
+                g_rt[ax].cia402_stage = CIA402_STAGE_OP_ENABLED;
+                soem_logf("[Ax%s] OP_ENABLED", robot_axis_name(ax));
+            } else if (g_rt[ax].cia402_timeout_cnt > 0U) {
+                g_rt[ax].cia402_timeout_cnt--;
+            } else {
+                soem_logf("[Ax%s] timeout waiting OpEnabled", robot_axis_name(ax));
+                g_rt[ax].cia402_stage = CIA402_STAGE_SEND_ENABLE_OP;
+            }
+            break;
+
+        case CIA402_STAGE_OP_ENABLED:
+        default:
+            cw = 0x000FU;
+            break;
+    }
+
+write_pdo:
+    if (cw != g_rt[ax].last_controlword) {
+        g_rt[ax].last_controlword = cw;
+        soem_logf("[Ax%s] CW=0x%04X", robot_axis_name(ax), cw);
+    }
+    g_rt[ax].rxpdo->controlword     = cw;
+    g_rt[ax].rxpdo->target_velocity = g_rt[ax].target_vel_hw;
+}
+
+/* ── Shadow update (called after receive_processdata) ────────────────────── */
+
+static void soem_update_shadows(uint8_t ax)
+{
+    if (g_rt[ax].txpdo == NULL) return;
+    int32_t hw = g_rt[ax].txpdo->position_actual;
+    g_shadow[ax].pos_hw     = hw;
+    g_shadow[ax].pos_centi  = axis_hw_to_centi(ax, hw);
+    g_shadow[ax].velocity   = g_rt[ax].txpdo->velocity_actual;
+    g_shadow[ax].torque     = g_rt[ax].txpdo->torque_actual;
+    g_shadow[ax].statusword = g_rt[ax].txpdo->statusword;
+    g_shadow[ax].pdo_ready  = 1U;
+    g_shadow[ax].run_enable = g_rt[ax].run_enable;
+}
+
+/* ── PDO mapping (applied once per slave in PRE_OP) ──────────────────────── */
+
+static int apply_pdo_mapping(uint8_t ax)
+{
+    uint16_t sl = ROBOT_SLAVE_IDX(ax);
+    uint8_t  u8;
+    uint16_t u16;
+    uint32_t u32;
+    int wkc;
+    char msg[80];
+
+    /* Clear SM2/SM3 PDO assignment lists */
+    u8 = 0;
+    wkc  = ecx_SDOwrite(&soem_context, sl, 0x1C12, 0, FALSE, sizeof(u8), &u8, EC_TIMEOUTRXM);
+    wkc += ecx_SDOwrite(&soem_context, sl, 0x1C13, 0, FALSE, sizeof(u8), &u8, EC_TIMEOUTRXM);
+    if (wkc < 2) {
+        soem_logf("[Ax%s] PDO SM clear fail", robot_axis_name(ax));
+        return 0;
+    }
+    for (volatile int d = 0; d < 500000; d++) {}
+
+    /* Step 1: Check CSV (mode=9) support via 0x6502 Supported Drive Modes */
+    {
+        uint32_t sup = 0;
+        int ckwkc = ax_sdo_rd32(ax, 0x6502, 0, &sup);
+        if (ckwkc > 0) {
+            soem_logf("[Ax%s] SupportedModes=0x%08lX CSV=%s PV=%s CSP=%s",
+                      robot_axis_name(ax), (unsigned long)sup,
+                      (sup & (1U<<8)) ? "yes" : "NO",
+                      (sup & (1U<<2)) ? "yes" : "no",
+                      (sup & (1U<<7)) ? "yes" : "no");
+            if (!(sup & (1U<<8))) {
+                soem_logf("[Ax%s] WARNING: drive may not support CSV(mode=9)!", robot_axis_name(ax));
+            }
+        } else {
+            soem_logf("[Ax%s] 0x6502 read failed — CSV support unknown", robot_axis_name(ax));
+        }
+    }
+
+    /* RxPDO 0x1600: Controlword(16) + TargetVelocity(32) = 6 bytes [CSV] */
+    u8 = 0;
+    ecx_SDOwrite(&soem_context, sl, 0x1600, 0, FALSE, sizeof(u8), &u8, EC_TIMEOUTRXM);
+    u32 = 0x60400010U; ecx_SDOwrite(&soem_context, sl, 0x1600, 1, FALSE, sizeof(u32), &u32, EC_TIMEOUTRXM);
+    u32 = 0x60FF0020U; ecx_SDOwrite(&soem_context, sl, 0x1600, 2, FALSE, sizeof(u32), &u32, EC_TIMEOUTRXM);
+    u8 = 2;
+    wkc = ecx_SDOwrite(&soem_context, sl, 0x1600, 0, FALSE, sizeof(u8), &u8, EC_TIMEOUTRXM);
+    if (wkc <= 0) { soem_logf("[Ax%s] RxPDO 0x1600 fail", robot_axis_name(ax)); return 0; }
+
+    /* TxPDO 0x1A00: Statusword(16) + PosActual(32) + VelActual(32) + Torque(16) = 12 bytes */
+    u8 = 0;
+    ecx_SDOwrite(&soem_context, sl, 0x1A00, 0, FALSE, sizeof(u8), &u8, EC_TIMEOUTRXM);
+    u32 = 0x60410010U; ecx_SDOwrite(&soem_context, sl, 0x1A00, 1, FALSE, sizeof(u32), &u32, EC_TIMEOUTRXM);
+    u32 = 0x60640020U; ecx_SDOwrite(&soem_context, sl, 0x1A00, 2, FALSE, sizeof(u32), &u32, EC_TIMEOUTRXM);
+    u32 = 0x606C0020U; ecx_SDOwrite(&soem_context, sl, 0x1A00, 3, FALSE, sizeof(u32), &u32, EC_TIMEOUTRXM);
+    u32 = 0x60770010U; ecx_SDOwrite(&soem_context, sl, 0x1A00, 4, FALSE, sizeof(u32), &u32, EC_TIMEOUTRXM);
+    u8 = 4;
+    wkc = ecx_SDOwrite(&soem_context, sl, 0x1A00, 0, FALSE, sizeof(u8), &u8, EC_TIMEOUTRXM);
+    if (wkc <= 0) { soem_logf("[Ax%s] TxPDO 0x1A00 fail", robot_axis_name(ax)); return 0; }
+
+    /* Assign PDOs to SM2/SM3 */
+    u16 = 0x1600U; ecx_SDOwrite(&soem_context, sl, 0x1C12, 1, FALSE, sizeof(u16), &u16, EC_TIMEOUTRXM);
+    u16 = 0x1A00U; ecx_SDOwrite(&soem_context, sl, 0x1C13, 1, FALSE, sizeof(u16), &u16, EC_TIMEOUTRXM);
+    for (volatile int d = 0; d < 500000; d++) {}
+    u8 = 1;
+    ecx_SDOwrite(&soem_context, sl, 0x1C12, 0, FALSE, sizeof(u8), &u8, EC_TIMEOUTRXM);
+    ecx_SDOwrite(&soem_context, sl, 0x1C13, 0, FALSE, sizeof(u8), &u8, EC_TIMEOUTRXM);
+
+    /* Set CSV mode (Cyclic Synchronous Velocity) */
+    int8_t mode = 9;
+    ecx_SDOwrite(&soem_context, sl, 0x6060, 0, FALSE, sizeof(mode), &mode, EC_TIMEOUTRXM);
+
+    (void)snprintf(msg, sizeof(msg), "[Ax%s] PDO mapping ok (Rx=6B Tx=12B CSV)", robot_axis_name(ax));
+    soem_log(msg);
+    return 1;
+}
+
+/* ── Bind PDO pointers after ec_config_map_group ─────────────────────────── */
+
+static void bind_pdo_pointers(void)
+{
+    for (uint8_t ax = 0; ax < g_active_axes; ax++) {
+        uint16_t sl = ROBOT_SLAVE_IDX(ax);
+        ec_slavet *s = &soem_context.slavelist[sl];
+
+        if (s->Obytes >= sizeof(RxPDO_t) && s->outputs != NULL)
+            g_rt[ax].rxpdo = (RxPDO_t *)s->outputs;
         else
-        {
-          soem_log("SOEM: software limits applied");
-        }
-      }
-      else
-      {
-        soem_software_limits_pending = 0U;
-        soem_log("SOEM: software limits apply failed");
-      }
-    }
-  }
+            g_rt[ax].rxpdo = NULL;
 
-  if ((allowSdoWrites != 0U) && (soem_unit_scale_pending != 0U))
-  {
-    uint32 feedConst = (uint32)((soem_unit_scale > 0) ? soem_unit_scale : 1);
-    uint32 shaftRevs = 1U;
-    int wkcFeed = ecx_SDOwrite(&soem_context, 1, 0x6092, 1, FALSE, sizeof(feedConst), &feedConst, EC_TIMEOUTRXM);
-    int wkcRevs = ecx_SDOwrite(&soem_context, 1, 0x6092, 2, FALSE, sizeof(shaftRevs), &shaftRevs, EC_TIMEOUTRXM);
-    if ((wkcFeed > 0) && (wkcRevs > 0))
-    {
-      soem_unit_scale_pending = 0U;
-      soem_log("SOEM: unit scale applied");
-    }
-    else
-    {
-      soem_unit_scale_pending = 0U;
-      soem_log("SOEM: unit scale apply failed");
-    }
-  }
-
-  if ((allowSdoWrites != 0U) && (soem_home_offset_pending != 0U))
-  {
-    int32_t homeOffset = soem_home_offset;
-    int wkc = ecx_SDOwrite(&soem_context, 1, 0x607C, 0, FALSE, sizeof(homeOffset), &homeOffset, EC_TIMEOUTRXM);
-    if (wkc > 0)
-    {
-      soem_home_offset_pending = 0U;
-      soem_log("SOEM: home offset applied");
-    }
-    else
-    {
-      soem_home_offset_pending = 0U;
-      soem_log("SOEM: home offset apply failed");
-    }
-  }
-
-  if ((allowSdoWrites != 0U) && (soem_position_gain_pending != 0U))
-  {
-    uint8_t used16_1 = 0U;
-    uint8_t used16_2 = 0U;
-    int wkc1 = soem_try_write_position_gain(SOEM_POSITION_GAIN1_INDEX, soem_position_gain, &used16_1);
-    int wkc2 = soem_try_write_position_gain(SOEM_POSITION_GAIN2_INDEX, soem_position_gain, &used16_2);
-    soem_position_gain_pending = 0U;
-
-    if ((wkc1 > 0) || (wkc2 > 0))
-    {
-      char line[128];
-      (void)snprintf(line,
-                     sizeof(line),
-                     "SOEM: position gain applied [2101:%s 2105:%s]",
-                     (wkc1 > 0) ? (used16_1 ? "ok16" : "ok32") : "fail",
-                     (wkc2 > 0) ? (used16_2 ? "ok16" : "ok32") : "fail");
-      soem_log(line);
-    }
-    else
-    {
-      int32_t abortCode = 0;
-      ec_errort err;
-      uint8_t abortFound = 0U;
-
-      while (ecx_iserror(&soem_context))
-      {
-        if (!ecx_poperror(&soem_context, &err))
-        {
-          break;
-        }
-        if ((err.Etype == EC_ERR_TYPE_SDO_ERROR) &&
-            ((err.Index == SOEM_POSITION_GAIN1_INDEX) ||
-             (err.Index == SOEM_POSITION_GAIN2_INDEX)))
-        {
-          abortCode = err.AbortCode;
-          abortFound = 1U;
-          break;
-        }
-      }
-
-      if (abortFound != 0U)
-      {
-        char line[112];
-        (void)snprintf(line,
-                       sizeof(line),
-                       "SOEM: position gain apply failed abort=0x%08lX",
-                       (unsigned long)((uint32_t)abortCode));
-        soem_log(line);
-      }
-      else
-      {
-        soem_log("SOEM: position gain apply failed (0x2101/0x2105)");
-      }
-    }
-  }
-
-  if (soem_position_gain_read_pending != 0U)
-  {
-    int32_t gainVal = 0;
-    uint8_t used16 = 0U;
-    uint16 readIndex = 0U;
-    int32_t abortCode = 0;
-    uint8_t abortFound = 0U;
-
-    int wkc = soem_try_read_position_gain(SOEM_POSITION_GAIN1_INDEX, &gainVal, &used16);
-    if (wkc > 0)
-    {
-      readIndex = SOEM_POSITION_GAIN1_INDEX;
-    }
-    else
-    {
-      wkc = soem_try_read_position_gain(SOEM_POSITION_GAIN2_INDEX, &gainVal, &used16);
-      if (wkc > 0)
-      {
-        readIndex = SOEM_POSITION_GAIN2_INDEX;
-      }
-    }
-
-    if (wkc > 0)
-    {
-      soem_position_gain_readback = gainVal;
-      soem_position_gain_read_updated = 1U;
-      soem_position_gain = gainVal;
-      soem_position_gain_read_pending = 0U;
-      soem_position_gain_read_status = 20;
-
-      char line[96];
-      (void)snprintf(line,
-                     sizeof(line),
-                     "SOEM: position gain read ok idx=0x%04X %s",
-                     (unsigned int)readIndex,
-                     used16 ? "u16" : "u32");
-      soem_log(line);
-    }
-    else
-    {
-      ec_errort err;
-
-      while (ecx_iserror(&soem_context))
-      {
-        if (!ecx_poperror(&soem_context, &err))
-        {
-          break;
-        }
-        if ((err.Etype == EC_ERR_TYPE_SDO_ERROR) &&
-            ((err.Index == SOEM_POSITION_GAIN1_INDEX) ||
-             (err.Index == SOEM_POSITION_GAIN2_INDEX)))
-        {
-          abortCode = err.AbortCode;
-          abortFound = 1U;
-          break;
-        }
-      }
-    }
-
-    soem_position_gain_read_pending = 0U;
-    if (wkc > 0)
-    {
-      /* success path already handled */
-    }
-    else if (abortFound != 0U)
-    {
-      if (((uint32_t)abortCode) == 0x06020000U)
-      {
-        soem_position_gain_read_status = -10;
-        soem_log("SOEM: position gain unsupported (0x2101/0x2105)");
-      }
-      else
-      {
-        soem_position_gain_read_status = -31;
-        char line[112];
-        (void)snprintf(line,
-                       sizeof(line),
-                       "SOEM: position gain read failed abort=0x%08lX",
-                       (unsigned long)((uint32_t)abortCode));
-        soem_log(line);
-      }
-    }
-    else
-    {
-      soem_position_gain_read_status = -30;
-      soem_log("SOEM: position gain read failed (0x2101/0x2105)");
-    }
-  }
-
-  if (soem_parameter_read_all_pending != 0U)
-  {
-    uint16_t acceleration = 0U;
-    uint16_t deceleration = 0U;
-    uint32_t feedConst = 1U;
-    uint32_t shaftRevs = 1U;
-    int32_t homeOffsetHw = 0;
-    int32_t limitMinusUser = 0;
-    int32_t limitPlusUser = 0;
-    int32_t positionGain = 0;
-    uint8_t positionGain16 = 0U;
-
-    int okAcc = soem_read_uint16_object(0x2301, 0, &acceleration);
-    int okDec = soem_read_uint16_object(0x2302, 0, &deceleration);
-    int okFeed = soem_read_uint32_object(0x6092, 1, &feedConst);
-    int okRevs = soem_read_uint32_object(0x6092, 2, &shaftRevs);
-    int okHome = soem_read_int32_object(0x607C, 0, &homeOffsetHw);
-    int okLimitMinus = soem_read_int32_object(0x607D, 1, &limitMinusUser);
-    int okLimitPlus = soem_read_int32_object(0x607D, 2, &limitPlusUser);
-    int okGain = soem_try_read_position_gain(SOEM_POSITION_GAIN1_INDEX, &positionGain, &positionGain16);
-    if (okGain <= 0)
-    {
-      okGain = soem_try_read_position_gain(SOEM_POSITION_GAIN2_INDEX, &positionGain, &positionGain16);
-    }
-
-    soem_parameter_read_all_pending = 0U;
-
-    if ((okAcc > 0) && (okDec > 0) && (okFeed > 0) && (okHome > 0) &&
-        (okLimitMinus > 0) && (okLimitPlus > 0) && (okGain > 0))
-    {
-      int32_t unitScaleUser = (int32_t)feedConst;
-      if ((okRevs > 0) && (shaftRevs > 0U))
-      {
-        unitScaleUser = (int32_t)(feedConst / shaftRevs);
-      }
-      if (unitScaleUser <= 0)
-      {
-        unitScaleUser = 1;
-      }
-
-      soem_parameter_read_all_values[0] = 0;
-      soem_parameter_read_all_values[1] = (int32_t)acceleration;
-      soem_parameter_read_all_values[2] = (int32_t)deceleration;
-      soem_parameter_read_all_values[5] = unitScaleUser;
-      soem_parameter_read_all_values[6] = homeOffsetHw / unitScaleUser;
-      soem_parameter_read_all_values[3] = limitPlusUser;
-      soem_parameter_read_all_values[4] = limitMinusUser;
-      soem_parameter_read_all_values[7] = positionGain;
-      soem_parameter_read_all_updated = 1U;
-      soem_log("SOEM: parameter read-all ok");
-    }
-    else
-    {
-      soem_log("SOEM: parameter read-all failed");
-    }
-  }
-
-}
-
-static void soem_update_pdo_pointers(void)
-{
-  ec_groupt *grp = soem_context.grouplist + soem_group;
-  char line[96];
-  soem_rxpdo = NULL;
-  soem_txpdo = NULL;
-  soem_pdo_ready = 0U;
-
-  if ((grp->outputs != NULL) && (grp->Obytes >= (int)sizeof(soem_rxpdo_t)))
-  {
-    soem_rxpdo = (soem_rxpdo_t *)grp->outputs;
-  }
-
-  if ((grp->inputs != NULL) && (grp->Ibytes >= (int)sizeof(soem_txpdo_t)))
-  {
-    soem_txpdo = (soem_txpdo_t *)grp->inputs;
-  }
-
-  if ((soem_rxpdo != NULL) && (soem_txpdo != NULL))
-  {
-    soem_pdo_ready = 1U;
-    (void)snprintf(line, sizeof(line), "SOEM: PDO ready Obytes=%lu Ibytes=%lu",
-             (unsigned long)grp->Obytes, (unsigned long)grp->Ibytes);
-    soem_log(line);
-    (void)snprintf(line, sizeof(line), "SOEM: IOmap=0x%08lX O=0x%08lX I=0x%08lX",
-             (unsigned long)(uintptr_t)soem_iomap,
-             (unsigned long)(uintptr_t)grp->outputs,
-             (unsigned long)(uintptr_t)grp->inputs);
-    soem_log(line);
-    soem_log("SOEM: PDO ready");
-  }
-  else
-  {
-    (void)snprintf(line, sizeof(line), "SOEM: PDO mismatch Obytes=%lu Ibytes=%lu",
-             (unsigned long)grp->Obytes, (unsigned long)grp->Ibytes);
-    soem_log(line);
-    (void)snprintf(line, sizeof(line), "SOEM: IOmap=0x%08lX O=0x%08lX I=0x%08lX",
-             (unsigned long)(uintptr_t)soem_iomap,
-             (unsigned long)(uintptr_t)grp->outputs,
-             (unsigned long)(uintptr_t)grp->inputs);
-    soem_log(line);
-    soem_log("SOEM: PDO size mismatch");
-  }
-}
-
-static void soem_cia402_step(uint16 statusword)
-{
-  uint16 effective_statusword = statusword;
-  uint16 controlword = soem_last_controlword;
-
-  soem_update_target_position_output();
-
-  /* If PDO statusword is still zero, skip CiA402 processing —
-   * the slave hasn't started sending TxPDO yet.  Do NOT use SDO
-   * fallback here because SDO frames inside the cyclic PDO loop
-   * corrupt the ETH DMA state and cause HardFault. */
-  if (statusword == 0U)
-  {
-    static uint16 zero_count = 0U;
-    zero_count++;
-    if ((zero_count % 10U) == 1U)
-    {
-      soem_log("CIA402: waiting for PDO statusword");
-    }
-    /* Keep sending controlword=0 (no action) while waiting. */
-    soem_rxpdo->controlword = 0U;
-    soem_rxpdo->target_position = soem_target_position_output;
-    return;
-  }
-
-  /* RUN/STOP direct gate:
-   * RUN=0 -> hold at Shutdown command (0x0006), never auto-progress to Enable Op.
-   * RUN=1 -> allow full CiA402 sequence to Operation Enabled.
-   */
-  if (soem_shadow_run_enable == 0U)
-  {
-    controlword = 0x0006U;
-    soem_cia402_stage = SOEM_CIA402_STAGE_WAIT_READY;
-    soem_cia402_hold_counter = 0U;
-    soem_cia402_timeout_counter = SOEM_CIA402_TIMEOUT_CYCLES;
-
-    if (controlword != soem_last_controlword)
-    {
-      char line[64];
-      soem_last_controlword = controlword;
-      (void)snprintf(line, sizeof(line), "CIA402: CW=0x%04X", controlword);
-      soem_log(line);
-    }
-
-    soem_rxpdo->controlword = controlword;
-    soem_rxpdo->target_position = soem_target_position_output;
-    return;
-  }
-
-  /* Fault bit set: send fault reset first. */
-  if ((effective_statusword & 0x0008U) != 0U)
-  {
-    if (soem_fault_active == 0U)
-    {
-      soem_fault_active = 1U;
-      soem_log_fault_diagnostics(effective_statusword);
-    }
-
-    /* Before clearing the fault, align CSP target to the current actual position.
-     * If RUN stays logically ON during recovery, a stale target can immediately
-     * retrigger a following/position fault after Operation Enabled is restored. */
-    soem_latch_target_to_actual("CIA402: fault recovery -> latch target to actual");
-
-    controlword = 0x0080U;
-    soem_cia402_stage = SOEM_CIA402_STAGE_SEND_SHUTDOWN;
-    soem_cia402_hold_counter = 0U;
-    soem_cia402_timeout_counter = 0U;
-    soem_log("CIA402: Fault reset (0x0080)");
-  }
-  else
-  {
-    soem_fault_active = 0U;
-
-    switch (soem_cia402_stage)
-    {
-      case SOEM_CIA402_STAGE_SEND_SHUTDOWN:
-        controlword = 0x0006U;
-        soem_cia402_hold_counter = SOEM_CIA402_HOLD_CYCLES;
-        soem_cia402_timeout_counter = SOEM_CIA402_TIMEOUT_CYCLES;
-        soem_cia402_stage = SOEM_CIA402_STAGE_WAIT_READY;
-        soem_log("CIA402: Shutdown (0x0006)");
-        break;
-
-      case SOEM_CIA402_STAGE_WAIT_READY:
-        controlword = 0x0006U;
-        if (soem_cia402_hold_counter > 0U)
-        {
-          soem_cia402_hold_counter--;
-          break;
-        }
-
-        /* Accept L7NH-ready variants: 0x21 or 0x31 (masked to 0x21). */
-        if ((effective_statusword & 0x006FU) == 0x0021U)
-        {
-          soem_cia402_stage = SOEM_CIA402_STAGE_SEND_SWITCH_ON;
-        }
-        else if (soem_cia402_timeout_counter > 0U)
-        {
-          soem_cia402_timeout_counter--;
-        }
+        if (s->Ibytes >= sizeof(TxPDO_t) && s->inputs != NULL)
+            g_rt[ax].txpdo = (TxPDO_t *)s->inputs;
         else
-        {
-          soem_log("CIA402: Timeout waiting ready, retry shutdown");
-          soem_cia402_stage = SOEM_CIA402_STAGE_SEND_SHUTDOWN;
-        }
-        break;
+            g_rt[ax].txpdo = NULL;
 
-      case SOEM_CIA402_STAGE_SEND_SWITCH_ON:
-        controlword = 0x0007U;
-        soem_cia402_hold_counter = SOEM_CIA402_HOLD_CYCLES;
-        soem_cia402_timeout_counter = SOEM_CIA402_TIMEOUT_CYCLES;
-        soem_cia402_stage = SOEM_CIA402_STAGE_WAIT_SWITCHED_ON;
-        soem_log("CIA402: Switch On (0x0007)");
-        break;
-
-      case SOEM_CIA402_STAGE_WAIT_SWITCHED_ON:
-        controlword = 0x0007U;
-        if (soem_cia402_hold_counter > 0U)
-        {
-          soem_cia402_hold_counter--;
-          break;
-        }
-
-        /* Accept L7NH-switched-on variants: 0x23 or 0x33 (masked to 0x23). */
-        if ((effective_statusword & 0x006FU) == 0x0023U)
-        {
-          soem_cia402_stage = SOEM_CIA402_STAGE_SEND_ENABLE_OP;
-        }
-        else if (soem_cia402_timeout_counter > 0U)
-        {
-          soem_cia402_timeout_counter--;
-        }
-        else
-        {
-          soem_log("CIA402: Timeout waiting switched-on, retry switch-on");
-          soem_cia402_stage = SOEM_CIA402_STAGE_SEND_SWITCH_ON;
-        }
-        break;
-
-      case SOEM_CIA402_STAGE_SEND_ENABLE_OP:
-        controlword = 0x000FU;
-        soem_cia402_hold_counter = SOEM_CIA402_HOLD_CYCLES;
-        soem_cia402_timeout_counter = SOEM_CIA402_TIMEOUT_CYCLES;
-        soem_cia402_stage = SOEM_CIA402_STAGE_WAIT_OPERATION_ENABLED;
-        soem_log("CIA402: Enable Op (0x000F)");
-        break;
-
-      case SOEM_CIA402_STAGE_WAIT_OPERATION_ENABLED:
-        controlword = 0x000FU;
-        if (soem_cia402_hold_counter > 0U)
-        {
-          soem_cia402_hold_counter--;
-          break;
-        }
-
-        /* Accept L7NH-op-enabled variants: 0x27 or 0x37 (masked to 0x27). */
-        if ((effective_statusword & 0x006FU) == 0x0027U)
-        {
-          soem_cia402_stage = SOEM_CIA402_STAGE_OPERATION_ENABLED;
-          soem_log("CIA402: Operation enabled confirmed");
-        }
-        else if (soem_cia402_timeout_counter > 0U)
-        {
-          soem_cia402_timeout_counter--;
-        }
-        else
-        {
-          soem_log("CIA402: Timeout waiting op-enabled, retry enable-op");
-          soem_cia402_stage = SOEM_CIA402_STAGE_SEND_ENABLE_OP;
-        }
-        break;
-
-      case SOEM_CIA402_STAGE_OPERATION_ENABLED:
-      default:
-        controlword = 0x000FU;
-        break;
+        soem_logf("[Ax%s] PDO ptrs rx=%s tx=%s O=%luB I=%luB",
+                  robot_axis_name(ax),
+                  g_rt[ax].rxpdo ? "ok" : "NULL",
+                  g_rt[ax].txpdo ? "ok" : "NULL",
+                  (unsigned long)s->Obytes,
+                  (unsigned long)s->Ibytes);
     }
-  }
-
-  if (controlword != soem_last_controlword)
-  {
-    char line[64];
-    soem_last_controlword = controlword;
-    (void)snprintf(line, sizeof(line), "CIA402: CTL=0x%04X", controlword);
-    soem_log(line);
-  }
-
-  soem_rxpdo->controlword = controlword;
-  soem_rxpdo->target_position = soem_target_position_output;
 }
 
-void SOEM_PortSetLog(void (*log_fn)(const char *msg))
-{
-  soem_log_fn = log_fn;
-}
+/* ════════════════════════════════════════════════════════════════════════════
+ *  Public API — lifecycle
+ * ══════════════════════════════════════════════════════════════════════════ */
+
+void SOEM_PortSetLog(void (*fn)(const char *msg)) { soem_log_fn = fn; }
 
 void SOEM_PortInit(void)
 {
-  if (soem_initialized != 0U)
-  {
-    return;
-  }
-  if (ecx_init(&soem_context, SOEM_IFNAME) > 0)
-  {
-    soem_initialized = 1U;
-    soem_log("SOEM: init ok");
-  }
-  else
-  {
-    soem_log("SOEM: init failed");
-  }
+    if (g_initialized) return;
+    memset(g_rt, 0, sizeof(g_rt));
+    for (uint8_t ax = 0; ax < AXIS_COUNT; ax++) {
+        g_rt[ax].cia402_stage      = CIA402_STAGE_SEND_SHUTDOWN;
+        g_rt[ax].last_controlword  = 0xFFFFU;
+        g_rt[ax].last_statusword   = 0xFFFFU;
+        g_rt[ax].last_cia402_state = 0xFFU;
+        g_rt[ax].ramp_velocity     = g_axis_param[ax].profile_velocity;
+        g_rt[ax].profile_velocity  = g_axis_param[ax].profile_velocity;
+        g_rt[ax].profile_accel_ms  = g_axis_param[ax].profile_accel_ms;
+        g_rt[ax].profile_decel_ms  = g_axis_param[ax].profile_decel_ms;
+        g_rt[ax].torque_limit      = g_axis_param[ax].torque_limit;
+    }
+    if (ecx_init(&soem_context, SOEM_IFNAME) > 0) {
+        g_initialized = 1U;
+        soem_log("SOEM: init ok (6-axis articulated)");
+    } else {
+        soem_log("SOEM: init failed");
+    }
 }
 
-void SOEM_PortPoll(void)
+/* ── Configuration state machine (runs until all slaves reach OPERATIONAL) ─ */
+
+void SOEM_PeriodicPoll(void)
 {
-  if (soem_initialized == 0U)
-  {
-    return;
-  }
-  if (soem_configured == 0U)
-  {
-    static uint8 config_phase = 0;  /* 0=init, 1=wait_safeop, 2=wait_op */
-    static uint16 phase_counter = 0;
+    if (!g_initialized) return;
 
-    switch (config_phase)
-    {
-      case 0: /* --- INIT: config + request SAFE_OP --- */
-      {
-        char log_line[128];
-        int slavecount = ecx_config_init(&soem_context);
-        if (slavecount <= 0)
-        {
-          soem_log("SOEM: no slaves");
-          return;
-        }
+    /* ── CONFIGURATION PHASE ─────────────────────────────────────────────── */
+    if (!g_configured) {
+        static uint8_t  cfg_phase   = 0;
+        static uint16_t cfg_counter = 0;
 
-        /* Force INIT → PRE_OP transition (SDO/mailbox requires PRE_OP) */
-        soem_log("SOEM: forcing PRE_OP");
-        soem_context.slavelist[0].state = EC_STATE_INIT;
-        ecx_writestate(&soem_context, 0);
-        for (volatile int d = 0; d < 1000000; d++) { }
+        switch (cfg_phase) {
 
-        soem_context.slavelist[0].state = EC_STATE_PRE_OP;
-        ecx_writestate(&soem_context, 0);
+        case 0: { /* Discover slaves, apply PDO mapping, request SAFE_OP */
+            int found = ecx_config_init(&soem_context);
+            if (found <= 0) { soem_log("SOEM: no slaves found"); return; }
 
-        /* Wait for PRE_OP (poll up to ~2 seconds) */
-        {
-          int preop_wait = 0;
-          while (preop_wait < 20)
-          {
-            for (volatile int d = 0; d < 1000000; d++) { }
-            ecx_statecheck(&soem_context, 0, EC_STATE_PRE_OP, 100000);
-            ecx_readstate(&soem_context);
-            uint16 st = soem_context.slavelist[1].state & 0x0FU;
-            if (st >= EC_STATE_PRE_OP)
-            {
-              (void)snprintf(log_line, sizeof(log_line),
-                             "SOEM: PRE_OP reached (try %d) state=0x%02X",
-                             preop_wait, soem_context.slavelist[1].state);
-              soem_log(log_line);
-              break;
+            g_active_axes = (found < (int)AXIS_COUNT) ? (uint8_t)found : AXIS_COUNT;
+            soem_logf("SOEM: found %d slave(s), activating %u axis(es)",
+                      found, g_active_axes);
+
+            /* Force INIT → PRE_OP for all slaves */
+            soem_context.slavelist[0].state = EC_STATE_PRE_OP;
+            ecx_writestate(&soem_context, 0);
+            for (int w = 0; w < 20; w++) {
+                for (volatile int d = 0; d < 1000000; d++) {}
+                ecx_statecheck(&soem_context, 0, EC_STATE_PRE_OP, 100000);
+                ecx_readstate(&soem_context);
+                uint8_t all_preop = 1U;
+                for (uint8_t ax = 0; ax < g_active_axes; ax++) {
+                    if ((soem_context.slavelist[ROBOT_SLAVE_IDX(ax)].state & 0x0FU)
+                        < EC_STATE_PRE_OP)
+                    { all_preop = 0U; break; }
+                }
+                if (all_preop) break;
             }
-            preop_wait++;
-          }
-          if (preop_wait >= 20)
-          {
-            (void)snprintf(log_line, sizeof(log_line),
-                           "SOEM: PRE_OP timeout state=0x%02X",
-                           soem_context.slavelist[1].state);
-            soem_log(log_line);
+
+            /* Apply PDO mapping to each slave */
+            for (uint8_t ax = 0; ax < g_active_axes; ax++) {
+                /* ACK error flag if present */
+                uint16_t sl = ROBOT_SLAVE_IDX(ax);
+                if (soem_context.slavelist[sl].state & 0x10U) {
+                    soem_context.slavelist[sl].state = EC_STATE_PRE_OP | EC_STATE_ERROR;
+                    ecx_writestate(&soem_context, sl);
+                    for (volatile int d = 0; d < 500000; d++) {}
+                    soem_context.slavelist[sl].state = EC_STATE_PRE_OP;
+                    ecx_writestate(&soem_context, sl);
+                    for (volatile int d = 0; d < 300000; d++) {}
+                }
+                if (!apply_pdo_mapping(ax)) {
+                    soem_logf("SOEM: PDO mapping failed for Ax%s", robot_axis_name(ax));
+                    return;
+                }
+            }
+
+            ecx_config_map_group(&soem_context, soem_iomap, soem_group);
+            bind_pdo_pointers();
+
+            soem_context.slavelist[0].state = EC_STATE_SAFE_OP;
+            ecx_writestate(&soem_context, 0);
+
+            cfg_phase = 1; cfg_counter = 0;
             return;
-          }
         }
 
-        /* ACK any error state so slave is in clean PRE_OP */
-        if ((soem_context.slavelist[1].state & 0x10U) != 0U)
-        {
-          soem_log("SOEM: Error ACK");
-          soem_context.slavelist[0].state = (EC_STATE_PRE_OP | EC_STATE_ERROR);
-          ecx_writestate(&soem_context, 0);
-          for (volatile int d = 0; d < 1000000; d++) { }
-          soem_context.slavelist[0].state = EC_STATE_PRE_OP;
-          ecx_writestate(&soem_context, 0);
-          for (volatile int d = 0; d < 500000; d++) { }
-        }
-
-        /* Manual PDO mapping BEFORE ec_config_map (matches working Linux code) */
-        soem_log("SOEM: manual PDO mapping");
-        if (soem_apply_manual_pdo_mapping(1) == 0)
-        {
-          soem_log("SOEM: manual PDO mapping FAILED");
-          return;
-        }
-
-        /* Now let SOEM read the updated PDO assignments and configure SM */
-        soem_log("SOEM: config_map_group");
-        ecx_config_map_group(&soem_context, soem_iomap, soem_group);
-
-        soem_update_pdo_pointers();
-
-        /* Dump SOEM's SM configuration for slave 1 */
-        {
-          ec_slavet *sl = &soem_context.slavelist[1];
-          (void)snprintf(log_line, sizeof(log_line),
-                         "SM2: addr=0x%04X len=%u flags=0x%08lX",
-                         sl->SM[2].StartAddr, sl->SM[2].SMlength,
-                         (unsigned long)sl->SM[2].SMflags);
-          soem_log(log_line);
-          (void)snprintf(log_line, sizeof(log_line),
-                         "SM3: addr=0x%04X len=%u flags=0x%08lX",
-                         sl->SM[3].StartAddr, sl->SM[3].SMlength,
-                         (unsigned long)sl->SM[3].SMflags);
-          soem_log(log_line);
-          (void)snprintf(log_line, sizeof(log_line),
-                         "SOEM: Obits=%u Ibits=%u Obytes=%lu Ibytes=%lu",
-                         sl->Obits, sl->Ibits,
-                         (unsigned long)sl->Obytes, (unsigned long)sl->Ibytes);
-          soem_log(log_line);
-        }
-
-        /* Set operation mode to CSP (Cyclic Synchronous Position) */
-        {
-          int8 mode = 8;
-          (void)ecx_SDOwrite(&soem_context, 1, 0x6060, 0, FALSE, sizeof(mode),
-                             &mode, EC_TIMEOUTRXM);
-          soem_log("CIA402: Mode=CSP(8)");
-        }
-
-        soem_log("SOEM: requesting SAFE_OP");
-        soem_context.slavelist[0].state = EC_STATE_SAFE_OP;
-        ecx_writestate(&soem_context, 0);
-
-        config_phase = 1;
-        phase_counter = 0;
-        return;
-      }
-
-      case 1: /* --- WAIT SAFE_OP (non-blocking, one check per poll) --- */
-      {
-        (void)ecx_send_processdata(&soem_context);
-        (void)ecx_receive_processdata(&soem_context, EC_TIMEOUTRET);
-
-        ecx_readstate(&soem_context);
-        uint16 sl_state = soem_context.slavelist[1].state & 0x0FU;
-        uint16 sl_al = soem_context.slavelist[1].ALstatuscode;
-        phase_counter++;
-
-        if (sl_state >= EC_STATE_SAFE_OP)
-        {
-          char msg[96];
-          (void)snprintf(msg, sizeof(msg),
-                         "SOEM: SAFE_OP reached (cycle %u) AL=0x%04X",
-                         phase_counter, sl_al);
-          soem_log(msg);
-
-          /* PDO burst + OP request + wait in tight loop */
-          soem_log("SOEM: PDO burst + OP transition");
-          for (int burst = 0; burst < 200; burst++)
-          {
+        case 1: { /* Wait SAFE_OP */
             (void)ecx_send_processdata(&soem_context);
             (void)ecx_receive_processdata(&soem_context, EC_TIMEOUTRET);
-            for (volatile int d = 0; d < 100000; d++) { } /* ~1ms delay */
-
-            /* Request OP after first 50 bursts */
-            if (burst == 50)
-            {
-              soem_log("SOEM: requesting OPERATIONAL");
-              soem_context.slavelist[0].state = EC_STATE_OPERATIONAL;
-              ecx_writestate(&soem_context, 0);
-            }
-
-            /* Check if OP reached */
-            if (burst > 50 && (burst % 10) == 0)
-            {
-              ecx_readstate(&soem_context);
-              if (soem_context.slavelist[1].state == EC_STATE_OPERATIONAL)
-              {
-                soem_configured = 1U;
-                soem_log("[SOEM] OPERATIONAL reached in burst");
-                break;
-              }
-            }
-          }
-
-          if (soem_configured == 0U)
-          {
-            /* Fall through to phase 2 polling */
             ecx_readstate(&soem_context);
-            char m2[96];
-            (void)snprintf(m2, sizeof(m2),
-                           "SOEM: burst done state=0x%02X AL=0x%04X",
-                           soem_context.slavelist[1].state,
-                           soem_context.slavelist[1].ALstatuscode);
-            soem_log(m2);
-          }
+            cfg_counter++;
 
-          config_phase = 2;
-          phase_counter = 0;
-        }
-        else if ((phase_counter % 10U) == 0U)
-        {
-          char msg[96];
-          (void)snprintf(msg, sizeof(msg),
-                         "SOEM: waiting SAFE_OP (%u) state=0x%02X AL=0x%04X",
-                         phase_counter, soem_context.slavelist[1].state, sl_al);
-          soem_log(msg);
+            uint8_t all_safeop = 1U;
+            for (uint8_t ax = 0; ax < g_active_axes; ax++) {
+                if ((soem_context.slavelist[ROBOT_SLAVE_IDX(ax)].state & 0x0FU)
+                    < EC_STATE_SAFE_OP)
+                { all_safeop = 0U; break; }
+            }
 
-          /* Re-request SAFE_OP periodically */
-          soem_context.slavelist[0].state = EC_STATE_SAFE_OP;
-          ecx_writestate(&soem_context, 0);
-        }
-
-        if (phase_counter > 100U)
-        {
-          soem_log("SOEM: SAFE_OP timeout — restarting config");
-          config_phase = 0;
-          phase_counter = 0;
-        }
-        return;
-      }
-
-      case 2: /* --- WAIT OPERATIONAL (non-blocking) --- */
-      {
-        (void)ecx_send_processdata(&soem_context);
-        (void)ecx_receive_processdata(&soem_context, EC_TIMEOUTRET);
-
-        ecx_readstate(&soem_context);
-        uint16 sl_state = soem_context.slavelist[1].state;
-        phase_counter++;
-
-        if (sl_state == EC_STATE_OPERATIONAL)
-        {
-          soem_configured = 1U;
-          soem_log("[SOEM] Slave reached OPERATIONAL state");
-        }
-        else if ((phase_counter % 10U) == 0U)
-        {
-          char msg[96];
-          uint16 sl_al = soem_context.slavelist[1].ALstatuscode;
-          (void)snprintf(msg, sizeof(msg),
-                         "SOEM: waiting OP (%u) state=0x%02X AL=0x%04X",
-                         phase_counter, sl_state, sl_al);
-          soem_log(msg);
-
-          soem_context.slavelist[0].state = EC_STATE_OPERATIONAL;
-          ecx_writestate(&soem_context, 0);
+            if (all_safeop) {
+                soem_logf("SOEM: all SAFE_OP (%u cycles) — PDO burst", cfg_counter);
+                for (int burst = 0; burst < 200; burst++) {
+                    (void)ecx_send_processdata(&soem_context);
+                    (void)ecx_receive_processdata(&soem_context, EC_TIMEOUTRET);
+                    for (volatile int d = 0; d < 100000; d++) {}
+                    if (burst == 50) {
+                        soem_log("SOEM: requesting OPERATIONAL");
+                        soem_context.slavelist[0].state = EC_STATE_OPERATIONAL;
+                        ecx_writestate(&soem_context, 0);
+                    }
+                    if (burst > 50 && (burst % 10) == 0) {
+                        ecx_readstate(&soem_context);
+                        uint8_t all_op = 1U;
+                        for (uint8_t ax = 0; ax < g_active_axes; ax++) {
+                            if (soem_context.slavelist[ROBOT_SLAVE_IDX(ax)].state
+                                != EC_STATE_OPERATIONAL)
+                            { all_op = 0U; break; }
+                        }
+                        if (all_op) {
+                            g_configured = 1U;
+                            soem_log("SOEM: all axes OPERATIONAL (burst)");
+                            return;
+                        }
+                    }
+                }
+                cfg_phase = 2; cfg_counter = 0;
+            } else if ((cfg_counter % 10U) == 0U) {
+                soem_context.slavelist[0].state = EC_STATE_SAFE_OP;
+                ecx_writestate(&soem_context, 0);
+            }
+            if (cfg_counter > 100U) { soem_log("SOEM: SAFE_OP timeout"); cfg_phase = 0; cfg_counter = 0; }
+            return;
         }
 
-        if (phase_counter > 100U)
-        {
-          soem_log("SOEM: OP timeout — restarting config");
-          config_phase = 0;
-          phase_counter = 0;
+        case 2: { /* Wait OPERATIONAL */
+            (void)ecx_send_processdata(&soem_context);
+            (void)ecx_receive_processdata(&soem_context, EC_TIMEOUTRET);
+            ecx_readstate(&soem_context);
+            cfg_counter++;
+
+            uint8_t all_op = 1U;
+            for (uint8_t ax = 0; ax < g_active_axes; ax++) {
+                if (soem_context.slavelist[ROBOT_SLAVE_IDX(ax)].state
+                    != EC_STATE_OPERATIONAL)
+                { all_op = 0U; break; }
+            }
+
+            if (all_op) {
+                g_configured = 1U;
+                soem_log("SOEM: all axes OPERATIONAL");
+            } else if ((cfg_counter % 10U) == 0U) {
+                soem_context.slavelist[0].state = EC_STATE_OPERATIONAL;
+                ecx_writestate(&soem_context, 0);
+            }
+            if (cfg_counter > 100U) { soem_log("SOEM: OP timeout"); cfg_phase = 0; cfg_counter = 0; }
+            return;
         }
-        return;
-      }
 
-      default:
-        config_phase = 0;
-        return;
-    }
-  }
-
-  /* IOmap is in non-cacheable RAM_CMD (0x2406C000) — no cache clean needed.
-   * The DMA reads directly from physical RAM for this region. */
-
-  (void)ecx_send_processdata(&soem_context);
-  {
-    int wkc = ecx_receive_processdata(&soem_context, EC_TIMEOUTRET);
-    static int last_wkc = -1;
-    if (wkc != last_wkc)
-    {
-      char line[48];
-      last_wkc = wkc;
-      (void)snprintf(line, sizeof(line), "SOEM: wkc=%d", wkc);
-      soem_log(line);
-    }
-  }
-
-  if (soem_pdo_ready != 0U)
-  {
-  #if SOEM_ENABLE_PERIODIC_PDO_DEBUG
-    static uint32 pdo_debug_counter = 0;
-  #endif
-    uint16 statusword = soem_txpdo->statusword;
-
-    /* Update shadow copies for UI access */
-    soem_shadow_position   = soem_txpdo->position_actual;
-    soem_shadow_velocity   = soem_txpdo->velocity_actual;
-    soem_shadow_torque     = soem_txpdo->torque_actual;
-    soem_shadow_statusword = statusword;
-    soem_shadow_pdo_ready  = 1U;
-    if (statusword != soem_last_statusword)
-    {
-      char line[64];
-      soem_last_statusword = statusword;
-      (void)snprintf(line, sizeof(line), "CIA402: SW=0x%04X", statusword);
-      soem_log(line);
-      {
-        uint8 state = soem_decode_cia402_state(statusword);
-        if (state != soem_last_state)
-        {
-          soem_last_state = state;
-          soem_log_cia402_state(state);
+        default:
+            cfg_phase = 0;
+            return;
         }
-      }
     }
 
-#if SOEM_ENABLE_PERIODIC_PDO_DEBUG
-    /* Debug: periodic statusword check every 5000 cycles (~5s) */
-    pdo_debug_counter++;
-    if ((pdo_debug_counter % 5000U) == 0U)
-    {
-      char line[128];
-      ec_groupt *grp = soem_context.grouplist + soem_group;
-      uint8 *inp = (uint8 *)grp->inputs;
-      int ilen = (grp->Ibytes > 20) ? 20 : (int)grp->Ibytes;
-      int pos = snprintf(line, sizeof(line), "IN[%d]:", ilen);
-      for (int i = 0; i < ilen && pos < 120; i++)
-      {
-        pos += snprintf(line + pos, sizeof(line) - (size_t)pos, " %02X", inp[i]);
-      }
-      soem_log(line);
-      (void)snprintf(line, sizeof(line), "PDO: SW=0x%04X CTL=0x%04X stg=%u cnt=%lu",
-                     statusword, soem_rxpdo->controlword,
-                     (unsigned)soem_cia402_stage, (unsigned long)pdo_debug_counter);
-      soem_log(line);
+    /* ── STEADY-STATE: 1ms cyclic PDO loop ───────────────────────────────── */
+
+    (void)ecx_send_processdata(&soem_context);
+    (void)ecx_receive_processdata(&soem_context, EC_TIMEOUTRET);
+
+    for (uint8_t ax = 0; ax < g_active_axes; ax++) {
+        soem_update_shadows(ax);
+        soem_apply_pending_sdo(ax);
+        soem_update_target_output(ax);
+        soem_cia402_step(ax);
     }
-#endif
-
-    soem_apply_pending_motion_settings();
-
-    soem_cia402_step(statusword);
-  }
 }
 
-/* ─── UI accessors (callable from TouchGFX task) ─────────────────────────── */
+uint8_t SOEM_GetActiveAxes(void) { return g_active_axes; }
 
-int32_t SOEM_GetPositionActual(void)  { return soem_hw_to_user((int32_t)soem_shadow_position); }
-int32_t SOEM_GetPositionActualHw(void) { return (int32_t)soem_shadow_position; }
-int32_t SOEM_GetVelocityActual(void)  { return (int32_t)soem_shadow_velocity; }
-int16_t SOEM_GetTorqueActual(void)    { return (int16_t)soem_shadow_torque;   }
-uint16_t SOEM_GetStatusword(void)     { return (uint16_t)soem_shadow_statusword; }
-uint8_t  SOEM_GetPdoReady(void)       { return (uint8_t)soem_shadow_pdo_ready; }
-uint8_t  SOEM_GetRunEnable(void)      { return (uint8_t)soem_shadow_run_enable; }
+/* ════════════════════════════════════════════════════════════════════════════
+ *  Public API — data reads (from volatile shadow)
+ * ══════════════════════════════════════════════════════════════════════════ */
 
-void SOEM_SetRunEnable(uint8_t enable)
+int32_t  SOEM_GetPositionHw(AxisId_t ax)     { return axis_valid((uint8_t)ax) ? (int32_t)g_shadow[ax].pos_hw : 0; }
+int32_t  SOEM_GetPositionUser(AxisId_t ax)   { return axis_valid((uint8_t)ax) ? axis_hw_to_user((uint8_t)ax, (int32_t)g_shadow[ax].pos_hw) : 0; }
+int32_t  SOEM_GetPositionCenti(AxisId_t ax)  { return axis_valid((uint8_t)ax) ? (int32_t)g_shadow[ax].pos_centi : 0; }
+int32_t  SOEM_GetVelocity(AxisId_t ax)       { return axis_valid((uint8_t)ax) ? (int32_t)g_shadow[ax].velocity : 0; }
+int16_t  SOEM_GetTorque(AxisId_t ax)         { return axis_valid((uint8_t)ax) ? (int16_t)g_shadow[ax].torque : 0; }
+uint16_t SOEM_GetStatusword(AxisId_t ax)     { return axis_valid((uint8_t)ax) ? (uint16_t)g_shadow[ax].statusword : 0; }
+uint8_t  SOEM_GetCia402State(AxisId_t ax)    { return axis_valid((uint8_t)ax) ? g_shadow[ax].cia402_state : 0; }
+uint8_t  SOEM_GetPdoReady(AxisId_t ax)       { return axis_valid((uint8_t)ax) ? g_shadow[ax].pdo_ready : 0; }
+uint8_t  SOEM_GetRunEnable(AxisId_t ax)      { return axis_valid((uint8_t)ax) ? g_rt[ax].run_enable : 0; }
+uint8_t  SOEM_IsTargetReached(AxisId_t ax)   { return axis_valid((uint8_t)ax) ? g_shadow[ax].target_reached : 0; }
+
+void SOEM_GetStatusPkt(AxisId_t ax, AxisStatusPkt_t *pkt)
 {
-  uint8_t requested = (enable != 0U) ? 1U : 0U;
-  if (soem_shadow_run_enable != requested)
-  {
-    if ((soem_shadow_run_enable == 0U) && (requested != 0U))
-    {
-      /* Latch target to current actual position before enabling operation.
-       * This prevents immediate following-error faults caused by stale target=0. */
-      soem_latch_target_to_actual("CIA402: RUN ON -> latch target to actual");
+    if (!axis_valid((uint8_t)ax) || pkt == NULL) return;
+    pkt->pos_centi  = (int32_t)g_shadow[ax].pos_centi;
+    int32_t vel     = (int32_t)g_shadow[ax].velocity;
+    pkt->velocity   = (int16_t)((vel > 32767) ? 32767 : (vel < -32768) ? -32768 : vel);
+    pkt->torque     = (int16_t)g_shadow[ax].torque;
+    pkt->statusword = (uint16_t)g_shadow[ax].statusword;
+    pkt->cia402_state = g_shadow[ax].cia402_state;
+    pkt->flags = (uint8_t)((g_shadow[ax].pdo_ready       ? 0x01U : 0U) |
+                            (g_shadow[ax].target_reached   ? 0x02U : 0U) |
+                            (g_shadow[ax].run_enable        ? 0x04U : 0U));
+}
+
+uint8_t SOEM_AllAxesReady(void)
+{
+    for (uint8_t ax = 0; ax < g_active_axes; ax++)
+        if (!g_shadow[ax].pdo_ready) return 0U;
+    return (g_active_axes > 0) ? 1U : 0U;
+}
+
+uint8_t SOEM_AllTargetsReached(void)
+{
+    for (uint8_t ax = 0; ax < g_active_axes; ax++)
+        if (!g_shadow[ax].target_reached) return 0U;
+    return (g_active_axes > 0) ? 1U : 0U;
+}
+
+/* ════════════════════════════════════════════════════════════════════════════
+ *  Public API — motion commands
+ * ══════════════════════════════════════════════════════════════════════════ */
+
+void SOEM_FaultReset(AxisId_t ax)
+{
+    if ((uint8_t)ax == (uint8_t)AXIS_ALL) {
+        for (uint8_t i = 0U; i < g_active_axes; i++)
+            g_rt[i].fault_reset_pending = 1U;
+    } else if (axis_valid((uint8_t)ax)) {
+        g_rt[ax].fault_reset_pending = 1U;
     }
-
-    soem_shadow_run_enable = requested;
-    soem_log((requested != 0U) ? "CIA402: RUN request ON" : "CIA402: RUN request OFF");
-  }
 }
 
-void SOEM_SetTargetPositionDelta(int32_t delta)
+void SOEM_SetRunEnable(AxisId_t ax, uint8_t en)
 {
-  int64_t nextUser = (int64_t)soem_hw_to_user(soem_target_position) + (int64_t)delta;
-  if (nextUser > (int64_t)INT32_MAX)
-  {
-    nextUser = (int64_t)INT32_MAX;
-  }
-  else if (nextUser < (int64_t)INT32_MIN)
-  {
-    nextUser = (int64_t)INT32_MIN;
-  }
-
-  soem_target_position = soem_saturated_user_to_hw(soem_clamp_user_position((int32_t)nextUser));
-  soem_target_position = soem_clamp_hw_position(soem_target_position);
+    if (!axis_valid((uint8_t)ax)) return;
+    g_rt[ax].run_enable = en ? 1U : 0U;
 }
 
-void SOEM_SetTargetPositionAbs(int32_t pos)
+void SOEM_SetAllRunEnable(uint8_t en)
 {
-#if SOEM_ENABLE_CMD_DEBUG_LOG
-  char line[96];
-#endif
-  int32_t requestedUser = pos;
-  soem_target_position = soem_saturated_user_to_hw(soem_clamp_user_position(pos));
-  soem_target_position = soem_clamp_hw_position(soem_target_position);
-#if SOEM_ENABLE_CMD_DEBUG_LOG
-  (void)snprintf(line, sizeof(line), "CMD: set abs user=%ld hw=%ld out=%ld actual=%ld",
-                 (long)requestedUser,
-                 (long)soem_target_position,
-                 (long)soem_target_position_output,
-                 (long)soem_shadow_position);
-  soem_log(line);
-#else
-  (void)requestedUser;
-#endif
+    for (uint8_t ax = 0; ax < g_active_axes; ax++) g_rt[ax].run_enable = en ? 1U : 0U;
 }
 
-void SOEM_SetTargetPositionAbsHw(int32_t hwPos)
+void SOEM_SetTargetHw(AxisId_t ax, int32_t hw)
 {
-#if SOEM_ENABLE_CMD_DEBUG_LOG
-  char line[96];
-#endif
-  soem_target_position = soem_clamp_hw_position(hwPos);
-#if SOEM_ENABLE_CMD_DEBUG_LOG
-  (void)snprintf(line, sizeof(line), "CMD: set abs hw=%ld out=%ld actual=%ld",
-                 (long)soem_target_position,
-                 (long)soem_target_position_output,
-                 (long)soem_shadow_position);
-  soem_log(line);
-#endif
+    if (!axis_valid((uint8_t)ax)) return;
+    g_rt[ax].interp_active = 0U;
+    g_rt[ax].target_hw = axis_clamp_hw((uint8_t)ax, hw);
 }
 
-void SOEM_SetProfileVelocity(int32_t velocity)
+void SOEM_SetTargetUser(AxisId_t ax, int32_t user)
 {
-  if (velocity < 0)
-  {
-    velocity = -velocity;
-  }
-  soem_profile_velocity = velocity;
-  soem_profile_velocity_pending = 1U;
+    if (!axis_valid((uint8_t)ax)) return;
+    int32_t hw = axis_user_to_hw((uint8_t)ax, user);
+    g_rt[ax].interp_active = 0U;
+    g_rt[ax].target_hw = axis_clamp_hw((uint8_t)ax, hw);
 }
 
-void SOEM_SetTorqueLimitPercent(uint16_t percent)
+void SOEM_SetTargetDelta(AxisId_t ax, int32_t delta)
 {
-  if (percent > 100U)
-  {
-    percent = 100U;
-  }
-  soem_torque_limit_percent = percent;
-  soem_torque_limit_pending = 1U;
+    if (!axis_valid((uint8_t)ax)) return;
+    int32_t cur_user = axis_hw_to_user((uint8_t)ax, g_rt[ax].target_hw);
+    SOEM_SetTargetUser(ax, cur_user + delta);
 }
 
-void SOEM_SetProfileAcceleration(int32_t acceleration)
+void SOEM_SetTargetVelocity(AxisId_t ax, int32_t vel_hw)
 {
-  if (acceleration < 0)
-  {
-    acceleration = -acceleration;
-  }
-  if (acceleration > (int32_t)SOEM_ACCDEC_MAX_MS)
-  {
-    acceleration = (int32_t)SOEM_ACCDEC_MAX_MS;
-  }
-  soem_profile_acceleration = acceleration;
-  soem_profile_acceleration_pending = 1U;
+    if (!axis_valid((uint8_t)ax)) return;
+    g_rt[ax].target_vel_hw = vel_hw;
 }
 
-void SOEM_SetProfileDeceleration(int32_t deceleration)
+void SOEM_SetInterpolatedTarget(AxisId_t ax, int32_t hw)
 {
-  if (deceleration < 0)
-  {
-    deceleration = -deceleration;
-  }
-  if (deceleration > (int32_t)SOEM_ACCDEC_MAX_MS)
-  {
-    deceleration = (int32_t)SOEM_ACCDEC_MAX_MS;
-  }
-  soem_profile_deceleration = deceleration;
-  soem_profile_deceleration_pending = 1U;
+    if (!axis_valid((uint8_t)ax)) return;
+    /* Bypass the ramp generator: set both target and output to the same
+     * interpolated value.  soem_update_target_output() will see diff=0
+     * and pass the value straight through to the PDO.               */
+    g_rt[ax].interp_active = 1U;
+    g_rt[ax].target_hw     = hw;
+    g_rt[ax].target_hw_out = hw;
 }
 
-void SOEM_SetSoftwareLimitPlus(int32_t limitPlus)
+void SOEM_SetRampVelocity(AxisId_t ax, int32_t vel)
 {
-  if (limitPlus > SOEM_SW_LIMIT_ABS_MAX_UU)
-  {
-    limitPlus = SOEM_SW_LIMIT_ABS_MAX_UU;
-  }
-  else if (limitPlus < -SOEM_SW_LIMIT_ABS_MAX_UU)
-  {
-    limitPlus = -SOEM_SW_LIMIT_ABS_MAX_UU;
-  }
-  soem_limit_plus_user = limitPlus;
-  soem_refresh_hw_limits();
-  soem_software_limits_pending = 1U;
+    if (!axis_valid((uint8_t)ax)) return;
+    g_rt[ax].ramp_velocity = (vel < 0) ? -vel : vel;
 }
 
-void SOEM_SetSoftwareLimitMinus(int32_t limitMinus)
+void SOEM_SyncRtFromAxisParam(void)
 {
-  if (limitMinus > SOEM_SW_LIMIT_ABS_MAX_UU)
-  {
-    limitMinus = SOEM_SW_LIMIT_ABS_MAX_UU;
-  }
-  else if (limitMinus < -SOEM_SW_LIMIT_ABS_MAX_UU)
-  {
-    limitMinus = -SOEM_SW_LIMIT_ABS_MAX_UU;
-  }
-  soem_limit_minus_user = limitMinus;
-  soem_refresh_hw_limits();
-  soem_software_limits_pending = 1U;
+    /* Called after RobotFlash_Load() to propagate flash-restored values into
+     * g_rt[], which was initialised from g_axis_param[] defaults BEFORE flash
+     * was loaded.  Without this, step_per_cycle() uses default velocity. */
+    for (uint8_t ax = 0U; ax < (uint8_t)AXIS_COUNT; ax++) {
+        g_rt[ax].profile_velocity = g_axis_param[ax].profile_velocity;
+        g_rt[ax].ramp_velocity    = g_axis_param[ax].profile_velocity;
+        g_rt[ax].profile_accel_ms = g_axis_param[ax].profile_accel_ms;
+        g_rt[ax].profile_decel_ms = g_axis_param[ax].profile_decel_ms;
+        g_rt[ax].torque_limit     = g_axis_param[ax].torque_limit;
+    }
 }
 
-void SOEM_SetUnitScale(int32_t scale)
+void SOEM_LatchAllTargetToActual(void)
 {
-  if (scale <= 0)
-  {
-    scale = 1;
-  }
-  soem_unit_scale = scale;
-  soem_refresh_hw_limits();
-  soem_unit_scale_pending = 1U;
+    for (uint8_t ax = 0U; ax < g_active_axes; ax++)
+        latch_target_to_actual(ax);
 }
 
-void SOEM_SetPositionGain(int32_t gain)
+void SOEM_SetProfileVelocity(AxisId_t ax, int32_t vel)
 {
-  if (gain < 0)
-  {
-    gain = 0;
-  }
-  soem_position_gain = gain;
-  soem_position_gain_pending = 1U;
+    if (!axis_valid((uint8_t)ax)) return;
+    int32_t v = (vel < 0) ? -vel : vel;
+    g_axis_param[ax].profile_velocity  = v;
+    g_rt[ax].profile_velocity          = v;
+    g_rt[ax].ramp_velocity             = v;   /* keep ramp in sync with profile */
+    g_rt[ax].profile_velocity_pending  = 1U;
 }
 
-void SOEM_RequestParameterReadAll(void)
+void SOEM_SetProfileAccel(AxisId_t ax, int32_t ms)
 {
-  soem_parameter_read_all_pending = 1U;
-  soem_parameter_read_all_updated = 0U;
+    if (!axis_valid((uint8_t)ax)) return;
+    g_axis_param[ax].profile_accel_ms  = ms;
+    g_rt[ax].profile_accel_ms          = ms;
+    g_rt[ax].profile_accel_pending     = 1U;
 }
 
-uint8_t SOEM_FetchParameterReadAll(int32_t *valuesOut, uint8_t valueCount)
+void SOEM_SetProfileDecel(AxisId_t ax, int32_t ms)
 {
-  uint8_t index;
-
-  if ((valuesOut == NULL) || (valueCount < SOEM_PARAMETER_PAGE_VALUE_COUNT) ||
-      (soem_parameter_read_all_updated == 0U))
-  {
-    return 0U;
-  }
-
-  for (index = 0U; index < SOEM_PARAMETER_PAGE_VALUE_COUNT; index++)
-  {
-    valuesOut[index] = soem_parameter_read_all_values[index];
-  }
-
-  soem_parameter_read_all_updated = 0U;
-  return 1U;
+    if (!axis_valid((uint8_t)ax)) return;
+    g_axis_param[ax].profile_decel_ms  = ms;
+    g_rt[ax].profile_decel_ms          = ms;
+    g_rt[ax].profile_decel_pending     = 1U;
 }
 
-void SOEM_RequestPositionGainRead(void)
+void SOEM_SetTorqueLimit(AxisId_t ax, uint16_t permille)
 {
-  soem_position_gain_read_pending = 1U;
-  soem_position_gain_read_status = 10;
+    if (!axis_valid((uint8_t)ax)) return;
+    if (permille > 1000U) permille = 1000U;
+    g_axis_param[ax].torque_limit      = permille;
+    g_rt[ax].torque_limit              = permille;
+    g_rt[ax].torque_limit_pending      = 1U;
 }
 
-uint8_t SOEM_FetchPositionGainRead(int32_t *gainOut)
+/* ── Unit scaling ─────────────────────────────────────────────────────────  */
+
+void SOEM_SetUnitScale(AxisId_t ax, int32_t scale)
 {
-  if ((gainOut == NULL) || (soem_position_gain_read_updated == 0U))
-  {
-    return 0U;
-  }
-
-  *gainOut = soem_position_gain_readback;
-  soem_position_gain_read_updated = 0U;
-  return 1U;
+    if (!axis_valid((uint8_t)ax) || scale <= 0) return;
+    g_axis_param[ax].unit_scale    = scale;
+    g_rt[ax].unit_scale_pending    = 1U;
+    g_rt[ax].profile_velocity_pending = 1U;  /* unit_scale 변경 시 0x6081도 재전송 */
 }
 
-int32_t SOEM_GetPositionGainReadStatus(void)
+/* ── Homing ───────────────────────────────────────────────────────────────  */
+
+void SOEM_SetHomePosition(AxisId_t ax)
 {
-  return soem_position_gain_read_status;
+    if (!axis_valid((uint8_t)ax)) return;
+    g_axis_param[ax].home_offset  = (int32_t)g_shadow[ax].pos_hw;
+    g_rt[ax].home_offset_pending  = 1U;
+    soem_logf("[Ax%s] home set hw=%ld", robot_axis_name((uint8_t)ax),
+              (long)g_axis_param[ax].home_offset);
+
+    /* limit_hw stores absolute encoder counts — physically unchanged after a
+     * home change.  Recompute limit_user so the param panel always shows mm
+     * relative to the new home rather than the old one.                      */
+    if (g_axis_param[ax].limits_enabled) {
+        g_axis_param[ax].limit_plus_user  =
+            axis_hw_to_user((uint8_t)ax, g_axis_param[ax].limit_plus_hw);
+        g_axis_param[ax].limit_minus_user =
+            axis_hw_to_user((uint8_t)ax, g_axis_param[ax].limit_minus_hw);
+    }
 }
 
-void SOEM_SetHomeOffset(int32_t offset)
+void SOEM_LoadHomeHwOffset(AxisId_t ax, int32_t hw_offset)
 {
-  int32_t scale = (soem_unit_scale > 0) ? soem_unit_scale : 1;
-  int64_t hwOffset = (int64_t)offset * (int64_t)scale;
-  if (hwOffset > (int64_t)INT32_MAX)
-  {
-    hwOffset = (int64_t)INT32_MAX;
-  }
-  else if (hwOffset < (int64_t)INT32_MIN)
-  {
-    hwOffset = (int64_t)INT32_MIN;
-  }
-
-  soem_home_offset = (int32_t)hwOffset;
-  soem_refresh_hw_limits();
-  soem_home_offset_pending = 1U;
+    if (!axis_valid((uint8_t)ax)) return;
+    g_axis_param[ax].home_offset  = hw_offset;
+    g_rt[ax].home_offset_pending  = 1U;
 }
 
-void SOEM_SetHomePosition(void)
+int32_t SOEM_GetHomeOffset(AxisId_t ax)
 {
-  /* Define the current hardware position as the new origin (0).
-   * After this call, GetPositionActual() returns 0 and all subsequent
-   * SetTargetPositionAbs() calls are relative to this new origin. */
-  soem_home_offset = soem_shadow_position;
-  soem_refresh_hw_limits();
-  soem_home_offset_pending = 1U;
-  /* Also reset the motion target to 0 in hardware space = stay put. */
-  soem_target_position = soem_clamp_hw_position((int32_t)soem_shadow_position);
-  soem_log("HOME: origin set to current position");
+    return axis_valid((uint8_t)ax) ? g_axis_param[ax].home_offset : 0;
 }
 
-int32_t SOEM_GetHomeOffset(void)
+/* ── Software limits ──────────────────────────────────────────────────────  */
+
+void SOEM_SetLimitPlusUser(AxisId_t ax, int32_t lim)
 {
-  return soem_home_offset;
+    if (!axis_valid((uint8_t)ax)) return;
+    g_axis_param[ax].limit_plus_user = lim;
+    g_axis_param[ax].limit_plus_hw   = axis_user_to_hw((uint8_t)ax, lim);
+    refresh_hw_limits((uint8_t)ax);
+    g_rt[ax].limits_pending = 1U;
 }
 
-void SOEM_LoadHomeHwOffset(int32_t hwOffset)
+void SOEM_SetLimitMinusUser(AxisId_t ax, int32_t lim)
 {
-  /* Restore a previously saved raw hardware home offset directly, without
-   * applying the unit-scale conversion used by SOEM_SetHomeOffset().
-   * Called once at startup after reading the flash home record. */
-  soem_home_offset = hwOffset;
-  soem_refresh_hw_limits();
-  soem_home_offset_pending = 1U;
+    if (!axis_valid((uint8_t)ax)) return;
+    g_axis_param[ax].limit_minus_user = lim;
+    g_axis_param[ax].limit_minus_hw   = axis_user_to_hw((uint8_t)ax, lim);
+    refresh_hw_limits((uint8_t)ax);
+    g_rt[ax].limits_pending = 1U;
 }
 
-#endif
+void SOEM_CaptureLimitPlusHere(AxisId_t ax)
+{
+    if (!axis_valid((uint8_t)ax)) return;
+    g_axis_param[ax].limit_plus_hw   = (int32_t)g_shadow[ax].pos_hw;
+    g_axis_param[ax].limit_plus_user = axis_hw_to_user((uint8_t)ax, (int32_t)g_shadow[ax].pos_hw);
+    refresh_hw_limits((uint8_t)ax);
+    g_rt[ax].limits_pending = 1U;
+}
+
+void SOEM_CaptureLimitMinusHere(AxisId_t ax)
+{
+    if (!axis_valid((uint8_t)ax)) return;
+    g_axis_param[ax].limit_minus_hw   = (int32_t)g_shadow[ax].pos_hw;
+    g_axis_param[ax].limit_minus_user = axis_hw_to_user((uint8_t)ax, (int32_t)g_shadow[ax].pos_hw);
+    refresh_hw_limits((uint8_t)ax);
+    g_rt[ax].limits_pending = 1U;
+}
+
+void SOEM_SetLimitPlusHw(AxisId_t ax, int32_t hw)
+{
+    if (!axis_valid((uint8_t)ax)) return;
+    g_axis_param[ax].limit_plus_hw   = hw;
+    g_axis_param[ax].limit_plus_user = axis_hw_to_user((uint8_t)ax, hw);
+    refresh_hw_limits((uint8_t)ax);
+}
+
+void SOEM_SetLimitMinusHw(AxisId_t ax, int32_t hw)
+{
+    if (!axis_valid((uint8_t)ax)) return;
+    g_axis_param[ax].limit_minus_hw   = hw;
+    g_axis_param[ax].limit_minus_user = axis_hw_to_user((uint8_t)ax, hw);
+    refresh_hw_limits((uint8_t)ax);
+}
+
+int32_t SOEM_GetLimitPlusHw(AxisId_t ax)  { return axis_valid((uint8_t)ax) ? g_axis_param[ax].limit_plus_hw  : INT32_MAX; }
+int32_t SOEM_GetLimitMinusHw(AxisId_t ax) { return axis_valid((uint8_t)ax) ? g_axis_param[ax].limit_minus_hw : INT32_MIN; }
+
+void SOEM_RefreshAllLimits(void)
+{
+    for (uint8_t ax = 0U; ax < (uint8_t)AXIS_COUNT; ax++)
+        refresh_hw_limits(ax);
+}
+
+/* ── Position gain ────────────────────────────────────────────────────────  */
+
+void SOEM_SetPositionGain(AxisId_t ax, int32_t gain)
+{
+    if (!axis_valid((uint8_t)ax)) return;
+    g_axis_param[ax].position_gain     = gain;
+    g_rt[ax].position_gain             = gain;
+    g_rt[ax].position_gain_pending     = (gain > 0) ? 1U : 0U;
+}
+
+void SOEM_RequestGainRead(AxisId_t ax)
+{
+    if (!axis_valid((uint8_t)ax)) return;
+    g_rt[ax].position_gain_read_pending = 1U;
+    g_rt[ax].position_gain_read_done    = 0U;
+}
+
+uint8_t SOEM_FetchGainRead(AxisId_t ax, int32_t *gain)
+{
+    if (!axis_valid((uint8_t)ax) || !g_rt[ax].position_gain_read_done) return 0U;
+    if (gain) *gain = (int32_t)g_rt[ax].position_gain_readback;
+    g_rt[ax].position_gain_read_done = 0U;
+    return 1U;
+}
+
+int32_t SOEM_GetGainReadStatus(AxisId_t ax)
+{
+    return axis_valid((uint8_t)ax) ? (int32_t)g_rt[ax].position_gain_read_status : -1;
+}
+
+/* ── Parameter bulk read ──────────────────────────────────────────────────  */
+
+void SOEM_RequestParamRead(AxisId_t ax)
+{
+    if (!axis_valid((uint8_t)ax)) return;
+    g_rt[ax].param_read_pending = 1U;
+    g_rt[ax].param_read_done    = 0U;
+}
+
+uint8_t SOEM_FetchParamRead(AxisId_t ax, int32_t *values, uint8_t count)
+{
+    if (!axis_valid((uint8_t)ax) || !g_rt[ax].param_read_done) return 0U;
+    if (values && count > 0U) {
+        uint8_t n = (count > SOEM_PARAM_READ_COUNT) ? SOEM_PARAM_READ_COUNT : count;
+        for (uint8_t i = 0; i < n; i++)
+            values[i] = (int32_t)g_rt[ax].param_read_values[i];
+    }
+    g_rt[ax].param_read_done = 0U;
+    return 1U;
+}
+
+#endif /* SOEM_ENABLED */

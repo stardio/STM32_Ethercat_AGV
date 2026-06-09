@@ -1,0 +1,493 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Servo Press Web Control</title>
+  <link rel="stylesheet" href="styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+</head>
+<body>
+
+  <!-- ═══ TOPBAR ═══ -->
+  <header class="topbar">
+    <span class="app-title">Servo Press</span>
+    <nav class="tabs" id="tabs">
+      <button class="tab active" data-tab="home">Home</button>
+      <button class="tab" data-tab="manual">Manual</button>
+      <button class="tab" data-tab="parameter">Parameter</button>
+      <button class="tab" data-tab="program">Program</button>
+      <button class="tab" data-tab="press">Press</button>
+      <button class="tab" data-tab="quality">Quality</button>
+      <button class="tab" data-tab="alarm">Alarm</button>
+      <button class="tab" data-tab="maintenance">Maint.</button>
+      <button class="tab" data-tab="db">DB</button>
+      <button class="tab" data-tab="log">Log</button>
+    </nav>
+    <div class="conn-wrap">
+      <select id="portSelect"></select>
+      <select id="baudSelect">
+        <option selected>115200</option>
+        <option>230400</option>
+        <option>460800</option>
+        <option>921600</option>
+      </select>
+      <button id="refreshPortsBtn" title="Refresh ports">⟳</button>
+      <button id="connectBtn">Connect</button>
+      <button id="readAllBtn" title="Read all settings">Read</button>
+      <button id="demoBtn" class="demo-btn">Demo</button>
+      <span id="connState" class="badge offline">Disconnected</span>
+    </div>
+  </header>
+
+  <!-- ═══ STATUS STRIP ═══ -->
+  <div class="status-strip">
+    <div class="st-group">
+      <span class="st-lbl">Position</span><strong id="mPos">-</strong>
+      <span class="st-lbl">Velocity</span><strong id="mVel">-</strong>
+      <span class="st-lbl">Torque</span><strong id="mTor">-</strong>
+      <span class="st-lbl">Status</span><strong id="mStatus">-</strong>
+    </div>
+    <div class="st-sep"></div>
+    <div class="st-group">
+      <span class="st-lbl">Run</span>
+      <label class="run-lbl">
+        <input type="checkbox" id="runToggle">
+        <strong id="mRun">OFF</strong>
+      </label>
+    </div>
+    <div class="st-sep"></div>
+    <div class="st-group">
+      <span class="st-lbl">Mode</span><strong id="psMode">-</strong>
+      <span class="st-lbl">Step</span><strong id="psStep">-</strong>
+    </div>
+    <div class="st-group interlocks">
+      <span id="ilkEstop" class="ilock-led">E-Stop</span>
+      <span id="ilkDoor" class="ilock-led">Door</span>
+      <span id="ilkDrive" class="ilock-led">Drive</span>
+      <span id="ilkHome" class="ilock-led">Home</span>
+    </div>
+    <div class="st-sep"></div>
+    <div class="st-group">
+      <span class="st-lbl">Total</span><strong id="cntTotal">0</strong>
+      <span class="st-lbl">OK</span><strong id="cntOk" class="clr-ok">0</strong>
+      <span class="st-lbl">NG</span><strong id="cntNg" class="clr-ng">0</strong>
+      <span class="st-lbl">Rate</span><strong id="cntRate">0.0%</strong>
+      <span class="st-lbl">CNG</span><strong id="cntCng">0</strong>
+    </div>
+    <div class="st-sep"></div>
+    <div class="st-group">
+      <span class="st-lbl">Alarm</span>
+      <strong id="activeAlarm" class="alarm-none">NONE</strong>
+    </div>
+  </div>
+
+  <!-- ═══ TREND CHART (항상 표시) ═══ -->
+  <div class="chart-area">
+    <canvas id="trendChart"></canvas>
+  </div>
+
+  <!-- ═══ CONTENT AREA ═══ -->
+  <main class="content-area">
+
+    <!-- Home -->
+    <div class="panel active" id="panel-home">
+      <div class="home-grid">
+        <div class="sect">
+          <div class="sect-title">서보 제어</div>
+          <p class="hint-text">하단 버튼으로 Home 설정 및 Run ON/OFF를 제어합니다.</p>
+          <div class="st-group" style="gap:12px; margin-top:8px">
+            <span class="st-lbl">현재 Run</span><strong id="homeRunStatus">-</strong>
+          </div>
+        </div>
+        <div class="sect">
+          <div class="sect-title">그래프 범례</div>
+          <div class="legend-list">
+            <div><span class="legend-dot" style="background:#57c7ff"></span>Position (mm)</div>
+            <div><span class="legend-dot" style="background:#80e96a"></span>Velocity (mm/s)</div>
+            <div><span class="legend-dot" style="background:#ffb44c"></span>Torque (%)</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Manual -->
+    <div class="panel" id="panel-manual">
+      <div class="form-grid form-grid2">
+        <label class="chk-label"><input id="manualAbs" type="checkbox" checked> ABS Mode</label>
+        <label>Position (mm)<input id="manualPos" type="text" inputmode="numeric" value="0"></label>
+        <label>Speed (mm/s)<input id="manualSpeed" type="text" inputmode="numeric" value="100"></label>
+        <label>Torque (%)<input id="manualTorque" type="text" inputmode="numeric" value="20"></label>
+      </div>
+    </div>
+
+    <!-- Parameter -->
+    <div class="panel" id="panel-parameter">
+      <div class="form-grid form-grid2">
+        <label>Jog Speed (mm/s)<input id="pJogSpeed" type="text" inputmode="numeric" value="10"></label>
+        <label>Acc Time (msec)<input id="pAcc" type="text" inputmode="numeric" value="100"></label>
+        <label>Dec Time (msec)<input id="pDec" type="text" inputmode="numeric" value="100"></label>
+        <label>Limit + (enc)
+          <div style="display:flex;gap:4px;align-items:center">
+            <input id="pLimitPlus" type="text" inputmode="numeric" value="100000" style="flex:1;min-width:0">
+            <button id="captureLimitPlusBtn" class="btn-link" style="padding:3px 8px;font-size:0.78rem;white-space:nowrap" title="현재 HW 인코더 절대값을 Limit+로 설정">📍현재위치</button>
+          </div>
+        </label>
+        <label>Limit - (enc)
+          <div style="display:flex;gap:4px;align-items:center">
+            <input id="pLimitMinus" type="text" inputmode="numeric" value="-100000" style="flex:1;min-width:0">
+            <button id="captureLimitMinusBtn" class="btn-link" style="padding:3px 8px;font-size:0.78rem;white-space:nowrap" title="현재 HW 인코더 절대값을 Limit-로 설정">📍현재위치</button>
+          </div>
+        </label>
+        <label>감속비 (Gear Ratio)<input id="pGearRatio" type="text" inputmode="numeric" value="1"></label>
+        <label>볼스크류 리드 (mm)<input id="pBallLead" type="text" inputmode="numeric" value="1"></label>
+        <label>엔코더 분해능 (cts/rev)<input id="pEncRes" type="text" inputmode="numeric" value="131072"></label>
+        <label>Unit Scale (자동계산)<input id="pUnitScale" type="text" readonly style="background:#1a2a3a;color:#8ac;" value="1"></label>
+        <label>Home Offset (mm)<input id="pHomeOffset" type="text" inputmode="numeric" value="0"></label>
+        <label>Position Gain<input id="pPosGain" type="text" inputmode="numeric" value="0"></label>
+      </div>
+    </div>
+
+    <!-- Program -->
+    <div class="panel" id="panel-program">
+      <div class="form-grid form-grid3">
+        <label>Pos 1 (mm)<input id="gPos1" type="text" inputmode="numeric" value="0"></label>
+        <label>Pos 2 (mm)<input id="gPos2" type="text" inputmode="numeric" value="0"></label>
+        <label>Pos 3 (mm)<input id="gPos3" type="text" inputmode="numeric" value="0"></label>
+        <label>Speed 1 (mm/s)<input id="gSpeed1" type="text" inputmode="numeric" value="100"></label>
+        <label>Speed 2 (mm/s)<input id="gSpeed2" type="text" inputmode="numeric" value="100"></label>
+        <label>Speed 3 (mm/s)<input id="gSpeed3" type="text" inputmode="numeric" value="100"></label>
+        <label>Torque 1 (%)<input id="gTorque1" type="text" inputmode="numeric" value="20"></label>
+        <label>Torque 2 (%)<input id="gTorque2" type="text" inputmode="numeric" value="20"></label>
+        <label>Torque 3 (%)<input id="gTorque3" type="text" inputmode="numeric" value="20"></label>
+        <label>Return Speed (mm/s)<input id="gReturnSpeed" type="text" inputmode="numeric" value="100"></label>
+        <label></label>
+        <label></label>
+        <label>Delay 1 (msec)<input id="gDelay1Ms" type="text" inputmode="numeric" value="0"></label>
+        <label>Delay 2 (msec)<input id="gDelay2Ms" type="text" inputmode="numeric" value="0"></label>
+        <label>Delay 3 (msec)<input id="gDelay3Ms" type="text" inputmode="numeric" value="0"></label>
+      </div>
+      <div class="repeat-section">
+        <label class="repeat-label">Cycle Repeat Count (1 ~ 99)
+          <input id="gCycleRepeat" type="text" inputmode="numeric" value="1" min="1" max="99" style="width:60px">
+        </label>
+        <span class="repeat-progress" id="cycleRepeatProgress"></span>
+      </div>
+      <div class="repeat-section">
+        <label class="repeat-label">Inter-Cycle Delay (msec)
+          <input id="gInterCycleDelay" type="text" inputmode="numeric" value="0" min="0" style="width:80px">
+        </label>
+      </div>
+    </div>
+
+    <!-- Press Control -->
+    <div class="panel" id="panel-press">
+      <div class="press-content-grid">
+        <div class="sect">
+          <div class="sect-title">Press Parameters</div>
+          <div class="form-grid form-grid2">
+            <label>Approach Speed (mm/s)<input id="pressApSpd" type="text" inputmode="numeric" value="500"></label>
+            <label>Approach Pos (mm)<input id="pressApPos" type="text" inputmode="numeric" value="-5000"></label>
+            <label>Contact Speed (mm/s)<input id="pressCntSpd" type="text" inputmode="numeric" value="50"></label>
+            <label>Contact Torque Th%<input id="pressCntTh" type="text" inputmode="numeric" value="10"></label>
+            <label>Press Speed (mm/s)<input id="pressPrSpd" type="text" inputmode="numeric" value="100"></label>
+            <label>Press Target Pos (mm)<input id="pressPrPos" type="text" inputmode="numeric" value="-10000"></label>
+            <label>Press Max Force%<input id="pressPrForce" type="text" inputmode="numeric" value="80"></label>
+            <label>Dwell Time (ms)<input id="pressDwell" type="text" inputmode="numeric" value="500"></label>
+            <label>Return Speed (mm/s)<input id="pressRetSpd" type="text" inputmode="numeric" value="500"></label>
+            <label>Return Pos (mm)<input id="pressRetPos" type="text" inputmode="numeric" value="0"></label>
+            <label>Timeout (ms)<input id="pressTimeout" type="text" inputmode="numeric" value="30000"></label>
+          </div>
+        </div>
+        <div class="press-right-col">
+          <div class="sect">
+            <div class="sect-title">AUTO 준비 상태</div>
+            <div class="auto-ready-lamp" id="autoReadyLamp">
+              <div class="ready-icon" id="readyIcon">●</div>
+              <div class="ready-label" id="readyLabel">NOT READY</div>
+            </div>
+            <div class="ready-conditions">
+              <span class="rcond" id="rcEstop">E-Stop</span>
+              <span class="rcond" id="rcDoor">Door</span>
+              <span class="rcond" id="rcDrive">Drive</span>
+              <span class="rcond" id="rcHome">Home</span>
+            </div>
+          </div>
+          <div class="sect" style="margin-top:8px">
+            <div class="sect-title">사이클 판정 결과</div>
+            <div class="cycle-result-panel" id="cycleResultPanel">
+              <div class="cr-icon" id="crIcon">—</div>
+              <div class="cr-body">
+                <div class="cr-label" id="crLabel">대기중</div>
+                <div class="cr-detail" id="crDetail"></div>
+              </div>
+            </div>
+          </div>
+          <div class="sect" style="margin-top:8px">
+            <div class="sect-title">Judge Limits</div>
+            <div class="form-grid form-grid2">
+              <label>Force Max%<input id="judgeForceMax" type="text" inputmode="numeric" value="75"></label>
+              <label>Force Min%<input id="judgeForceMin" type="text" inputmode="numeric" value="10"></label>
+              <label>Pos Max<input id="judgePosMax" type="text" inputmode="numeric" value="-9000"></label>
+              <label>Pos Min<input id="judgePosMin" type="text" inputmode="numeric" value="-11000"></label>
+            </div>
+          </div>
+          <div class="sect" style="margin-top:8px">
+            <div class="sect-title">Interlock Simulation</div>
+            <div class="form-grid form-grid2">
+              <label class="chk-label"><input type="checkbox" id="simEstop" checked> E-Stop OK</label>
+              <label class="chk-label"><input type="checkbox" id="simDoor" checked> Door OK</label>
+              <label class="chk-label"><input type="checkbox" id="simHome" checked> Home Complete</label>
+            </div>
+          </div>
+          <div class="sect" style="margin-top:8px">
+            <div class="sect-title">Last Cycle Result</div>
+            <div class="result-box">
+              <div><span>Cycle#</span><strong id="rstCycle">-</strong></div>
+              <div><span>Result</span><strong id="rstResult">-</strong></div>
+              <div><span>Peak Force</span><strong id="rstForce">-</strong></div>
+              <div><span>End Pos</span><strong id="rstPos">-</strong></div>
+              <div><span>Cycle Time</span><strong id="rstMs">-</strong></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Force-Displacement Graph -->
+      <div class="pg-section">
+        <div class="pg-header">
+          <span class="sect-title" style="margin:0">Force-Displacement Graph</span>
+          <div class="pg-legend">
+            <span class="pgl" style="--c:#4a9eff">Approach</span>
+            <span class="pgl" style="--c:#ffaa00">Contact</span>
+            <span class="pgl" style="--c:#ff4455">Press</span>
+            <span class="pgl" style="--c:#aa44ff">Dwell</span>
+            <span class="pgl" style="--c:#888">Return</span>
+          </div>
+        </div>
+        <canvas id="pressGraphCanvas"></canvas>
+      </div>
+    </div>
+
+    <!-- Quality -->
+    <div class="panel flex-panel" id="panel-quality">
+      <canvas id="qualityChart" style="max-height:220px; flex-shrink:0"></canvas>
+      <div class="tbl-wrap">
+        <table class="data-table">
+          <thead><tr><th>#</th><th>Cycle</th><th>Result</th><th>Force%</th><th>Pos</th><th>Time(ms)</th><th>Time</th></tr></thead>
+          <tbody id="historyBody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Alarm -->
+    <div class="panel flex-panel" id="panel-alarm">
+      <div class="active-alarm-box" style="flex-shrink:0">
+        <span>Active Alarm:</span>
+        <strong id="activeAlarmDetail">NONE (code=0)</strong>
+        <span id="activeAlarmAck"></span>
+      </div>
+      <div class="tbl-wrap">
+        <table class="data-table">
+          <thead><tr><th>Code</th><th>Message</th><th>Acked</th><th>Timestamp</th></tr></thead>
+          <tbody id="alarmBody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Maintenance -->
+    <div class="panel" id="panel-maintenance">
+      <div class="maint-content-grid">
+        <div class="sect">
+          <div class="sect-title">User Access Level</div>
+          <div class="user-level-box">
+            <span>Level:</span><strong id="userLevelName">OPERATOR</strong>
+            <span id="userLevelBadge" class="ulevel-badge op">OP</span>
+          </div>
+          <div class="form-grid form-grid1" style="margin-top:10px">
+            <label>PIN<input id="loginPin" type="password" inputmode="numeric" placeholder="4자리 PIN" maxlength="4"></label>
+          </div>
+        </div>
+        <div class="sect">
+          <div class="sect-title">Preventive Maintenance</div>
+          <div class="maint-info">
+            <div><span>Total Cycles</span><strong id="maintTotal">0</strong></div>
+            <div><span>Since Maint</span><strong id="maintSince">0</strong></div>
+            <div><span>Threshold</span><strong id="maintThresh">100,000</strong></div>
+            <div><span>PM Alert</span><strong id="maintAlert" class="alarm-none">NO</strong></div>
+          </div>
+          <div class="form-grid form-grid1" style="margin-top:10px">
+            <label>New Threshold<input id="maintThreshInput" type="text" inputmode="numeric" value="100000"></label>
+          </div>
+        </div>
+        <div class="sect">
+          <div class="sect-title">System Info</div>
+          <div class="sys-info-grid">
+            <div><span>Mode</span><strong id="sysMode">-</strong></div>
+            <div><span>Step</span><strong id="sysStep">-</strong></div>
+            <div><span>Drive Ready</span><strong id="sysDrive">-</strong></div>
+            <div><span>Home Done</span><strong id="sysHome">-</strong></div>
+            <div><span>E-Stop</span><strong id="sysEstop">-</strong></div>
+            <div><span>Door</span><strong id="sysDoor">-</strong></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- DB Viewer -->
+    <div class="panel flex-panel" id="panel-db">
+      <div class="db-split">
+        <div class="db-list-col">
+          <div class="db-list-header">
+            <span class="sect-title">사이클 그래프 DB</span>
+            <span id="dbTotal" class="db-count-badge">0 건</span>
+          </div>
+          <div class="tbl-wrap" style="max-height:330px; overflow-y:auto; flex:none">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>ID</th><th>Cycle#</th><th>Time</th><th>Result</th>
+                  <th>Avg%</th><th>Peak%</th><th>EndPos</th><th>ms</th><th>Pts</th><th>이상</th>
+                </tr>
+              </thead>
+              <tbody id="dbBody"></tbody>
+            </table>
+          </div>
+        </div>
+        <div class="db-graph-col">
+          <div class="pg-header">
+            <span class="sect-title" style="margin:0" id="dbGraphTitle">← 행을 클릭하면 그래프 표시</span>
+            <div style="display:flex;gap:6px;align-items:center">
+              <a id="dbCsvBtn" class="btn-link" href="#" download="" style="display:none;font-size:0.85rem;padding:5px 10px">CSV</a>
+            </div>
+          </div>
+          <div class="db-graph-info" id="dbGraphInfo"></div>
+          <canvas id="dbGraphCanvas"></canvas>
+          <div class="pg-legend" style="margin-top:4px">
+            <span class="pgl" style="--c:#4a9eff">Approach</span>
+            <span class="pgl" style="--c:#ffaa00">Contact</span>
+            <span class="pgl" style="--c:#ff4455">Press</span>
+            <span class="pgl" style="--c:#aa44ff">Dwell</span>
+            <span class="pgl" style="--c:#888">Return</span>
+            <span class="pgl" style="--c:#aaa;border-style:dashed">기준선</span>
+          </div>
+          <!-- Golden Signature Panel -->
+          <div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-top:1px solid #1e3040;margin-top:4px;flex-wrap:wrap">
+            <span style="color:#8ab;font-size:0.82rem;font-weight:600">Golden Signature</span>
+            <span id="baselineStatus" style="color:#556;font-size:0.8rem;flex:1">미설정</span>
+            <label style="color:#778;font-size:0.8rem;display:flex;align-items:center;gap:4px">
+              최근
+              <input id="baselineCycleCount" type="number" value="10" min="3" max="100"
+                style="width:46px;padding:2px 4px;background:#0d1e2a;border:1px solid #2a4050;color:#ccc;border-radius:3px;font-size:0.8rem">
+              사이클
+            </label>
+            <button id="baselineBuildBtn" class="btn-link" style="padding:4px 10px;font-size:0.8rem">수립</button>
+            <button id="baselineReanalyzeBtn" class="btn-link" style="padding:4px 10px;font-size:0.8rem;display:none">재분석</button>
+            <button id="baselineDeleteBtn" class="btn-link" style="padding:4px 10px;font-size:0.8rem;color:#e44;display:none">삭제</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Log -->
+    <div class="panel flex-panel" id="panel-log">
+      <div class="log-toolbar">
+        <button id="logPauseBtn" class="log-btn">⏸ 스크롤 정지</button>
+        <button id="logClearBtn" class="log-btn">🗑 지우기</button>
+        <button id="logCopyBtn" class="log-btn">📋 전체 복사</button>
+        <span id="logPauseLabel" class="log-pause-label" style="display:none">▐▐ PAUSED</span>
+      </div>
+      <pre id="logBox"></pre>
+    </div>
+
+  </main>
+
+  <!-- ═══ BOTTOM BAR (운전 버튼) ═══ -->
+  <div class="bottom-bar">
+
+    <div class="bot-section active" id="bottom-home">
+      <button id="setHomeBtn">Set Home</button>
+      <div class="bot-sep"></div>
+      <button id="runOnBtn">Run ON</button>
+      <button id="runOffBtn">Run OFF</button>
+    </div>
+
+    <div class="bot-section" id="bottom-manual">
+      <button class="jog-btn" id="jogRevBtn">◄ Jog REV</button>
+      <button class="jog-btn" id="jogFwdBtn">Jog FWD ►</button>
+      <div class="bot-sep"></div>
+      <button id="manualApplyBtn">Apply</button>
+      <button id="manualStartBtn">Manual Start</button>
+      <button id="manualStopBtn">Manual Stop</button>
+      <div class="bot-sep"></div>
+      <button id="manualSaveBtn">Save</button>
+      <button id="manualLoadBtn">Load</button>
+    </div>
+
+    <div class="bot-section" id="bottom-parameter">
+      <button id="paramSaveBtn">Save</button>
+      <button id="paramLoadBtn">Load</button>
+    </div>
+
+    <div class="bot-section" id="bottom-program">
+      <button id="programApplyBtn">Apply Values</button>
+      <button id="programStartBtn">Program Start</button>
+      <button id="programStopBtn">Program Stop</button>
+      <div class="bot-sep"></div>
+      <button id="programSaveBtn">Save</button>
+      <button id="programLoadBtn">Load</button>
+    </div>
+
+    <div class="bot-section" id="bottom-press">
+      <button class="mode-btn" id="modeManuBtn">MANUAL</button>
+      <button class="mode-btn" id="modeSetupBtn">SETUP</button>
+      <button class="mode-btn" id="modeAutoBtn">AUTO</button>
+      <div class="bot-sep"></div>
+      <button class="big-green" id="cycleStartBtn">▶ CYCLE START</button>
+      <button class="big-red" id="cycleStopBtn">■ STOP</button>
+      <button id="cycleAbortBtn">⚠ ABORT</button>
+      <button class="alarm-rst-btn" id="ngResetBtn">Alarm Reset</button>
+      <div class="bot-sep"></div>
+      <button id="simApplyBtn">Apply Sim</button>
+      <div class="bot-sep"></div>
+      <button id="pressSaveBtn">Save</button>
+      <button id="pressLoadBtn">Load</button>
+      <button id="counterResetBtn">Reset Cnt</button>
+    </div>
+
+    <div class="bot-section" id="bottom-quality">
+      <button id="qualityRefreshBtn">Refresh</button>
+      <a id="csvDownloadBtn" class="btn-link" href="/api/history/csv" download="cycle_history.csv">CSV Download</a>
+      <button id="qualityClearBtn">Clear History</button>
+    </div>
+
+    <div class="bot-section" id="bottom-alarm">
+      <button class="alarm-ack-btn" id="alarmAckBtn">ACK Alarm</button>
+      <button class="alarm-rst-btn" id="alarmResetBtn">Reset Alarm</button>
+      <button id="alarmFetchBtn">Fetch History</button>
+    </div>
+
+    <div class="bot-section" id="bottom-maintenance">
+      <button id="loginBtn">Login</button>
+      <button id="logoutBtn">Logout</button>
+      <div class="bot-sep"></div>
+      <button id="maintRefreshBtn">Refresh</button>
+      <button class="alarm-rst-btn" id="maintResetBtn">Reset Counter</button>
+      <button id="maintSetThreshBtn">Set Threshold</button>
+    </div>
+
+    <div class="bot-section" id="bottom-db">
+      <button id="dbRefreshBtn">Refresh</button>
+      <button id="dbTestInsertBtn" style="background:#2a6;color:#fff">DB Test</button>
+      <button id="dbUartTestBtn" style="background:#26a;color:#fff">UART Test</button>
+      <a class="btn-link" href="/api/db/export/csv" download="all_cycles.csv">Export All CSV</a>
+      <button id="dbDeleteBtn" class="big-red">Delete Selected</button>
+    </div>
+
+    <div class="bot-section" id="bottom-log"></div>
+
+  </div>
+
+  <script src="app.js?v=20260518p13"></script>
+</body>
+</html>

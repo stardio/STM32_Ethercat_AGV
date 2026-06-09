@@ -1,0 +1,97 @@
+[0.000000] (-) TimerEvent: {}
+[0.000307] (agv_bringup) JobQueued: {'identifier': 'agv_bringup', 'dependencies': OrderedDict()}
+[0.000493] (agv_description) JobQueued: {'identifier': 'agv_description', 'dependencies': OrderedDict()}
+[0.000672] (agv_bringup) JobStarted: {'identifier': 'agv_bringup'}
+[0.056128] (agv_description) JobStarted: {'identifier': 'agv_description'}
+[0.099968] (-) TimerEvent: {}
+[0.206493] (-) TimerEvent: {}
+[0.312976] (-) TimerEvent: {}
+[0.418114] (-) TimerEvent: {}
+[0.519624] (-) TimerEvent: {}
+[0.625964] (-) TimerEvent: {}
+[0.732630] (-) TimerEvent: {}
+[1.092371] (-) TimerEvent: {}
+[1.195487] (-) TimerEvent: {}
+[1.302036] (-) TimerEvent: {}
+[1.406165] (-) TimerEvent: {}
+[1.512791] (-) TimerEvent: {}
+[1.616803] (-) TimerEvent: {}
+[1.722155] (-) TimerEvent: {}
+[1.822866] (-) TimerEvent: {}
+[1.923737] (-) TimerEvent: {}
+[2.024452] (-) TimerEvent: {}
+[2.125275] (-) TimerEvent: {}
+[2.226674] (-) TimerEvent: {}
+[2.333223] (-) TimerEvent: {}
+[2.438922] (-) TimerEvent: {}
+[2.545475] (-) TimerEvent: {}
+[2.646246] (-) TimerEvent: {}
+[2.747049] (-) TimerEvent: {}
+[2.847714] (-) TimerEvent: {}
+[2.952878] (-) TimerEvent: {}
+[3.059327] (-) TimerEvent: {}
+[3.162609] (-) TimerEvent: {}
+[3.263514] (-) TimerEvent: {}
+[3.364407] (-) TimerEvent: {}
+[3.464998] (-) TimerEvent: {}
+[3.565550] (-) TimerEvent: {}
+[3.637318] (agv_bringup) Command: {'cmd': ['/usr/bin/python3', '-W', 'ignore:setup.py install is deprecated', '-W', 'ignore:easy_install command is deprecated', 'setup.py', 'develop', '--editable', '--build-directory', '/mnt/d/Ethercat_N753-6AX_AGV/ros2_ws/build/agv_bringup/build', '--no-deps', 'symlink_data'], 'cwd': '/mnt/d/Ethercat_N753-6AX_AGV/ros2_ws/build/agv_bringup', 'env': {'LESSOPEN': '| /usr/bin/lesspipe %s', 'USER': 'son', 'SHLVL': '1', 'LD_LIBRARY_PATH': '/opt/ros/humble/opt/rviz_ogre_vendor/lib:/opt/ros/humble/lib/x86_64-linux-gnu:/opt/ros/humble/lib', 'HOME': '/home/son', 'OLDPWD': '/home/son', 'ROS_PYTHON_VERSION': '3', 'DBUS_SESSION_BUS_ADDRESS': 'unix:path=/run/user/1000/bus', 'WSL_DISTRO_NAME': 'Ubuntu-22.04', 'WAYLAND_DISPLAY': 'wayland-0', 'COLCON_PREFIX_PATH': '/home/son/ros2_ws/install', 'ROS_DISTRO': 'humble', 'LOGNAME': 'son', 'NAME': 'DESKTOP-3GMVF8B', 'WSL_INTEROP': '/run/WSL/1813_interop', 'PULSE_SERVER': 'unix:/mnt/wslg/PulseServer', '_': '/usr/bin/colcon', 'ROS_VERSION': '2', 'TERM': 'xterm-256color', 'ROS_LOCALHOST_ONLY': '0', 'PATH': '/home/son/ros2_ws/install/agv_bringup/bin:/opt/ros/humble/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games:/usr/local/games:/usr/lib/wsl/lib:/mnt/c/Program Files/WindowsApps/MicrosoftCorporationII.WindowsSubsystemForLinux_2.7.3.0_x64__8wekyb3d8bbwe:/mnt/c/TwinCAT/Common64:/mnt/c/TwinCAT/Common32:/mnt/c/Program Files/Eclipse Adoptium/jdk-11.0.27.6-hotspot/bin:/mnt/c/Users/BSA/AppData/Local/Programs/cursor/resources/app/bin:/mnt/c/Program Files (x86)/NAT Service:/mnt/c/WINDOWS/system32:/mnt/c/WINDOWS:/mnt/c/WINDOWS/System32/Wbem:/mnt/c/WINDOWS/System32/WindowsPowerShell/v1.0/:/mnt/c/WINDOWS/System32/OpenSSH/:/mnt/c/Program Files/Bandizip/:/mnt/c/Program Files/dotnet/:/mnt/c/Program Files (x86)/Mitov/Visuino:/mnt/c/Users/BSA/AppData/Local/Microsoft/WindowsApps:/mnt/c/Users/BSA/AppData/Local/Programs/cursor/resources/app/bin:/mnt/c/Users/BSA/AppData/Local/Programs/cursor/resources/app/bin:/mnt/c/Program Files/Git/cmd:/mnt/c/Program Files/nodejs/:/mnt/c/Users/BSA/AppData/Roaming/npm:/mnt/c/Users/BSA/AppData/Local/Programs/Python/Python3x/:/mnt/c/Users/BSA/AppData/Local/Programs/Python/Python3x/Scripts/:/mnt/c/Users/BSA/AppData/Local/Programs/Python/Python3x/:/mnt/c/Users/BSA/AppData/Local/Programs/Python/Python313/Scripts:/mnt/c/Program Files/cursor/resources/app/bin:/mnt/c/Program Files/CMake/bin:/mnt/c/Program Files/Microsoft SQL Server/170/Tools/Binn/:/mnt/c/Program Files/Microsoft SQL Server/Client SDK/ODBC/170/Tools/Binn/:/mnt/c/Program Files (x86)/Windows Kits/10/Windows Performance Toolkit/:/mnt/c/Program Files/PowerShell/7/:/mnt/c/Program Files/Tailscale/:/mnt/c/Program Files/usbipd-win/:/mnt/c/Ruby34-x64/bin:/mnt/c/TwinCAT/Common64:/mnt/c/TwinCAT/Common32:/mnt/c/Program Files/Eclipse Adoptium/jdk-11.0.27.6-hotspot/bin:/mnt/c/Users/BSA/AppData/Local/Programs/cursor/resources/app/bin:/mnt/c/Program Files (x86)/NAT Service:/mnt/c/WINDOWS/system32:/mnt/c/WINDOWS:/mnt/c/WINDOWS/System32/Wbem:/mnt/c/WINDOWS/System32/WindowsPowerShell/v1.0/:/mnt/c/WINDOWS/System32/OpenSSH/:/mnt/c/Program Files/Bandizip/:/mnt/c/Program Files/dotnet/:/mnt/c/Program Files (x86)/Mitov/Visuino:/mnt/c/Users/BSA/AppData/Local/Microsoft/WindowsApps:/mnt/c/Users/BSA/AppData/Local/Programs/cursor/resources/app/bin:/mnt/c/Users/BSA/AppData/Local/Programs/cursor/resources/app/bin:/mnt/c/Program Files/Git/cmd:/mnt/c/Program Files/nodejs/:/mnt/c/Users/BSA/AppData/Roaming/npm:/mnt/c/Users/BSA/AppData/Local/Programs/Python/Python3x/:/mnt/c/Users/BSA/AppData/Local/Programs/Python/Python3x/Scripts/:/mnt/c/Users/BSA/AppData/Local/Programs/Python/Python3x/:/mnt/c/Users/BSA/AppData/Local/Programs/Python/Python313/Scripts:/mnt/c/Program Files/cursor/resources/app/bin:/mnt/c/Program Files/CMake/bin:/mnt/c/Program Files/Microsoft SQL Server/170/Tools/Binn/:/mnt/c/Program Files/Microsoft SQL Server/Client SDK/ODBC/170/Tools/Binn/:/mnt/c/Program Files (x86)/Windows Kits/10/Windows Performance Toolkit/:/mnt/c/Program Files/PowerShell/7/:/mnt/c/Program Files/Tailscale/:/mnt/c/Program Files/usbipd-win/:/mnt/d/EtherCat_STM32/Tools/ninja:/mnt/c/Users/BSA/AppData/Local/Programs/Microsoft VS Code/bin:/mnt/c/Users/BSA/AppData/Local/Microsoft/WinGet/Links:/snap/bin', 'XDG_RUNTIME_DIR': '/run/user/1000', 'DISPLAY': ':0', 'LANG': 'C.UTF-8', 'LS_COLORS': 'rs=0:di=01;34:ln=01;36:mh=00:pi=40;33:so=01;35:do=01;35:bd=40;33;01:cd=40;33;01:or=40;31;01:mi=00:su=37;41:sg=30;43:ca=30;41:tw=30;42:ow=34;42:st=37;44:ex=01;32:*.tar=01;31:*.tgz=01;31:*.arc=01;31:*.arj=01;31:*.taz=01;31:*.lha=01;31:*.lz4=01;31:*.lzh=01;31:*.lzma=01;31:*.tlz=01;31:*.txz=01;31:*.tzo=01;31:*.t7z=01;31:*.zip=01;31:*.z=01;31:*.dz=01;31:*.gz=01;31:*.lrz=01;31:*.lz=01;31:*.lzo=01;31:*.xz=01;31:*.zst=01;31:*.tzst=01;31:*.bz2=01;31:*.bz=01;31:*.tbz=01;31:*.tbz2=01;31:*.tz=01;31:*.deb=01;31:*.rpm=01;31:*.jar=01;31:*.war=01;31:*.ear=01;31:*.sar=01;31:*.rar=01;31:*.alz=01;31:*.ace=01;31:*.zoo=01;31:*.cpio=01;31:*.7z=01;31:*.rz=01;31:*.cab=01;31:*.wim=01;31:*.swm=01;31:*.dwm=01;31:*.esd=01;31:*.jpg=01;35:*.jpeg=01;35:*.mjpg=01;35:*.mjpeg=01;35:*.gif=01;35:*.bmp=01;35:*.pbm=01;35:*.pgm=01;35:*.ppm=01;35:*.tga=01;35:*.xbm=01;35:*.xpm=01;35:*.tif=01;35:*.tiff=01;35:*.png=01;35:*.svg=01;35:*.svgz=01;35:*.mng=01;35:*.pcx=01;35:*.mov=01;35:*.mpg=01;35:*.mpeg=01;35:*.m2v=01;35:*.mkv=01;35:*.webm=01;35:*.webp=01;35:*.ogm=01;35:*.mp4=01;35:*.m4v=01;35:*.mp4v=01;35:*.vob=01;35:*.qt=01;35:*.nuv=01;35:*.wmv=01;35:*.asf=01;35:*.rm=01;35:*.rmvb=01;35:*.flc=01;35:*.avi=01;35:*.fli=01;35:*.flv=01;35:*.gl=01;35:*.dl=01;35:*.xcf=01;35:*.xwd=01;35:*.yuv=01;35:*.cgm=01;35:*.emf=01;35:*.ogv=01;35:*.ogx=01;35:*.aac=00;36:*.au=00;36:*.flac=00;36:*.m4a=00;36:*.mid=00;36:*.midi=00;36:*.mka=00;36:*.mp3=00;36:*.mpc=00;36:*.ogg=00;36:*.ra=00;36:*.wav=00;36:*.oga=00;36:*.opus=00;36:*.spx=00;36:*.xspf=00;36:', 'ROS_DOMAIN_ID': '0', 'AMENT_PREFIX_PATH': '/home/son/ros2_ws/install/agv_bringup:/home/son/ros2_ws/install/agv_description:/opt/ros/humble', 'SHELL': '/bin/bash', 'LESSCLOSE': '/usr/bin/lesspipe %s %s', 'PWD': '/mnt/d/Ethercat_N753-6AX_AGV/ros2_ws/build/agv_bringup', 'XDG_DATA_DIRS': '/usr/local/share:/usr/share:/var/lib/snapd/desktop', 'PYTHONPATH': '/mnt/d/Ethercat_N753-6AX_AGV/ros2_ws/build/agv_bringup/prefix_override:/usr/lib/python3/dist-packages/colcon_core/task/python/colcon_distutils_commands:/mnt/d/Ethercat_N753-6AX_AGV/ros2_ws/install/agv_bringup/lib/python3.10/site-packages:/mnt/d/Ethercat_N753-6AX_AGV/ros2_ws/build/agv_bringup:/home/son/ros2_ws/install/agv_bringup/lib/python3.10/site-packages:/mnt/d/Ethercat_N753-6AX_AGV/ros2_ws/build/agv_description:/home/son/ros2_ws/install/agv_description/lib/python3.10/site-packages:/opt/ros/humble/lib/python3.10/site-packages:/opt/ros/humble/local/lib/python3.10/dist-packages', 'COLCON': '1', 'WSL2_GUI_APPS_ENABLED': '1', 'HOSTTYPE': 'x86_64', 'WSLENV': ''}, 'shell': False}
+[3.666184] (-) TimerEvent: {}
+[3.772586] (-) TimerEvent: {}
+[3.877388] (-) TimerEvent: {}
+[3.983875] (-) TimerEvent: {}
+[4.089363] (-) TimerEvent: {}
+[4.195794] (-) TimerEvent: {}
+[4.272923] (agv_description) Command: {'cmd': ['/usr/bin/python3', '-W', 'ignore:setup.py install is deprecated', '-W', 'ignore:easy_install command is deprecated', 'setup.py', 'develop', '--editable', '--build-directory', '/mnt/d/Ethercat_N753-6AX_AGV/ros2_ws/build/agv_description/build', '--no-deps', 'symlink_data'], 'cwd': '/mnt/d/Ethercat_N753-6AX_AGV/ros2_ws/build/agv_description', 'env': {'LESSOPEN': '| /usr/bin/lesspipe %s', 'USER': 'son', 'SHLVL': '1', 'LD_LIBRARY_PATH': '/opt/ros/humble/opt/rviz_ogre_vendor/lib:/opt/ros/humble/lib/x86_64-linux-gnu:/opt/ros/humble/lib', 'HOME': '/home/son', 'OLDPWD': '/home/son', 'ROS_PYTHON_VERSION': '3', 'DBUS_SESSION_BUS_ADDRESS': 'unix:path=/run/user/1000/bus', 'WSL_DISTRO_NAME': 'Ubuntu-22.04', 'WAYLAND_DISPLAY': 'wayland-0', 'COLCON_PREFIX_PATH': '/home/son/ros2_ws/install', 'ROS_DISTRO': 'humble', 'LOGNAME': 'son', 'NAME': 'DESKTOP-3GMVF8B', 'WSL_INTEROP': '/run/WSL/1813_interop', 'PULSE_SERVER': 'unix:/mnt/wslg/PulseServer', '_': '/usr/bin/colcon', 'ROS_VERSION': '2', 'TERM': 'xterm-256color', 'ROS_LOCALHOST_ONLY': '0', 'PATH': '/home/son/ros2_ws/install/agv_bringup/bin:/opt/ros/humble/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games:/usr/local/games:/usr/lib/wsl/lib:/mnt/c/Program Files/WindowsApps/MicrosoftCorporationII.WindowsSubsystemForLinux_2.7.3.0_x64__8wekyb3d8bbwe:/mnt/c/TwinCAT/Common64:/mnt/c/TwinCAT/Common32:/mnt/c/Program Files/Eclipse Adoptium/jdk-11.0.27.6-hotspot/bin:/mnt/c/Users/BSA/AppData/Local/Programs/cursor/resources/app/bin:/mnt/c/Program Files (x86)/NAT Service:/mnt/c/WINDOWS/system32:/mnt/c/WINDOWS:/mnt/c/WINDOWS/System32/Wbem:/mnt/c/WINDOWS/System32/WindowsPowerShell/v1.0/:/mnt/c/WINDOWS/System32/OpenSSH/:/mnt/c/Program Files/Bandizip/:/mnt/c/Program Files/dotnet/:/mnt/c/Program Files (x86)/Mitov/Visuino:/mnt/c/Users/BSA/AppData/Local/Microsoft/WindowsApps:/mnt/c/Users/BSA/AppData/Local/Programs/cursor/resources/app/bin:/mnt/c/Users/BSA/AppData/Local/Programs/cursor/resources/app/bin:/mnt/c/Program Files/Git/cmd:/mnt/c/Program Files/nodejs/:/mnt/c/Users/BSA/AppData/Roaming/npm:/mnt/c/Users/BSA/AppData/Local/Programs/Python/Python3x/:/mnt/c/Users/BSA/AppData/Local/Programs/Python/Python3x/Scripts/:/mnt/c/Users/BSA/AppData/Local/Programs/Python/Python3x/:/mnt/c/Users/BSA/AppData/Local/Programs/Python/Python313/Scripts:/mnt/c/Program Files/cursor/resources/app/bin:/mnt/c/Program Files/CMake/bin:/mnt/c/Program Files/Microsoft SQL Server/170/Tools/Binn/:/mnt/c/Program Files/Microsoft SQL Server/Client SDK/ODBC/170/Tools/Binn/:/mnt/c/Program Files (x86)/Windows Kits/10/Windows Performance Toolkit/:/mnt/c/Program Files/PowerShell/7/:/mnt/c/Program Files/Tailscale/:/mnt/c/Program Files/usbipd-win/:/mnt/c/Ruby34-x64/bin:/mnt/c/TwinCAT/Common64:/mnt/c/TwinCAT/Common32:/mnt/c/Program Files/Eclipse Adoptium/jdk-11.0.27.6-hotspot/bin:/mnt/c/Users/BSA/AppData/Local/Programs/cursor/resources/app/bin:/mnt/c/Program Files (x86)/NAT Service:/mnt/c/WINDOWS/system32:/mnt/c/WINDOWS:/mnt/c/WINDOWS/System32/Wbem:/mnt/c/WINDOWS/System32/WindowsPowerShell/v1.0/:/mnt/c/WINDOWS/System32/OpenSSH/:/mnt/c/Program Files/Bandizip/:/mnt/c/Program Files/dotnet/:/mnt/c/Program Files (x86)/Mitov/Visuino:/mnt/c/Users/BSA/AppData/Local/Microsoft/WindowsApps:/mnt/c/Users/BSA/AppData/Local/Programs/cursor/resources/app/bin:/mnt/c/Users/BSA/AppData/Local/Programs/cursor/resources/app/bin:/mnt/c/Program Files/Git/cmd:/mnt/c/Program Files/nodejs/:/mnt/c/Users/BSA/AppData/Roaming/npm:/mnt/c/Users/BSA/AppData/Local/Programs/Python/Python3x/:/mnt/c/Users/BSA/AppData/Local/Programs/Python/Python3x/Scripts/:/mnt/c/Users/BSA/AppData/Local/Programs/Python/Python3x/:/mnt/c/Users/BSA/AppData/Local/Programs/Python/Python313/Scripts:/mnt/c/Program Files/cursor/resources/app/bin:/mnt/c/Program Files/CMake/bin:/mnt/c/Program Files/Microsoft SQL Server/170/Tools/Binn/:/mnt/c/Program Files/Microsoft SQL Server/Client SDK/ODBC/170/Tools/Binn/:/mnt/c/Program Files (x86)/Windows Kits/10/Windows Performance Toolkit/:/mnt/c/Program Files/PowerShell/7/:/mnt/c/Program Files/Tailscale/:/mnt/c/Program Files/usbipd-win/:/mnt/d/EtherCat_STM32/Tools/ninja:/mnt/c/Users/BSA/AppData/Local/Programs/Microsoft VS Code/bin:/mnt/c/Users/BSA/AppData/Local/Microsoft/WinGet/Links:/snap/bin', 'XDG_RUNTIME_DIR': '/run/user/1000', 'DISPLAY': ':0', 'LANG': 'C.UTF-8', 'LS_COLORS': 'rs=0:di=01;34:ln=01;36:mh=00:pi=40;33:so=01;35:do=01;35:bd=40;33;01:cd=40;33;01:or=40;31;01:mi=00:su=37;41:sg=30;43:ca=30;41:tw=30;42:ow=34;42:st=37;44:ex=01;32:*.tar=01;31:*.tgz=01;31:*.arc=01;31:*.arj=01;31:*.taz=01;31:*.lha=01;31:*.lz4=01;31:*.lzh=01;31:*.lzma=01;31:*.tlz=01;31:*.txz=01;31:*.tzo=01;31:*.t7z=01;31:*.zip=01;31:*.z=01;31:*.dz=01;31:*.gz=01;31:*.lrz=01;31:*.lz=01;31:*.lzo=01;31:*.xz=01;31:*.zst=01;31:*.tzst=01;31:*.bz2=01;31:*.bz=01;31:*.tbz=01;31:*.tbz2=01;31:*.tz=01;31:*.deb=01;31:*.rpm=01;31:*.jar=01;31:*.war=01;31:*.ear=01;31:*.sar=01;31:*.rar=01;31:*.alz=01;31:*.ace=01;31:*.zoo=01;31:*.cpio=01;31:*.7z=01;31:*.rz=01;31:*.cab=01;31:*.wim=01;31:*.swm=01;31:*.dwm=01;31:*.esd=01;31:*.jpg=01;35:*.jpeg=01;35:*.mjpg=01;35:*.mjpeg=01;35:*.gif=01;35:*.bmp=01;35:*.pbm=01;35:*.pgm=01;35:*.ppm=01;35:*.tga=01;35:*.xbm=01;35:*.xpm=01;35:*.tif=01;35:*.tiff=01;35:*.png=01;35:*.svg=01;35:*.svgz=01;35:*.mng=01;35:*.pcx=01;35:*.mov=01;35:*.mpg=01;35:*.mpeg=01;35:*.m2v=01;35:*.mkv=01;35:*.webm=01;35:*.webp=01;35:*.ogm=01;35:*.mp4=01;35:*.m4v=01;35:*.mp4v=01;35:*.vob=01;35:*.qt=01;35:*.nuv=01;35:*.wmv=01;35:*.asf=01;35:*.rm=01;35:*.rmvb=01;35:*.flc=01;35:*.avi=01;35:*.fli=01;35:*.flv=01;35:*.gl=01;35:*.dl=01;35:*.xcf=01;35:*.xwd=01;35:*.yuv=01;35:*.cgm=01;35:*.emf=01;35:*.ogv=01;35:*.ogx=01;35:*.aac=00;36:*.au=00;36:*.flac=00;36:*.m4a=00;36:*.mid=00;36:*.midi=00;36:*.mka=00;36:*.mp3=00;36:*.mpc=00;36:*.ogg=00;36:*.ra=00;36:*.wav=00;36:*.oga=00;36:*.opus=00;36:*.spx=00;36:*.xspf=00;36:', 'ROS_DOMAIN_ID': '0', 'AMENT_PREFIX_PATH': '/home/son/ros2_ws/install/agv_bringup:/home/son/ros2_ws/install/agv_description:/opt/ros/humble', 'SHELL': '/bin/bash', 'LESSCLOSE': '/usr/bin/lesspipe %s %s', 'PWD': '/mnt/d/Ethercat_N753-6AX_AGV/ros2_ws/build/agv_description', 'XDG_DATA_DIRS': '/usr/local/share:/usr/share:/var/lib/snapd/desktop', 'PYTHONPATH': '/mnt/d/Ethercat_N753-6AX_AGV/ros2_ws/build/agv_description/prefix_override:/usr/lib/python3/dist-packages/colcon_core/task/python/colcon_distutils_commands:/mnt/d/Ethercat_N753-6AX_AGV/ros2_ws/install/agv_description/lib/python3.10/site-packages:/mnt/d/Ethercat_N753-6AX_AGV/ros2_ws/build/agv_bringup:/home/son/ros2_ws/install/agv_bringup/lib/python3.10/site-packages:/mnt/d/Ethercat_N753-6AX_AGV/ros2_ws/build/agv_description:/home/son/ros2_ws/install/agv_description/lib/python3.10/site-packages:/opt/ros/humble/lib/python3.10/site-packages:/opt/ros/humble/local/lib/python3.10/dist-packages', 'COLCON': '1', 'WSL2_GUI_APPS_ENABLED': '1', 'HOSTTYPE': 'x86_64', 'WSLENV': ''}, 'shell': False}
+[4.296084] (-) TimerEvent: {}
+[4.402302] (-) TimerEvent: {}
+[4.508776] (-) TimerEvent: {}
+[4.615202] (-) TimerEvent: {}
+[4.694040] (agv_bringup) StdoutLine: {'line': b'running develop\n'}
+[4.716491] (-) TimerEvent: {}
+[4.822882] (-) TimerEvent: {}
+[4.929228] (-) TimerEvent: {}
+[4.996656] (agv_bringup) StdoutLine: {'line': b'running egg_info\n'}
+[4.997514] (agv_bringup) StdoutLine: {'line': b'writing agv_bringup.egg-info/PKG-INFO\n'}
+[4.999768] (agv_bringup) StdoutLine: {'line': b'writing dependency_links to agv_bringup.egg-info/dependency_links.txt\n'}
+[5.002857] (agv_bringup) StdoutLine: {'line': b'writing entry points to agv_bringup.egg-info/entry_points.txt\n'}
+[5.005588] (agv_bringup) StdoutLine: {'line': b'writing requirements to agv_bringup.egg-info/requires.txt\n'}
+[5.007881] (agv_bringup) StdoutLine: {'line': b'writing top-level names to agv_bringup.egg-info/top_level.txt\n'}
+[5.030545] (-) TimerEvent: {}
+[5.089740] (agv_bringup) StdoutLine: {'line': b"reading manifest file 'agv_bringup.egg-info/SOURCES.txt'\n"}
+[5.133034] (-) TimerEvent: {}
+[5.186332] (agv_bringup) StdoutLine: {'line': b"writing manifest file 'agv_bringup.egg-info/SOURCES.txt'\n"}
+[5.202965] (agv_bringup) StdoutLine: {'line': b'running build_ext\n'}
+[5.203701] (agv_bringup) StdoutLine: {'line': b'Creating /mnt/d/Ethercat_N753-6AX_AGV/ros2_ws/install/agv_bringup/lib/python3.10/site-packages/agv-bringup.egg-link (link to .)\n'}
+[5.221109] (agv_bringup) StdoutLine: {'line': b'Installing stm32_bridge_node script to /mnt/d/Ethercat_N753-6AX_AGV/ros2_ws/install/agv_bringup/bin\n'}
+[5.233808] (-) TimerEvent: {}
+[5.236619] (agv_bringup) StdoutLine: {'line': b'\n'}
+[5.237336] (agv_bringup) StdoutLine: {'line': b'Installed /mnt/d/Ethercat_N753-6AX_AGV/ros2_ws/build/agv_bringup\n'}
+[5.239710] (agv_bringup) StdoutLine: {'line': b'running symlink_data\n'}
+[5.339524] (-) TimerEvent: {}
+[5.362785] (agv_description) StdoutLine: {'line': b'running develop\n'}
+[5.444177] (-) TimerEvent: {}
+[5.464961] (agv_bringup) CommandEnded: {'returncode': 0}
+[5.544494] (-) TimerEvent: {}
+[5.650906] (-) TimerEvent: {}
+[5.681974] (agv_description) StdoutLine: {'line': b'running egg_info\n'}
+[5.683435] (agv_description) StdoutLine: {'line': b'writing agv_description.egg-info/PKG-INFO\n'}
+[5.687144] (agv_description) StdoutLine: {'line': b'writing dependency_links to agv_description.egg-info/dependency_links.txt\n'}
+[5.691452] (agv_description) StdoutLine: {'line': b'writing requirements to agv_description.egg-info/requires.txt\n'}
+[5.693848] (agv_description) StdoutLine: {'line': b'writing top-level names to agv_description.egg-info/top_level.txt\n'}
+[5.739001] (agv_description) StdoutLine: {'line': b"reading manifest file 'agv_description.egg-info/SOURCES.txt'\n"}
+[5.751665] (-) TimerEvent: {}
+[5.797120] (agv_description) StdoutLine: {'line': b"writing manifest file 'agv_description.egg-info/SOURCES.txt'\n"}
+[5.815486] (agv_description) StdoutLine: {'line': b'running build_ext\n'}
+[5.816235] (agv_description) StdoutLine: {'line': b'Creating /mnt/d/Ethercat_N753-6AX_AGV/ros2_ws/install/agv_description/lib/python3.10/site-packages/agv-description.egg-link (link to .)\n'}
+[5.834348] (agv_description) StdoutLine: {'line': b'\n'}
+[5.835113] (agv_description) StdoutLine: {'line': b'Installed /mnt/d/Ethercat_N753-6AX_AGV/ros2_ws/build/agv_description\n'}
+[5.835868] (agv_bringup) JobEnded: {'identifier': 'agv_bringup', 'rc': 0}
+[5.840811] (agv_description) StdoutLine: {'line': b'running symlink_data\n'}
+[5.851925] (-) TimerEvent: {}
+[5.933892] (agv_description) CommandEnded: {'returncode': 0}
+[5.952201] (-) TimerEvent: {}
+[6.057810] (-) TimerEvent: {}
+[6.164285] (-) TimerEvent: {}
+[6.180936] (agv_description) JobEnded: {'identifier': 'agv_description', 'rc': 0}
+[6.186678] (-) EventReactorShutdown: {}

@@ -1,0 +1,341 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Servo Press Web Control</title>
+  <link rel="stylesheet" href="styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="title-wrap">
+      <h1>Servo Press Web Control</h1>
+      <p>STM32 EtherCAT Servo Press Monitor &amp; Control</p>
+    </div>
+    <div class="conn-wrap">
+      <select id="portSelect"></select>
+      <select id="baudSelect">
+        <option selected>115200</option>
+        <option>230400</option>
+        <option>460800</option>
+        <option>921600</option>
+      </select>
+      <button id="refreshPortsBtn">Ports</button>
+      <button id="connectBtn">Connect</button>
+      <button id="readAllBtn">Read Settings</button>
+      <span id="connState" class="badge offline">Disconnected</span>
+    </div>
+  </header>
+
+  <main class="layout">
+    <!-- Telemetry + trend chart -->
+    <section class="card telemetry-card">
+      <div class="metrics">
+        <div class="metric"><span>Position</span><strong id="mPos">-</strong></div>
+        <div class="metric"><span>Velocity</span><strong id="mVel">-</strong></div>
+        <div class="metric"><span>Torque</span><strong id="mTor">-</strong></div>
+        <div class="metric"><span>Status</span><strong id="mStatus">-</strong></div>
+        <div class="metric"><span>Run</span><strong id="mRun">-</strong></div>
+      </div>
+      <!-- Press Status bar -->
+      <div class="press-status-bar">
+        <div class="ps-group">
+          <span class="ps-label">Mode</span><strong id="psMode">-</strong>
+          <span class="ps-label">Step</span><strong id="psStep">-</strong>
+        </div>
+        <div class="ps-group interlocks">
+          <span class="ilock-item"><span id="ilkEstop" class="ilock-led">E-Stop</span></span>
+          <span class="ilock-item"><span id="ilkDoor" class="ilock-led">Door</span></span>
+          <span class="ilock-item"><span id="ilkDrive" class="ilock-led">Drive</span></span>
+          <span class="ilock-item"><span id="ilkHome" class="ilock-led">Home</span></span>
+        </div>
+        <div class="ps-group counters">
+          <span>Total:<strong id="cntTotal">0</strong></span>
+          <span>OK:<strong id="cntOk" class="ok">0</strong></span>
+          <span>NG:<strong id="cntNg" class="ng">0</strong></span>
+          <span>Rate:<strong id="cntRate">0.0%</strong></span>
+          <span>ConsNg:<strong id="cntCng">0</strong></span>
+        </div>
+        <div class="ps-group alarm-bar">
+          <span>Alarm:</span><strong id="activeAlarm" class="alarm-none">NONE</strong>
+        </div>
+      </div>
+      <canvas id="trendChart" width="1000" height="180"></canvas>
+    </section>
+
+    <section class="card tab-card">
+      <nav class="tabs" id="tabs">
+        <button class="tab active" data-tab="home">Home</button>
+        <button class="tab" data-tab="main">Main</button>
+        <button class="tab" data-tab="manual">Manual</button>
+        <button class="tab" data-tab="parameter">Parameter</button>
+        <button class="tab" data-tab="program">Program</button>
+        <button class="tab" data-tab="press">Press Control</button>
+        <button class="tab" data-tab="quality">Quality</button>
+        <button class="tab" data-tab="alarm">Alarms</button>
+        <button class="tab" data-tab="maintenance">Maintenance</button>
+      </nav>
+
+      <!-- Home tab -->
+      <div class="panel active" id="panel-home">
+        <p>CP ORG Reset: 현재 위치를 Home으로 저장</p>
+        <button class="action" id="setHomeBtn">Set Home</button>
+      </div>
+
+      <!-- Main tab -->
+      <div class="panel" id="panel-main">
+        <p>Servo ON/OFF (Run Enable)</p>
+        <label class="switch-row"><input type="checkbox" id="runToggle"> Servo ON</label>
+        <div class="row">
+          <button class="action" id="runOnBtn">Run ON</button>
+          <button class="action" id="runOffBtn">Run OFF</button>
+        </div>
+      </div>
+
+      <!-- Manual tab -->
+      <div class="panel" id="panel-manual">
+        <div class="grid2">
+          <label><input id="manualAbs" type="checkbox" checked> ABS Mode</label>
+          <label>Cycle Position (puls) <input id="manualPos" type="text" inputmode="numeric" value="0"></label>
+          <label>Cycle Speed (puls) <input id="manualSpeed" type="text" inputmode="numeric" value="100"></label>
+          <label>Cycle Torque (%) <input id="manualTorque" type="text" inputmode="numeric" value="20"></label>
+        </div>
+        <div class="row">
+          <button class="action" id="jogRevBtn">Jog REV</button>
+          <button class="action" id="jogFwdBtn">Jog FWD</button>
+          <button class="action" id="manualApplyBtn">Apply Values</button>
+          <button class="action" id="manualStartBtn">Manual Start</button>
+          <button class="action" id="manualStopBtn">Manual Stop</button>
+        </div>
+        <div class="row">
+          <button class="action" id="manualSaveBtn">Save Manual</button>
+          <button class="action" id="manualLoadBtn">Load Manual</button>
+        </div>
+      </div>
+
+      <!-- Parameter tab -->
+      <div class="panel" id="panel-parameter">
+        <div class="grid2">
+          <label>Jog Speed (puls) <input id="pJogSpeed" type="text" inputmode="numeric" value="1000"></label>
+          <label>Acc Time (msec) <input id="pAcc" type="text" inputmode="numeric" value="100"></label>
+          <label>Dec Time (msec) <input id="pDec" type="text" inputmode="numeric" value="100"></label>
+          <label>Limit Plus (puls) <input id="pLimitPlus" type="text" inputmode="numeric" value="100000"></label>
+          <label>Limit Minus (puls) <input id="pLimitMinus" type="text" inputmode="numeric" value="-100000"></label>
+          <label>Unit Scale (puls) <input id="pUnitScale" type="text" inputmode="numeric" value="1"></label>
+          <label>Home Offset (puls) <input id="pHomeOffset" type="text" inputmode="numeric" value="0"></label>
+          <label>Position Gain <input id="pPosGain" type="text" inputmode="numeric" value="0"></label>
+        </div>
+        <div class="row">
+          <button class="action" id="paramWriteAllBtn">Write All</button>
+          <button class="action" id="paramReadAllBtn">Read All</button>
+          <button class="action" id="paramSaveBtn">Save</button>
+          <button class="action" id="paramLoadBtn">Load</button>
+        </div>
+      </div>
+
+      <!-- Program tab -->
+      <div class="panel" id="panel-program">
+        <div class="grid3">
+          <label>Pos1 (puls) <input id="gPos1" type="text" inputmode="numeric" value="0"></label>
+          <label>Pos2 (puls) <input id="gPos2" type="text" inputmode="numeric" value="0"></label>
+          <label>Pos3 (puls) <input id="gPos3" type="text" inputmode="numeric" value="0"></label>
+          <label>Speed1 (puls) <input id="gSpeed1" type="text" inputmode="numeric" value="100"></label>
+          <label>Speed2 (puls) <input id="gSpeed2" type="text" inputmode="numeric" value="100"></label>
+          <label>Speed3 (puls) <input id="gSpeed3" type="text" inputmode="numeric" value="100"></label>
+          <label>Torque1 (%) <input id="gTorque1" type="text" inputmode="numeric" value="20"></label>
+          <label>Torque2 (%) <input id="gTorque2" type="text" inputmode="numeric" value="20"></label>
+          <label>Torque3 (%) <input id="gTorque3" type="text" inputmode="numeric" value="20"></label>
+          <label>ReturnSpeed (puls) <input id="gReturnSpeed" type="text" inputmode="numeric" value="100"></label>
+          <label>Delay (msec) <input id="gDelayMs" type="text" inputmode="numeric" value="0"></label>
+        </div>
+        <div class="row">
+          <button class="action" id="programApplyBtn">Apply Values</button>
+          <button class="action" id="programStartBtn">Program Start</button>
+          <button class="action" id="programStopBtn">Program Stop</button>
+          <button class="action" id="programSaveBtn">Save</button>
+          <button class="action" id="programLoadBtn">Load</button>
+        </div>
+      </div>
+
+      <!-- Press Control tab -->
+      <div class="panel" id="panel-press">
+        <div class="press-ctrl-grid">
+          <div class="press-section">
+            <h3>Operation Mode</h3>
+            <div class="row">
+              <button class="action mode-btn" id="modeManuBtn">MANUAL</button>
+              <button class="action mode-btn" id="modeSetupBtn">SETUP</button>
+              <button class="action mode-btn" id="modeAutoBtn">AUTO</button>
+            </div>
+          </div>
+          <div class="press-section">
+            <h3>Cycle Control</h3>
+            <div class="row">
+              <button class="action big-green" id="cycleStartBtn">▶ CYCLE START</button>
+              <button class="action big-red" id="cycleStopBtn">■ CYCLE STOP</button>
+              <button class="action" id="cycleAbortBtn">⚠ ABORT</button>
+            </div>
+          </div>
+          <div class="press-section">
+            <h3>Press Parameters</h3>
+            <div class="grid2">
+              <label>Approach Speed <input id="pressApSpd" type="text" inputmode="numeric" value="500"></label>
+              <label>Approach Pos <input id="pressApPos" type="text" inputmode="numeric" value="-5000"></label>
+              <label>Contact Speed <input id="pressCntSpd" type="text" inputmode="numeric" value="50"></label>
+              <label>Contact Torque Th% <input id="pressCntTh" type="text" inputmode="numeric" value="10"></label>
+              <label>Press Speed <input id="pressPrSpd" type="text" inputmode="numeric" value="100"></label>
+              <label>Press Target Pos <input id="pressPrPos" type="text" inputmode="numeric" value="-10000"></label>
+              <label>Press Max Force% <input id="pressPrForce" type="text" inputmode="numeric" value="80"></label>
+              <label>Dwell Time (ms) <input id="pressDwell" type="text" inputmode="numeric" value="500"></label>
+              <label>Return Speed <input id="pressRetSpd" type="text" inputmode="numeric" value="500"></label>
+              <label>Return Pos <input id="pressRetPos" type="text" inputmode="numeric" value="0"></label>
+              <label>Timeout (ms) <input id="pressTimeout" type="text" inputmode="numeric" value="30000"></label>
+            </div>
+            <div class="row">
+              <button class="action" id="pressApplyBtn">Apply Press Params</button>
+            </div>
+          </div>
+          <div class="press-section">
+            <h3>Quality Judge Limits</h3>
+            <div class="grid2">
+              <label>Force Max% <input id="judgeForceMax" type="text" inputmode="numeric" value="75"></label>
+              <label>Force Min% <input id="judgeForceMin" type="text" inputmode="numeric" value="10"></label>
+              <label>Pos Max <input id="judgePosMax" type="text" inputmode="numeric" value="-9000"></label>
+              <label>Pos Min <input id="judgePosMin" type="text" inputmode="numeric" value="-11000"></label>
+            </div>
+            <div class="row">
+              <button class="action" id="judgeApplyBtn">Apply Judge Limits</button>
+            </div>
+          </div>
+          <div class="press-section">
+            <h3>Interlock Simulation</h3>
+            <div class="grid2">
+              <label><input type="checkbox" id="simEstop" checked> E-Stop OK</label>
+              <label><input type="checkbox" id="simDoor" checked> Door OK</label>
+              <label><input type="checkbox" id="simHome" checked> Home Complete</label>
+            </div>
+            <div class="row">
+              <button class="action" id="simApplyBtn">Apply Sim State</button>
+              <button class="action" id="counterResetBtn">Reset Counters</button>
+            </div>
+          </div>
+          <div class="press-section">
+            <h3>Last Cycle Result</h3>
+            <div class="result-box">
+              <div><span>Cycle#</span><strong id="rstCycle">-</strong></div>
+              <div><span>Result</span><strong id="rstResult">-</strong></div>
+              <div><span>Peak Force</span><strong id="rstForce">-</strong></div>
+              <div><span>End Pos</span><strong id="rstPos">-</strong></div>
+              <div><span>Cycle Time</span><strong id="rstMs">-</strong></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Quality Trend tab -->
+      <div class="panel" id="panel-quality">
+        <div class="quality-header">
+          <h3>Cycle History — OK / NG Trend</h3>
+          <div class="row">
+            <button class="action" id="qualityRefreshBtn">Refresh</button>
+            <a id="csvDownloadBtn" class="action" href="/api/history/csv" download="cycle_history.csv">Download CSV</a>
+            <button class="action" id="qualityClearBtn">Clear History</button>
+          </div>
+        </div>
+        <canvas id="qualityChart" height="160"></canvas>
+        <div class="history-table-wrap">
+          <table id="historyTable" class="data-table">
+            <thead>
+              <tr>
+                <th>#</th><th>Cycle</th><th>Result</th><th>Force%</th><th>Pos</th><th>Time(ms)</th><th>Timestamp</th>
+              </tr>
+            </thead>
+            <tbody id="historyBody"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Alarm History tab -->
+      <div class="panel" id="panel-alarm">
+        <div class="alarm-header">
+          <h3>Alarm Management</h3>
+          <div class="row">
+            <button class="action alarm-ack-btn" id="alarmAckBtn">ACK Alarm</button>
+            <button class="action alarm-rst-btn" id="alarmResetBtn">Reset Alarm</button>
+            <button class="action" id="alarmFetchBtn">Fetch History</button>
+          </div>
+        </div>
+        <div class="active-alarm-box">
+          <span>Active Alarm:</span>
+          <strong id="activeAlarmDetail">NONE (code=0)</strong>
+          <span id="activeAlarmAck"></span>
+        </div>
+        <table id="alarmTable" class="data-table">
+          <thead>
+            <tr><th>Code</th><th>Message</th><th>Acked</th><th>Timestamp</th></tr>
+          </thead>
+          <tbody id="alarmBody"></tbody>
+        </table>
+      </div>
+    </section>
+
+      <!-- Maintenance tab -->
+      <div class="panel" id="panel-maintenance">
+        <div class="maint-grid">
+          <div class="press-section">
+            <h3>User Access Level</h3>
+            <div class="user-level-box">
+              <span>Current Level:</span>
+              <strong id="userLevelName">OPERATOR</strong>
+              <span id="userLevelBadge" class="ulevel-badge op">OP</span>
+            </div>
+            <div class="grid2" style="margin-top:8px">
+              <label>PIN <input id="loginPin" type="password" inputmode="numeric" placeholder="4-digit PIN" maxlength="4"></label>
+            </div>
+            <div class="row">
+              <button class="action" id="loginBtn">Login</button>
+              <button class="action" id="logoutBtn">Logout</button>
+            </div>
+          </div>
+          <div class="press-section">
+            <h3>Preventive Maintenance Counter</h3>
+            <div class="maint-info">
+              <div><span>Total Cycles</span><strong id="maintTotal">0</strong></div>
+              <div><span>Since Last Maint</span><strong id="maintSince">0</strong></div>
+              <div><span>PM Threshold</span><strong id="maintThresh">100000</strong></div>
+              <div><span>PM Alert</span><strong id="maintAlert" class="alarm-none">NO</strong></div>
+            </div>
+            <div class="grid2" style="margin-top:8px">
+              <label>New Threshold <input id="maintThreshInput" type="text" inputmode="numeric" value="100000"></label>
+            </div>
+            <div class="row">
+              <button class="action" id="maintRefreshBtn">Refresh</button>
+              <button class="action alarm-rst-btn" id="maintResetBtn">Reset Maint Counter</button>
+              <button class="action" id="maintSetThreshBtn">Set Threshold</button>
+            </div>
+          </div>
+          <div class="press-section" style="grid-column: 1 / -1">
+            <h3>System Information</h3>
+            <div class="sys-info-grid">
+              <div><span>Mode</span><strong id="sysMode">-</strong></div>
+              <div><span>Step</span><strong id="sysStep">-</strong></div>
+              <div><span>Drive Ready</span><strong id="sysDrive">-</strong></div>
+              <div><span>Home Complete</span><strong id="sysHome">-</strong></div>
+              <div><span>E-Stop OK</span><strong id="sysEstop">-</strong></div>
+              <div><span>Door OK</span><strong id="sysDoor">-</strong></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="card log-card">
+      <h2>UART Log</h2>
+      <pre id="logBox"></pre>
+    </section>
+  </main>
+
+  <script src="app.js?v=20260512p3"></script>
+</body>
+</html>

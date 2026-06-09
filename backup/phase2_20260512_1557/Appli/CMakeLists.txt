@@ -1,0 +1,178 @@
+cmake_minimum_required(VERSION 3.22)
+
+project(LCD_Test_Appli C CXX ASM)
+
+# Source files
+set(APPLI_SOURCES
+    Core/Src/main.c
+    Core/Src/stm32h7rsxx_hal_msp.c
+    Core/Src/stm32h7rsxx_hal_timebase_tim.c
+    Core/Src/stm32h7rsxx_it.c
+    Core/Src/system_stm32h7rsxx.c
+    Core/Src/freertos.c
+    Core/Src/settings_persistence.c
+    Core/Src/ui_flash_storage.c
+    Core/Src/emw3080_web_server.c
+    Core/Src/emw3080_at_http.c
+    Core/Src/soem_port.c
+    Core/Src/interlock_manager.c
+    Core/Src/press_state_machine.c
+    Core/Src/recipe_manager.c
+    Core/Src/cycle_logger.c
+    Core/Src/alarm_manager.c
+    ${CMAKE_SOURCE_DIR}/gcc/startup_stm32h7s7l8hxh_appli.s
+    ${CMAKE_SOURCE_DIR}/gcc/syscalls.c
+    ${CMAKE_SOURCE_DIR}/gcc/sysmem.c
+)
+
+# HAL Driver sources
+set(HAL_SOURCES
+    ${CMAKE_SOURCE_DIR}/Drivers/STM32H7RSxx_HAL_Driver/Src/stm32h7rsxx_hal.c
+    ${CMAKE_SOURCE_DIR}/Drivers/STM32H7RSxx_HAL_Driver/Src/stm32h7rsxx_hal_cortex.c
+    ${CMAKE_SOURCE_DIR}/Drivers/STM32H7RSxx_HAL_Driver/Src/stm32h7rsxx_hal_crc.c
+    ${CMAKE_SOURCE_DIR}/Drivers/STM32H7RSxx_HAL_Driver/Src/stm32h7rsxx_hal_crc_ex.c
+    ${CMAKE_SOURCE_DIR}/Drivers/STM32H7RSxx_HAL_Driver/Src/stm32h7rsxx_hal_dma.c
+    ${CMAKE_SOURCE_DIR}/Drivers/STM32H7RSxx_HAL_Driver/Src/stm32h7rsxx_hal_dma_ex.c
+    ${CMAKE_SOURCE_DIR}/Drivers/STM32H7RSxx_HAL_Driver/Src/stm32h7rsxx_hal_dma2d.c
+    ${CMAKE_SOURCE_DIR}/Drivers/STM32H7RSxx_HAL_Driver/Src/stm32h7rsxx_hal_eth.c
+    ${CMAKE_SOURCE_DIR}/Drivers/STM32H7RSxx_HAL_Driver/Src/stm32h7rsxx_hal_eth_ex.c
+    ${CMAKE_SOURCE_DIR}/Drivers/STM32H7RSxx_HAL_Driver/Src/stm32h7rsxx_hal_exti.c
+    ${CMAKE_SOURCE_DIR}/Drivers/STM32H7RSxx_HAL_Driver/Src/stm32h7rsxx_hal_flash.c
+    ${CMAKE_SOURCE_DIR}/Drivers/STM32H7RSxx_HAL_Driver/Src/stm32h7rsxx_hal_flash_ex.c
+    ${CMAKE_SOURCE_DIR}/Drivers/STM32H7RSxx_HAL_Driver/Src/stm32h7rsxx_hal_gfxmmu.c
+    ${CMAKE_SOURCE_DIR}/Drivers/STM32H7RSxx_HAL_Driver/Src/stm32h7rsxx_hal_gpio.c
+    ${CMAKE_SOURCE_DIR}/Drivers/STM32H7RSxx_HAL_Driver/Src/stm32h7rsxx_hal_gpu2d.c
+    ${CMAKE_SOURCE_DIR}/Drivers/STM32H7RSxx_HAL_Driver/Src/stm32h7rsxx_hal_i2c.c
+    ${CMAKE_SOURCE_DIR}/Drivers/STM32H7RSxx_HAL_Driver/Src/stm32h7rsxx_hal_i2c_ex.c
+    ${CMAKE_SOURCE_DIR}/Drivers/STM32H7RSxx_HAL_Driver/Src/stm32h7rsxx_hal_icache.c
+    ${CMAKE_SOURCE_DIR}/Drivers/STM32H7RSxx_HAL_Driver/Src/stm32h7rsxx_hal_jpeg.c
+    ${CMAKE_SOURCE_DIR}/Drivers/STM32H7RSxx_HAL_Driver/Src/stm32h7rsxx_hal_ltdc.c
+    ${CMAKE_SOURCE_DIR}/Drivers/STM32H7RSxx_HAL_Driver/Src/stm32h7rsxx_hal_ltdc_ex.c
+    ${CMAKE_SOURCE_DIR}/Drivers/STM32H7RSxx_HAL_Driver/Src/stm32h7rsxx_hal_pwr.c
+    ${CMAKE_SOURCE_DIR}/Drivers/STM32H7RSxx_HAL_Driver/Src/stm32h7rsxx_hal_pwr_ex.c
+    ${CMAKE_SOURCE_DIR}/Drivers/STM32H7RSxx_HAL_Driver/Src/stm32h7rsxx_hal_rcc.c
+    ${CMAKE_SOURCE_DIR}/Drivers/STM32H7RSxx_HAL_Driver/Src/stm32h7rsxx_hal_rcc_ex.c
+    ${CMAKE_SOURCE_DIR}/Drivers/STM32H7RSxx_HAL_Driver/Src/stm32h7rsxx_hal_tim.c
+    ${CMAKE_SOURCE_DIR}/Drivers/STM32H7RSxx_HAL_Driver/Src/stm32h7rsxx_hal_tim_ex.c
+    ${CMAKE_SOURCE_DIR}/Drivers/STM32H7RSxx_HAL_Driver/Src/stm32h7rsxx_hal_uart.c
+    ${CMAKE_SOURCE_DIR}/Drivers/STM32H7RSxx_HAL_Driver/Src/stm32h7rsxx_hal_uart_ex.c
+    ${CMAKE_SOURCE_DIR}/Drivers/STM32H7RSxx_HAL_Driver/Src/stm32h7rsxx_hal_xspi.c
+)
+
+# External memory manager (NOR SFDP + XSPI SAL)
+set(EXTMEM_SOURCES
+    ${CMAKE_SOURCE_DIR}/Middlewares/ST/STM32_ExtMem_Manager/stm32_extmem.c
+    ${CMAKE_SOURCE_DIR}/Middlewares/ST/STM32_ExtMem_Manager/nor_sfdp/stm32_sfdp_driver.c
+    ${CMAKE_SOURCE_DIR}/Middlewares/ST/STM32_ExtMem_Manager/nor_sfdp/stm32_sfdp_data.c
+    ${CMAKE_SOURCE_DIR}/Middlewares/ST/STM32_ExtMem_Manager/sal/stm32_sal_xspi.c
+)
+
+# FreeRTOS sources
+file(GLOB FREERTOS_SOURCES
+    ${CMAKE_SOURCE_DIR}/Middlewares/Third_Party/FreeRTOS/Source/*.c
+    ${CMAKE_SOURCE_DIR}/Middlewares/Third_Party/FreeRTOS/Source/portable/MemMang/heap_4.c
+    ${CMAKE_SOURCE_DIR}/Middlewares/Third_Party/FreeRTOS/Source/portable/GCC/ARM_CM7/r0p1/*.c
+    ${CMAKE_SOURCE_DIR}/Middlewares/Third_Party/FreeRTOS/Source/CMSIS_RTOS_V2/*.c
+)
+
+# SOEM EtherCAT sources
+set(SOEM_DIR ${CMAKE_SOURCE_DIR}/Middlewares/Third_Party/SOEM)
+file(GLOB SOEM_SOURCES
+    ${SOEM_DIR}/src/*.c
+    ${SOEM_DIR}/osal/stm32/*.c
+    ${SOEM_DIR}/oshw/stm32/*.c
+)
+
+# LAN8742 PHY driver
+set(LAN8742_SOURCES
+    ${CMAKE_SOURCE_DIR}/Drivers/BSP/Components/lan8742.c
+)
+
+# TouchGFX sources
+file(GLOB_RECURSE TOUCHGFX_APP_SOURCES
+    TouchGFX/App/*.c
+    TouchGFX/App/*.cpp
+    TouchGFX/target/*.c
+    TouchGFX/target/*.cpp
+    TouchGFX/gui/src/*.cpp
+    TouchGFX/generated/gui_generated/src/*.cpp
+    TouchGFX/generated/fonts/src/*.cpp
+    TouchGFX/generated/images/src/*.cpp
+    TouchGFX/generated/texts/src/*.cpp
+    TouchGFX/generated/videos/src/*.cpp
+)
+
+add_executable(${PROJECT_NAME}
+    ${APPLI_SOURCES}
+    ${HAL_SOURCES}
+    ${EXTMEM_SOURCES}
+    ${FREERTOS_SOURCES}
+    ${SOEM_SOURCES}
+    ${LAN8742_SOURCES}
+    ${TOUCHGFX_APP_SOURCES}
+)
+
+target_include_directories(${PROJECT_NAME} PRIVATE
+    Core/Inc
+    ${CMAKE_SOURCE_DIR}/Drivers/STM32H7RSxx_HAL_Driver/Inc
+    ${CMAKE_SOURCE_DIR}/Drivers/STM32H7RSxx_HAL_Driver/Inc/Legacy
+    ${CMAKE_SOURCE_DIR}/Drivers/CMSIS/Device/ST/STM32H7RSxx/Include
+    ${CMAKE_SOURCE_DIR}/Drivers/CMSIS/Include
+    ${CMAKE_SOURCE_DIR}/Drivers/CMSIS/RTOS2/Include
+    ${CMAKE_SOURCE_DIR}/Middlewares/Third_Party/FreeRTOS/Source/include
+    ${CMAKE_SOURCE_DIR}/Middlewares/Third_Party/FreeRTOS/Source/portable/GCC/ARM_CM7/r0p1
+    ${CMAKE_SOURCE_DIR}/Middlewares/Third_Party/FreeRTOS/Source/CMSIS_RTOS_V2
+    TouchGFX
+    TouchGFX/App
+    TouchGFX/target
+    TouchGFX/target/generated
+    TouchGFX/gui/include
+    TouchGFX/generated/gui_generated/include
+    TouchGFX/generated/fonts/include
+    TouchGFX/generated/images/include
+    TouchGFX/generated/texts/include
+    TouchGFX/generated/videos/include
+    ${CMAKE_SOURCE_DIR}/Middlewares/ST/touchgfx/framework/include
+    ${CMAKE_SOURCE_DIR}/Middlewares/ST/touchgfx/os
+    ${CMAKE_SOURCE_DIR}/Middlewares/ST/touchgfx_components/gpu2d/TouchGFXNema/include
+    ${CMAKE_SOURCE_DIR}/Middlewares/ST/touchgfx_components/gpu2d/NemaGFX/include
+    ${CMAKE_SOURCE_DIR}/Middlewares/ST/STM32_ExtMem_Manager
+    ${CMAKE_SOURCE_DIR}/Middlewares/ST/STM32_ExtMem_Manager/nor_sfdp
+    ${CMAKE_SOURCE_DIR}/Middlewares/ST/STM32_ExtMem_Manager/sal
+    # SOEM includes
+    ${SOEM_DIR}/include
+    ${SOEM_DIR}/osal
+    ${SOEM_DIR}/osal/stm32
+    ${SOEM_DIR}/oshw/stm32
+    # LAN8742 PHY driver
+    ${CMAKE_SOURCE_DIR}/Drivers/BSP/Components
+)
+
+target_compile_definitions(${PROJECT_NAME} PRIVATE
+    USE_HAL_DRIVER
+    STM32H7S7xx
+    USE_BPP=24
+    EC_VER4
+    SOEM_ENABLED
+    EMW3080_LWIP_WEB_SERVER=0
+    EMW3080_AT_HTTP_SERVER=1
+    EMW3080_AT_IO_MODE=0
+    EMW3080_AT_UART_INSTANCE=7
+)
+
+# Link TouchGFX libraries
+target_link_libraries(${PROJECT_NAME}
+    ${CMAKE_SOURCE_DIR}/Middlewares/ST/touchgfx/lib/core/cortex_m7/gcc/libtouchgfx-float-abi-hard.a
+    ${CMAKE_SOURCE_DIR}/Middlewares/ST/touchgfx_components/gpu2d/TouchGFXNema/lib/cortex_m7/gcc/libtouchgfxnema-float-abi-hard.a
+    ${CMAKE_SOURCE_DIR}/Middlewares/ST/touchgfx_components/gpu2d/NemaGFX/lib/core/cortex_m7/gcc/libnemagfx-float-abi-hard.a
+)
+
+# Linker script
+set(LINKER_SCRIPT ${CMAKE_CURRENT_SOURCE_DIR}/stm32h7rsxx_RAMxspi1_ROMxspi2.ld)
+target_link_options(${PROJECT_NAME} PRIVATE -T${LINKER_SCRIPT})
+
+# Generate binary
+add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
+    COMMAND ${CMAKE_OBJCOPY} -O binary $<TARGET_FILE:${PROJECT_NAME}> ${PROJECT_NAME}.bin
+    COMMENT "Generating ${PROJECT_NAME}.bin"
+)

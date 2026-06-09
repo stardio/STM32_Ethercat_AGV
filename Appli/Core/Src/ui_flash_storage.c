@@ -1,52 +1,46 @@
+/**
+ * @file    ui_flash_storage.c
+ * @brief   6-axis articulated robot — flash persistence implementation
+ *
+ * Storage  : Bank 2 Sector 7  (FLASH_SETTINGS_ADDR = 0x081E0000)
+ * Word size: 256 bits = 32 bytes  (STM32H753ZI HAL requirement)
+ *
+ * One RobotFlashData_t record (320 bytes = 10 flash words) covers all
+ * six axes.  CRC32 is computed over the axis[] payload only.
+ *
+ * Write sequence
+ *   1. Unlock flash
+ *   2. Erase Sector 7 (128 KB)
+ *   3. Program 10 × 32-byte words
+ *   4. Lock flash
+ *   5. Invalidate D-cache, verify by memcmp
+ */
 #include "ui_flash_storage.h"
+#include "axis_config.h"   /* g_axis_param[]              */
+#include "main.h"          /* FLASH_SETTINGS_ADDR/BANK/SECTOR */
 
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
 
-#include "main.h"
+/* Build-time layout checks — fail fast if AxisParam_t is resized. */
+_Static_assert(sizeof(AxisParam_t)      == 48U,  "AxisParam_t size changed — update RobotFlashData_t._pad");
+_Static_assert(sizeof(RobotFlashData_t) == 320U, "RobotFlashData_t must be exactly 320 bytes (10 × 32B flash words)");
+_Static_assert((sizeof(RobotFlashData_t) % 32U) == 0U, "Flash layout must be a multiple of 32 bytes");
 
-#define UI_PARAM_FLASH_SECTOR       (FLASH_SECTOR_NB - 1U)
-#define UI_PARAM_FLASH_ADDR         (FLASH_BASE + (UI_PARAM_FLASH_SECTOR * FLASH_SECTOR_SIZE))
+/* ── Internal helpers ────────────────────────────────────────────────────── */
 
-#define UI_FLASH_MAGIC              (0x31465355UL) /* "UFS1" */
-#define UI_FLASH_VERSION            (1U)
-
-typedef enum
-{
-    UI_FLASH_PAGE_PROGRAM = 1,
-    UI_FLASH_PAGE_MANUAL = 2,
-    UI_FLASH_PAGE_PARAMETER = 3,
-    UI_FLASH_PAGE_HOME = 4
-} UiFlashPageId;
-
-typedef struct
-{
-    uint32_t magic;
-    uint16_t version;
-    uint16_t pageId;
-    uint32_t payloadSize;
-    uint32_t crc32;
-    uint8_t payload[64];
-} UiFlashRecord;
-
-typedef struct
-{
-    /* Keep Parameter first for backward compatibility with legacy single-record layout. */
-    UiFlashRecord parameter;
-    UiFlashRecord manual;
-    UiFlashRecord program;
-    UiFlashRecord home;
-} UiFlashInternalLayout;
-
-static uint32_t UiFlash_Crc32(const uint8_t* data, uint32_t length)
+static uint32_t RobotFlash_Crc32(const uint8_t *data, uint32_t len)
 {
     uint32_t crc = 0xFFFFFFFFUL;
+    uint32_t i;
 
-    for (uint32_t i = 0U; i < length; i++)
+    for (i = 0U; i < len; i++)
     {
-        crc ^= (uint32_t)data[i];
-        for (uint8_t bit = 0U; bit < 8U; bit++)
+        uint8_t  byte = data[i];
+        uint8_t  bit;
+        crc ^= (uint32_t)byte;
+        for (bit = 0U; bit < 8U; bit++)
         {
             uint32_t mask = (uint32_t)(-(int32_t)(crc & 1UL));
             crc = (crc >> 1U) ^ (0xEDB88320UL & mask);
@@ -56,377 +50,128 @@ static uint32_t UiFlash_Crc32(const uint8_t* data, uint32_t length)
     return ~crc;
 }
 
-static uint8_t UiFlash_BuildRecord(UiFlashPageId pageId,
-                                   const void* payload,
-                                   uint32_t payloadSize,
-                                   UiFlashRecord* record)
-{
-    if ((payload == 0) || (record == 0) || (payloadSize > sizeof(record->payload)))
-    {
-        return 0U;
-    }
-
-    memset(record, 0xFF, sizeof(*record));
-    record->magic = UI_FLASH_MAGIC;
-    record->version = UI_FLASH_VERSION;
-    record->pageId = (uint16_t)pageId;
-    record->payloadSize = payloadSize;
-    memcpy(record->payload, payload, payloadSize);
-
-    record->crc32 = UiFlash_Crc32(record->payload, payloadSize);
-    record->crc32 ^= UiFlash_Crc32((const uint8_t*)&record->pageId, sizeof(record->pageId));
-    record->crc32 ^= UiFlash_Crc32((const uint8_t*)&record->payloadSize, sizeof(record->payloadSize));
-
-    return 1U;
-}
-
-static uint8_t UiFlash_ValidateRecord(const UiFlashRecord* record,
-                                      UiFlashPageId expectedPage,
-                                      uint32_t expectedPayloadSize)
-{
-    if (record == 0)
-    {
-        return 0U;
-    }
-
-    if (record->magic != UI_FLASH_MAGIC)
-    {
-        return 0U;
-    }
-
-    if (record->version != UI_FLASH_VERSION)
-    {
-        return 0U;
-    }
-
-    if (record->pageId != (uint16_t)expectedPage)
-    {
-        return 0U;
-    }
-
-    if (record->payloadSize != expectedPayloadSize)
-    {
-        return 0U;
-    }
-
-    uint32_t crc = UiFlash_Crc32(record->payload, record->payloadSize);
-    crc ^= UiFlash_Crc32((const uint8_t*)&record->pageId, sizeof(record->pageId));
-    crc ^= UiFlash_Crc32((const uint8_t*)&record->payloadSize, sizeof(record->payloadSize));
-
-    return (crc == record->crc32) ? 1U : 0U;
-}
-
-static void UiFlash_InvalidateDCacheForRange(const void* address, uint32_t sizeBytes)
+static void RobotFlash_InvalidateDCache(const void *addr, uint32_t size)
 {
 #if defined(__DCACHE_PRESENT) && (__DCACHE_PRESENT == 1U)
-    if ((address == 0) || (sizeBytes == 0U))
-    {
-        return;
-    }
+    const uint32_t line  = 32U;
+    uint32_t       start;
+    uint32_t       end;
 
-    const uint32_t lineSize = 32U;
-    const uint32_t start = ((uint32_t)address) & ~(lineSize - 1U);
-    const uint32_t end = (((uint32_t)address) + sizeBytes + (lineSize - 1U)) & ~(lineSize - 1U);
+    if (addr == NULL || size == 0U) { return; }
 
-    SCB_InvalidateDCache_by_Addr((uint32_t*)start, (int32_t)(end - start));
+    start = (uint32_t)addr & ~(line - 1U);
+    end   = ((uint32_t)addr + size + line - 1U) & ~(line - 1U);
+
+    SCB_InvalidateDCache_by_Addr((uint32_t *)start, (int32_t)(end - start));
     __DSB();
     __ISB();
 #else
-    (void)address;
-    (void)sizeBytes;
+    (void)addr;
+    (void)size;
 #endif
 }
 
-static void UiFlash_RestoreInterruptState(uint32_t primask)
+/* ── Public API ──────────────────────────────────────────────────────────── */
+
+uint8_t RobotFlash_Save(void)
 {
-    if ((primask & 1U) == 0U)
-    {
-        __enable_irq();
-    }
-}
+    RobotFlashData_t    img;
+    FLASH_EraseInitTypeDef erase;
+    uint32_t            sector_err = 0U;
+    HAL_StatusTypeDef   st;
+    uint32_t            off;
 
-static void UiFlash_ReadLayout(UiFlashInternalLayout* layout)
-{
-    if (layout == 0)
-    {
-        return;
-    }
+    /* Marshal --------------------------------------------------------------- */
+    memset(&img, 0, sizeof(img));
+    img.magic      = ROBOT_FLASH_MAGIC;
+    img.version    = ROBOT_FLASH_VERSION;
+    img.axis_count = (uint8_t)AXIS_COUNT;
+    img._rsvd      = 0U;
+    memcpy(img.axis, g_axis_param, sizeof(g_axis_param));
+    img.crc32      = RobotFlash_Crc32((const uint8_t *)img.axis, sizeof(img.axis));
+    /* _pad already zeroed by memset */
 
-    UiFlash_InvalidateDCacheForRange((const void*)UI_PARAM_FLASH_ADDR, sizeof(UiFlashInternalLayout));
-    memcpy(layout, (const void*)UI_PARAM_FLASH_ADDR, sizeof(UiFlashInternalLayout));
-}
+    /* Unlock ---------------------------------------------------------------- */
+    st = HAL_FLASH_Unlock();
+    if (st != HAL_OK) { return 0U; }
 
-static uint8_t UiFlash_WriteLayout(const UiFlashInternalLayout* layout)
-{
-    uint32_t primask;
-    uint32_t sectorError = 0U;
-    FLASH_EraseInitTypeDef eraseInit;
-    HAL_StatusTypeDef status;
+    /* Erase sector ---------------------------------------------------------- */
+    memset(&erase, 0, sizeof(erase));
+    erase.TypeErase = FLASH_TYPEERASE_SECTORS;
+    erase.Banks     = FLASH_SETTINGS_BANK;
+    erase.Sector    = FLASH_SETTINGS_SECTOR;
+    erase.NbSectors = 1U;
 
-    if (layout == 0)
-    {
-        return 0U;
-    }
-
-    if (((uint32_t)sizeof(UiFlashInternalLayout) % 16U) != 0U)
-    {
-        return 0U;
-    }
-
-    if ((uint32_t)sizeof(UiFlashInternalLayout) > FLASH_SECTOR_SIZE)
-    {
-        return 0U;
-    }
-
-    primask = __get_PRIMASK();
-    __disable_irq();
-
-    status = HAL_FLASH_Unlock();
-    if (status != HAL_OK)
-    {
-        UiFlash_RestoreInterruptState(primask);
-        return 0U;
-    }
-
-    memset(&eraseInit, 0, sizeof(eraseInit));
-    eraseInit.TypeErase = FLASH_TYPEERASE_SECTORS;
-    eraseInit.Sector = UI_PARAM_FLASH_SECTOR;
-    eraseInit.NbSectors = 1U;
-
-    status = HAL_FLASHEx_Erase(&eraseInit, &sectorError);
-    if ((status != HAL_OK) || (sectorError != 0xFFFFFFFFUL))
+    st = HAL_FLASHEx_Erase(&erase, &sector_err);
+    if (st != HAL_OK || sector_err != 0xFFFFFFFFUL)
     {
         (void)HAL_FLASH_Lock();
-        UiFlash_RestoreInterruptState(primask);
         return 0U;
     }
 
-    for (uint32_t offset = 0U; offset < sizeof(UiFlashInternalLayout); offset += 16U)
+    /* Program 32-byte flash words ------------------------------------------- */
+    for (off = 0U; off < sizeof(img); off += 32U)
     {
-        status = HAL_FLASH_Program(FLASH_TYPEPROGRAM_QUADWORD,
-                                   UI_PARAM_FLASH_ADDR + offset,
-                                   (uint32_t)((const uint8_t*)layout + offset));
-        if (status != HAL_OK)
+        st = HAL_FLASH_Program(FLASH_TYPEPROGRAM_FLASHWORD,
+                               FLASH_SETTINGS_ADDR + off,
+                               (uint32_t)((const uint8_t *)&img + off));
+        if (st != HAL_OK)
         {
             (void)HAL_FLASH_Lock();
-            UiFlash_RestoreInterruptState(primask);
             return 0U;
         }
     }
 
-    status = HAL_FLASH_Lock();
-    UiFlash_RestoreInterruptState(primask);
+    (void)HAL_FLASH_Lock();
 
-    if (status != HAL_OK)
-    {
-        return 0U;
-    }
+    /* Verify ---------------------------------------------------------------- */
+    RobotFlash_InvalidateDCache((const void *)FLASH_SETTINGS_ADDR, sizeof(img));
 
-    UiFlash_InvalidateDCacheForRange((const void*)UI_PARAM_FLASH_ADDR, sizeof(UiFlashInternalLayout));
+    return (memcmp((const void *)FLASH_SETTINGS_ADDR, &img, sizeof(img)) == 0) ? 1U : 0U;
+}
 
-    if (memcmp((const void*)UI_PARAM_FLASH_ADDR, layout, sizeof(UiFlashInternalLayout)) != 0)
-    {
-        return 0U;
-    }
+uint8_t RobotFlash_Load(void)
+{
+    RobotFlashData_t img;
+    uint32_t         computed_crc;
 
+    RobotFlash_InvalidateDCache((const void *)FLASH_SETTINGS_ADDR, sizeof(img));
+    memcpy(&img, (const void *)FLASH_SETTINGS_ADDR, sizeof(img));
+
+    /* Validate header ------------------------------------------------------- */
+    if (img.magic      != ROBOT_FLASH_MAGIC)   { return 0U; }
+    if (img.version    != ROBOT_FLASH_VERSION) { return 0U; }
+    if (img.axis_count != (uint8_t)AXIS_COUNT) { return 0U; }
+
+    /* Validate CRC ---------------------------------------------------------- */
+    computed_crc = RobotFlash_Crc32((const uint8_t *)img.axis, sizeof(img.axis));
+    if (img.crc32 != computed_crc)             { return 0U; }
+
+    /* Restore --------------------------------------------------------------- */
+    memcpy(g_axis_param, img.axis, sizeof(g_axis_param));
     return 1U;
 }
 
-static UiFlashRecord* UiFlash_GetRecordMutable(UiFlashInternalLayout* layout, UiFlashPageId page)
+/* ── Legacy home-offset shims ───────────────────────────────────────────── */
+/*
+ * These functions exist only for main.c call sites that have not yet been
+ * migrated to the new web-protocol command layer (Phase 4).
+ *
+ * SaveHome  — updates AXIS_J1 home offset and writes all 6 axes to flash.
+ * LoadHome  — returns the AXIS_J1 home offset that was restored by
+ *             RobotFlash_Load() at boot.  If RobotFlash_Load() has not
+ *             been called yet this returns the AxisConfig_InitDefaults()
+ *             value (0), which is safe.
+ */
+uint8_t UiFlashStorage_SaveHome(int32_t hw_offset)
 {
-    if (layout == 0)
-    {
-        return 0;
-    }
-
-    if (page == UI_FLASH_PAGE_PARAMETER)
-    {
-        return &layout->parameter;
-    }
-    if (page == UI_FLASH_PAGE_MANUAL)
-    {
-        return &layout->manual;
-    }
-    if (page == UI_FLASH_PAGE_PROGRAM)
-    {
-        return &layout->program;
-    }
-    if (page == UI_FLASH_PAGE_HOME)
-    {
-        return &layout->home;
-    }
-
-    return 0;
+    g_axis_param[AXIS_J1].home_offset = hw_offset;
+    return RobotFlash_Save();
 }
 
-static const UiFlashRecord* UiFlash_GetRecordConst(const UiFlashInternalLayout* layout, UiFlashPageId page)
+uint8_t UiFlashStorage_LoadHome(int32_t *hw_offset)
 {
-    if (layout == 0)
-    {
-        return 0;
-    }
-
-    if (page == UI_FLASH_PAGE_PARAMETER)
-    {
-        return &layout->parameter;
-    }
-    if (page == UI_FLASH_PAGE_MANUAL)
-    {
-        return &layout->manual;
-    }
-    if (page == UI_FLASH_PAGE_PROGRAM)
-    {
-        return &layout->program;
-    }
-    if (page == UI_FLASH_PAGE_HOME)
-    {
-        return &layout->home;
-    }
-
-    return 0;
-}
-
-static uint8_t UiFlash_SaveRecord(UiFlashPageId page, const UiFlashRecord* record)
-{
-    UiFlashInternalLayout layout;
-    UiFlashRecord* slot = 0;
-
-    if (record == 0)
-    {
-        return 0U;
-    }
-
-    memset(&layout, 0xFF, sizeof(layout));
-    UiFlash_ReadLayout(&layout);
-
-    slot = UiFlash_GetRecordMutable(&layout, page);
-    if (slot == 0)
-    {
-        return 0U;
-    }
-
-    *slot = *record;
-    return UiFlash_WriteLayout(&layout);
-}
-
-static uint8_t UiFlash_LoadRecord(UiFlashPageId page,
-                                  void* payload,
-                                  uint32_t payloadSize)
-{
-    UiFlashInternalLayout layout;
-    const UiFlashRecord* slot = 0;
-
-    if (payload == 0)
-    {
-        return 0U;
-    }
-
-    UiFlash_ReadLayout(&layout);
-
-    slot = UiFlash_GetRecordConst(&layout, page);
-    if (slot == 0)
-    {
-        return 0U;
-    }
-
-    if (UiFlash_ValidateRecord(slot, page, payloadSize) == 0U)
-    {
-        return 0U;
-    }
-
-    memcpy(payload, slot->payload, payloadSize);
-    return 1U;
-}
-
-uint8_t UiFlashStorage_SaveProgram(const UiFlashProgramData* data)
-{
-    UiFlashRecord record;
-
-    if ((data == 0) ||
-        (UiFlash_BuildRecord(UI_FLASH_PAGE_PROGRAM, data, sizeof(UiFlashProgramData), &record) == 0U))
-    {
-        return 0U;
-    }
-
-    return UiFlash_SaveRecord(UI_FLASH_PAGE_PROGRAM, &record);
-}
-
-uint8_t UiFlashStorage_LoadProgram(UiFlashProgramData* data)
-{
-    return UiFlash_LoadRecord(UI_FLASH_PAGE_PROGRAM,
-                              data,
-                              sizeof(UiFlashProgramData));
-}
-
-uint8_t UiFlashStorage_SaveManual(const UiFlashManualData* data)
-{
-    UiFlashRecord record;
-
-    if ((data == 0) ||
-        (UiFlash_BuildRecord(UI_FLASH_PAGE_MANUAL, data, sizeof(UiFlashManualData), &record) == 0U))
-    {
-        return 0U;
-    }
-
-    return UiFlash_SaveRecord(UI_FLASH_PAGE_MANUAL, &record);
-}
-
-uint8_t UiFlashStorage_LoadManual(UiFlashManualData* data)
-{
-    return UiFlash_LoadRecord(UI_FLASH_PAGE_MANUAL,
-                              data,
-                              sizeof(UiFlashManualData));
-}
-
-uint8_t UiFlashStorage_SaveParameter(const UiFlashParameterData* data)
-{
-    UiFlashRecord record;
-
-    if ((data == 0) ||
-        (UiFlash_BuildRecord(UI_FLASH_PAGE_PARAMETER, data, sizeof(UiFlashParameterData), &record) == 0U))
-    {
-        return 0U;
-    }
-
-    return UiFlash_SaveRecord(UI_FLASH_PAGE_PARAMETER, &record);
-}
-
-uint8_t UiFlashStorage_LoadParameter(UiFlashParameterData* data)
-{
-    return UiFlash_LoadRecord(UI_FLASH_PAGE_PARAMETER,
-                              data,
-                              sizeof(UiFlashParameterData));
-}
-
-uint8_t UiFlashStorage_SaveHome(int32_t hwOffset)
-{
-    UiFlashHomeData payload;
-    UiFlashRecord record;
-
-    payload.hwOffset = hwOffset;
-
-    if (UiFlash_BuildRecord(UI_FLASH_PAGE_HOME, &payload, sizeof(UiFlashHomeData), &record) == 0U)
-    {
-        return 0U;
-    }
-
-    return UiFlash_SaveRecord(UI_FLASH_PAGE_HOME, &record);
-}
-
-uint8_t UiFlashStorage_LoadHome(int32_t* hwOffset)
-{
-    UiFlashHomeData payload;
-
-    if (hwOffset == 0)
-    {
-        return 0U;
-    }
-
-    if (UiFlash_LoadRecord(UI_FLASH_PAGE_HOME, &payload, sizeof(UiFlashHomeData)) == 0U)
-    {
-        return 0U;
-    }
-
-    *hwOffset = payload.hwOffset;
+    if (hw_offset == NULL) { return 0U; }
+    *hw_offset = g_axis_param[AXIS_J1].home_offset;
     return 1U;
 }

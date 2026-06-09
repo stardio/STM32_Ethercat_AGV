@@ -1,7 +1,7 @@
 #include "../osal.h"
 #include "osal_defs.h"
-#include "stm32h7rsxx_hal.h"
-#include "stm32h7rsxx.h"  /* CoreDebug, DWT registers */
+#include "stm32h7xx_hal.h"
+#include "stm32h7xx.h"  /* CoreDebug, DWT registers */
 #include <stdlib.h>
 
 /* ---- DWT Cycle Counter for µs-resolution timing ---- */

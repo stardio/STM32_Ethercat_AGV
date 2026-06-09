@@ -1,0 +1,2685 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>6-Axis Robot HMI</title>
+<style>
+:root {
+  --bg:     #0d1117;
+  --panel:  #161b22;
+  --panel2: #1c2128;
+  --border: #30363d;
+  --accent: #58a6ff;
+  --green:  #3fb950;
+  --yellow: #d29922;
+  --red:    #f85149;
+  --text:   #e6edf3;
+  --muted:  #8b949e;
+  --c0: #58a6ff;
+  --c1: #3fb950;
+  --c2: #f0a30a;
+  --c3: #e06c75;
+  --c4: #c678dd;
+  --c5: #56b6c2;
+  /* legacy aliases */
+  --cx: #58a6ff;
+  --cy: #3fb950;
+  --cz: #f0a30a;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; overflow: hidden; }
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+  font-size: 17px;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ── TOP BAR ──────────────────────────────────────────────────────── */
+#topbar {
+  flex-shrink: 0;
+  height: 42px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 14px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+}
+#topbar h1 { font-size: 18px; font-weight: 700; color: var(--accent); white-space: nowrap; }
+#topbar h1 span { color: var(--muted); font-weight: 400; }
+.spacer { flex: 1; }
+#port-select {
+  width: 130px;
+  padding: 4px 8px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text);
+  font-size: 16px;
+  cursor: pointer;
+}
+#port-select:focus { outline: none; border-color: var(--accent); }
+#port-select option { background: var(--panel); }
+.tbtn {
+  padding: 4px 12px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  background: var(--panel2);
+  color: var(--text);
+  font-size: 16px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.tbtn:hover { border-color: var(--accent); }
+#conn-badge {
+  padding: 3px 10px;
+  border-radius: 10px;
+  font-size: 15px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.online  { background: #132313; color: var(--green);  border: 1px solid var(--green); }
+.offline { background: #231313; color: var(--red);    border: 1px solid var(--red); }
+
+/* ── VIEW TABS ─────────────────────────────────────────────────────── */
+.view-tab {
+  padding: 4px 14px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  background: var(--panel2);
+  color: var(--muted);
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.view-tab.active { background: #0d1f38; border-color: var(--accent); color: var(--accent); }
+.view-tab:hover:not(.active) { border-color: var(--accent); }
+
+/* ── VIEW CONTAINERS ────────────────────────────────────────────────── */
+#view-agv    { display: none; flex-direction: column; flex: 1; min-height: 0; padding: 12px; gap: 10px; overflow-y: auto; }
+#view-agv.active { display: flex; }
+
+/* ── MAIN GRID ─────────────────────────────────────────────────────── */
+#main {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  display: grid;
+  grid-template-columns: 255px 440px 1fr 210px;
+  gap: 8px;
+  padding: 8px;
+}
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 10px 12px;
+}
+.ph {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  padding-bottom: 7px;
+  margin-bottom: 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+/* ── DRO ──────────────────────────────────────────────────────────── */
+.dro-row {
+  display: grid;
+  grid-template-columns: 28px 1fr 28px;
+  align-items: center;
+  height: 62px;
+  box-sizing: border-box;
+  overflow: hidden;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.dro-row:last-child { border-bottom: none; }
+.axis-inactive { opacity: 0.35; pointer-events: none; }
+.dl { font-size: 18px; font-weight: 800; }
+.dl.x { color: var(--cx); }
+.dl.y { color: var(--cy); }
+.dl.z { color: var(--cz); }
+.dv {
+  font-size: 28px;
+  font-weight: 700;
+  font-family: 'Courier New', monospace;
+  letter-spacing: -1px;
+  line-height: 1;
+}
+.du { font-size: 15px; color: var(--muted); }
+.dro-mid { display: flex; flex-direction: column; justify-content: center; height: 56px; overflow: hidden; }
+.dm { font-size: 15px; color: var(--muted); margin-top: 3px; display: flex; gap: 6px; align-items: center; height: 20px; overflow: hidden; white-space: nowrap; }
+.sbadge {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-size: 14px;
+  font-weight: 700;
+}
+.s-op  { background: #132313; color: var(--green); }
+.s-flt { background: #231313; color: var(--red); }
+.s-oth { background: #1a1a0d; color: var(--yellow); }
+.s-off { background: #1c2128; color: var(--muted); }
+
+/* ── JOG ──────────────────────────────────────────────────────────── */
+.step-row { display: flex; gap: 4px; margin-bottom: 8px; }
+.sbtn {
+  flex: 1;
+  padding: 5px 4px;
+  background: var(--panel2);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--muted);
+  font-size: 16px;
+  cursor: pointer;
+  text-align: center;
+  font-family: 'Courier New', monospace;
+}
+.sbtn.sel { background: #0d1f38; border-color: var(--accent); color: var(--accent); font-weight: 700; }
+.sbtn:hover { border-color: var(--accent); }
+.jrow { display: flex; align-items: center; gap: 5px; margin-bottom: 5px; }
+.jl { font-size: 17px; font-weight: 800; width: 14px; }
+.jl.x { color: var(--cx); } .jl.y { color: var(--cy); } .jl.z { color: var(--cz); }
+.jbtn {
+  flex: 1;
+  padding: 8px 2px;
+  background: var(--panel2);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text);
+  font-size: 19px;
+  cursor: pointer;
+  text-align: center;
+  user-select: none;
+  line-height: 1;
+}
+.jbtn:hover      { background: #0d1f38; border-color: var(--accent); }
+.jbtn:active,
+.jbtn.jog-active { background: #0a1830; border-color: #58a6ff; transform: scale(.97); }
+
+/* ── GO TO HOME ───────────────────────────────────────────────────── */
+.home-row {
+  display: flex; align-items: center; gap: 5px; margin-bottom: 5px;
+}
+.home-btn {
+  flex: 1;
+  display: block; padding: 7px 6px;
+  border-radius: 5px; border: 1px solid var(--border);
+  background: var(--panel2); color: var(--text);
+  font-size: 15px; font-weight: 600; cursor: pointer; text-align: center;
+}
+.home-btn:hover { background: #1e2a38; border-color: var(--accent); }
+.home-dur {
+  width: 52px; padding: 6px 4px;
+  background: var(--bg); border: 1px solid var(--border);
+  border-radius: 4px; color: var(--muted);
+  font-size: 14px; font-family: 'Courier New', monospace; text-align: center;
+}
+.home-dur:focus { outline: none; border-color: var(--accent); color: var(--text); }
+
+/* ── SPEED OVERRIDE ───────────────────────────────────────────────── */
+.ovr-row { display:flex; align-items:center; gap:8px; margin-bottom:6px; }
+#ovr-slider {
+  flex:1; accent-color: var(--accent); cursor:pointer;
+}
+#ovr-label {
+  font-size:17px; font-weight:700; font-family:'Courier New',monospace;
+  color:var(--accent); width:46px; text-align:right;
+}
+#ovr-apply {
+  padding:4px 10px; border-radius:4px; border:1px solid var(--accent);
+  background:#0d1f38; color:var(--accent); font-size:14px; cursor:pointer;
+}
+#ovr-apply:hover { background:#132a4a; }
+
+/* ── SERVO FREE (Dead-man) ────────────────────────────────────────── */
+#btn-free {
+  display: block; width: 100%;
+  padding: 10px 10px; margin-bottom: 5px;
+  border-radius: 5px; font-size: 16px; font-weight: 700;
+  cursor: pointer; text-align: center; user-select: none;
+  border: 2px solid var(--yellow);
+  background: #1a1400; color: var(--yellow);
+  transition: background 0.1s, border-color 0.1s, color 0.1s;
+}
+#btn-free:hover { background: #221a00; }
+#btn-free.free-active {
+  background: #2a1313;
+  border-color: var(--red);
+  color: var(--red);
+  box-shadow: 0 0 8px var(--red);
+}
+
+/* ── TEACH ────────────────────────────────────────────────────────── */
+#btn-teach {
+  background: #0a1f0a;
+  border-color: var(--green);
+  color: var(--green);
+  font-size: 19px;
+  font-weight: 700;
+  margin-bottom: 5px;
+  transition: background 0.15s;
+}
+#btn-teach:hover   { background: #122412; }
+#btn-teach.flashed { background: #1a4a1a; }
+.teach-dur-inp {
+  width: 68px; padding: 4px 6px;
+  background: var(--bg); border: 1px solid var(--border);
+  border-radius: 4px; color: var(--text);
+  font-size: 15px; font-family: 'Courier New', monospace; text-align: right;
+}
+.teach-dur-inp:focus { outline: none; border-color: var(--green); }
+
+/* ── G-CODE CONSOLE ───────────────────────────────────────────────── */
+.gc-row { display: flex; gap: 6px; margin-top: 8px; }
+#gc-inp {
+  flex: 1; padding: 6px 9px;
+  background: var(--bg); border: 1px solid var(--border);
+  border-radius: 4px; color: var(--text);
+  font-size: 16px; font-family: 'Courier New', monospace;
+}
+#gc-inp:focus { outline: none; border-color: var(--accent); }
+#gc-send {
+  padding: 6px 14px; background: var(--accent); border: none;
+  border-radius: 4px; color: #0d1117; font-size: 16px; font-weight: 700; cursor: pointer;
+}
+#gc-send:hover { background: #79b8ff; }
+
+/* ── ACTIONS + STATUS ─────────────────────────────────────────────── */
+.abtn {
+  display: block; width: 100%; padding: 7px 10px; margin-bottom: 5px;
+  border-radius: 5px; border: 1px solid var(--border);
+  background: var(--panel2); color: var(--text);
+  font-size: 16px; font-weight: 600; cursor: pointer; text-align: center;
+}
+.abtn:last-child { margin-bottom: 0; }
+.abtn:hover  { background: #1e2a38; }
+.abtn.red    { background: #2a1313; border-color: var(--red);    color: var(--red); }
+.abtn.red:hover  { background: #3a1818; }
+.abtn.green  { background: #132313; border-color: var(--green);  color: var(--green); }
+.abtn.green:hover { background: #1a3018; }
+.abtn.blue   { background: #0d1f38; border-color: var(--accent); color: var(--accent); }
+.srow {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 5px 0; font-size: 16px; border-bottom: 1px solid var(--border);
+}
+.srow:last-child { border-bottom: none; }
+.dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; flex-shrink: 0; }
+.don { background: var(--green); box-shadow: 0 0 5px var(--green); }
+.doff { background: #333; }
+.ibadge {
+  display: inline-block; padding: 2px 8px;
+  border-radius: 10px; font-size: 15px; font-weight: 700;
+}
+.i-idle   { background: #1c2128; color: var(--muted); border: 1px solid var(--border); }
+.i-moving { background: #0d1f38; color: var(--accent); border: 1px solid var(--accent); }
+.i-done   { background: #132313; color: var(--green);  border: 1px solid var(--green); }
+.i-error  { background: #231313; color: var(--red);    border: 1px solid var(--red); }
+
+/* ── CHARTS ───────────────────────────────────────────────────────── */
+#charts {
+  flex: 1; min-height: 0;
+  display: grid; grid-template-columns: 1fr 1fr;
+  gap: 8px; padding: 0 8px;
+}
+.cwrap {
+  background: var(--panel); border: 1px solid var(--border);
+  border-radius: 6px; padding: 8px 10px;
+  display: flex; flex-direction: column; min-height: 0;
+}
+.cwrap canvas { flex: 1; min-height: 0; }
+
+/* ── AUTO VIEW LAYOUT ─────────────────────────────────────────────── */
+#auto-layout {
+  display: grid;
+  grid-template-columns: 230px 1fr;
+  gap: 8px;
+  flex: 1;
+  min-height: 0;
+}
+
+/* ── AUTO LEFT ────────────────────────────────────────────────────── */
+#auto-left { display: flex; flex-direction: column; gap: 3px; overflow-y: auto; }
+.adro-row {
+  display: flex; align-items: baseline; gap: 6px;
+  padding: 3px 0; border-bottom: 1px solid var(--border);
+}
+.adro-row:last-child { border-bottom: none; }
+.adro-label { font-size: 15px; font-weight: 800; width: 16px; }
+.adro-val {
+  font-size: 24px; font-weight: 700;
+  font-family: 'Courier New', monospace;
+  letter-spacing: -1px; flex: 1; text-align: right;
+}
+.adro-unit { font-size: 13px; color: var(--muted); }
+.run-btn {
+  display: block; width: 100%; padding: 6px 10px; margin-bottom: 3px;
+  border-radius: 5px; border: 1px solid var(--border);
+  background: var(--panel2); color: var(--text);
+  font-size: 15px; font-weight: 700; cursor: pointer; text-align: center;
+}
+.run-btn:last-child { margin-bottom: 0; }
+.run-btn.go    { background: #0a1f0a; border-color: var(--green);  color: var(--green);  font-size: 17px; }
+.run-btn.go:hover { background: #122412; }
+.run-btn.stop  { background: #2a1313; border-color: var(--red);    color: var(--red);    font-size: 17px; }
+.run-btn.stop:hover { background: #3a1818; }
+.run-btn.reset { border-color: var(--yellow); color: var(--yellow); }
+.run-btn.reset:hover { background: #221a00; }
+.run-btn:disabled { opacity: .35; cursor: not-allowed; }
+.run-btn.sim-on {
+  background: #1a0a2a; border-color: var(--c4); color: var(--c4);
+}
+.run-btn.sim-on:hover { background: #250d3a; }
+.run-btn.go:disabled  { background: #0a1f0a; }
+.run-btn.stop:disabled { background: #2a1313; }
+
+/* ── AUTO CENTER (EDITOR) ─────────────────────────────────────────── */
+#auto-center { display: flex; flex-direction: column; gap: 0; padding: 0; overflow: hidden; }
+#editor-toolbar {
+  display: flex; align-items: center; gap: 5px;
+  padding: 7px 10px; border-bottom: 1px solid var(--border); flex-shrink: 0;
+}
+#editor-filename {
+  flex: 1; font-size: 14px; font-family: 'Courier New', monospace;
+  color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.etbtn {
+  padding: 3px 9px; border-radius: 4px; border: 1px solid var(--border);
+  background: var(--panel2); color: var(--text); font-size: 14px; cursor: pointer; white-space: nowrap;
+}
+.etbtn:hover { border-color: var(--accent); color: var(--accent); }
+#editor-wrap { flex: 1; display: flex; overflow: hidden; position: relative; }
+#line-nums {
+  width: 42px; flex-shrink: 0; padding: 8px 6px 8px 0;
+  background: var(--panel2); border-right: 1px solid var(--border);
+  font-family: 'Courier New', monospace; font-size: 15px; color: var(--muted);
+  text-align: right; overflow: hidden; white-space: pre; line-height: 1.55; user-select: none;
+}
+#gc-editor {
+  flex: 1; padding: 8px 10px; background: var(--bg); border: none;
+  color: var(--text); font-family: 'Courier New', monospace; font-size: 15px;
+  line-height: 1.55; resize: none; outline: none; white-space: pre; overflow: auto; tab-size: 2;
+}
+#exec-overlay {
+  position: absolute; inset: 0; background: var(--bg);
+  overflow: auto; display: none; padding: 0;
+}
+#exec-lines { font-family: 'Courier New', monospace; font-size: 15px; line-height: 1.55; }
+.exec-line { display: flex; align-items: stretch; padding: 0; }
+.el-num {
+  width: 42px; flex-shrink: 0; text-align: right; padding: 0 8px 0 0;
+  color: var(--muted); font-size: 14px; background: var(--panel2);
+  border-right: 1px solid var(--border); display: flex; align-items: center; justify-content: flex-end;
+}
+.el-text { flex: 1; padding: 0 10px; white-space: pre; display: flex; align-items: center; }
+.exec-line.el-done .el-text { color: #3a4a3a; }
+.exec-line.el-cur  { background: #1a1e00; }
+.exec-line.el-cur  .el-num  { color: var(--yellow); background: #1a1c00; }
+.exec-line.el-cur  .el-text { color: var(--yellow); font-weight: 700; }
+.exec-line.el-err  { background: #2a0d0d; }
+.exec-line.el-err  .el-text { color: var(--red); }
+.exec-line.el-skip .el-text { color: #2a3a2a; font-style: italic; }
+
+/* ── 시뮬레이션 모드: 완료 줄도 밝게 유지 ── */
+#exec-overlay.sim-exec .exec-line.el-done            { background: rgba(30,80,30,0.12); }
+#exec-overlay.sim-exec .exec-line.el-done .el-text   { color: var(--muted); }
+#exec-overlay.sim-exec .exec-line.el-done .el-num    { color: var(--green); }
+#exec-overlay.sim-exec .exec-line.el-skip .el-text   { color: #4a5a4a; font-style: italic; }
+#exec-overlay.sim-exec .exec-line.el-wait .el-text   { color: var(--text); }
+/* 현재 줄: 더 선명한 초록 계열로 차별화 */
+#exec-overlay.sim-exec .exec-line.el-cur             { background: #0a2a0a; }
+#exec-overlay.sim-exec .exec-line.el-cur  .el-num    { color: var(--green); background: #0a2200; }
+#exec-overlay.sim-exec .exec-line.el-cur  .el-text   { color: var(--green); font-weight: 700; }
+#editor-statusbar {
+  flex-shrink: 0; display: flex; align-items: center; gap: 10px;
+  padding: 4px 10px; border-top: 1px solid var(--border);
+  font-size: 14px; font-family: 'Courier New', monospace;
+  color: var(--muted); background: var(--panel2);
+}
+#esb-state {
+  padding: 1px 8px; border-radius: 10px; font-size: 13px; font-weight: 700;
+}
+.esb-idle    { background: #1c2128; color: var(--muted);  border: 1px solid var(--border); }
+.esb-running { background: #0d1f38; color: var(--accent); border: 1px solid var(--accent); }
+.esb-done    { background: #132313; color: var(--green);  border: 1px solid var(--green); }
+.esb-error   { background: #231313; color: var(--red);    border: 1px solid var(--red); }
+
+/* ── AUTO RIGHT (3D MONITOR) ──────────────────────────────────────── */
+#auto-right { display: flex; flex-direction: column; padding: 0; overflow: hidden; min-height: 0; }
+#canvas-toolbar {
+  display: flex; align-items: center; gap: 5px; flex-wrap: wrap;
+  padding: 6px 10px; border-bottom: 1px solid var(--border); flex-shrink: 0;
+}
+#canvas-toolbar .ph { margin-bottom: 0; padding-bottom: 0; border-bottom: none; margin-right: 4px; }
+.cvbtn {
+  padding: 3px 9px; border-radius: 4px; border: 1px solid var(--border);
+  background: var(--panel2); color: var(--muted); font-size: 13px; cursor: pointer;
+}
+.cvbtn:hover  { border-color: var(--accent); color: var(--accent); }
+.cvbtn.active { border-color: var(--accent); color: var(--accent); background: #0d1f38; }
+#canvas3d-wrap { flex: 1; min-height: 0; position: relative; overflow: hidden; }
+#canvas3d { width: 100%; height: 100%; display: block; cursor: grab; }
+#canvas3d:active { cursor: grabbing; }
+#c3d-overlay {
+  position: absolute; top: 6px; right: 8px;
+  font-size: 26px; font-family: 'Courier New', monospace;
+  color: var(--muted); pointer-events: none; line-height: 1.6;
+  text-align: right;
+}
+
+/* ── PARAM MODAL ─────────────────────────────────────────────────── */
+#param-overlay {
+  display: none; position: fixed; inset: 0;
+  background: rgba(0,0,0,.72); z-index: 100;
+  align-items: center; justify-content: center;
+}
+#param-overlay.open { display: flex; }
+#param-modal {
+  background: var(--panel); border: 1px solid var(--border);
+  border-radius: 8px; width: 860px; max-width: 96vw; max-height: 90vh;
+  display: flex; flex-direction: column; overflow: hidden;
+}
+#pm-header {
+  display: flex; align-items: center; gap: 10px;
+  padding: 12px 16px; border-bottom: 1px solid var(--border); flex-shrink: 0;
+}
+#pm-header h2 { font-size: 18px; font-weight: 700; color: var(--accent); flex: 1; }
+#pm-axis-tabs { display: flex; gap: 4px; }
+.pm-tab {
+  padding: 5px 20px; border-radius: 4px; border: 1px solid var(--border);
+  background: var(--panel2); color: var(--muted); font-size: 17px; font-weight: 700; cursor: pointer;
+}
+.pm-tab.active { border-color: var(--accent); color: var(--text); background: #0d1f38; }
+.pm-tab.tx.active { border-color: var(--cx); color: var(--cx); background: #0d1832; }
+.pm-tab.ty.active { border-color: var(--cy); color: var(--cy); background: #0d1f0d; }
+.pm-tab.tz.active { border-color: var(--cz); color: var(--cz); background: #1f1500; }
+#pm-body {
+  flex: 1; overflow-y: auto; padding: 16px;
+  display: grid; grid-template-columns: 1fr 1fr; gap: 14px; align-content: start;
+}
+.pm-group {
+  background: var(--panel2); border: 1px solid var(--border);
+  border-radius: 6px; padding: 10px 14px;
+}
+.pm-group-title {
+  font-size: 14px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: .07em; color: var(--muted);
+  padding-bottom: 8px; margin-bottom: 10px; border-bottom: 1px solid var(--border);
+}
+.pm-row { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.pm-row:last-child { margin-bottom: 0; }
+.pm-label { flex: 1; font-size: 16px; color: var(--text); white-space: nowrap; }
+.pm-hint  { font-size: 14px; color: var(--muted); margin-top: 1px; }
+.pm-unit  { font-size: 15px; color: var(--muted); white-space: nowrap; width: 40px; text-align: right; }
+.pm-inp {
+  width: 110px; padding: 5px 8px; background: var(--bg);
+  border: 1px solid var(--border); border-radius: 4px;
+  color: var(--text); font-size: 16px; font-family: 'Courier New', monospace; text-align: right;
+}
+.pm-inp:focus { outline: none; border-color: var(--accent); }
+.pm-inp.dirty { border-color: var(--yellow); color: var(--yellow); }
+.pm-smbtn {
+  padding: 4px 10px; border-radius: 4px; border: 1px solid var(--border);
+  background: var(--panel2); color: var(--muted); font-size: 15px; cursor: pointer; white-space: nowrap;
+}
+.pm-smbtn:hover { border-color: var(--accent); color: var(--accent); }
+.pm-smbtn.warn:hover { border-color: var(--red); color: var(--red); }
+#pm-footer {
+  display: flex; align-items: center; gap: 8px;
+  padding: 10px 16px; border-top: 1px solid var(--border); flex-shrink: 0;
+}
+#pm-status { flex: 1; font-size: 15px; color: var(--muted); font-family: 'Courier New', monospace; }
+.pm-fbtn {
+  padding: 6px 18px; border-radius: 5px; border: 1px solid var(--border);
+  background: var(--panel2); color: var(--text); font-size: 16px; font-weight: 600; cursor: pointer;
+}
+.pm-fbtn:hover  { border-color: var(--accent); }
+.pm-fbtn.apply  { background: #0d1f38; border-color: var(--accent); color: var(--accent); }
+.pm-fbtn.apply:hover { background: #132a4a; }
+.pm-fbtn.save   { background: #132313; border-color: var(--green);  color: var(--green); }
+.pm-fbtn.save:hover  { background: #1a3018; }
+.pm-fbtn.read   { border-color: var(--muted); color: var(--muted); }
+
+/* ── DH PARAMETER MODAL ──────────────────────────────────────────── */
+#dh-overlay {
+  display: none; position: fixed; inset: 0;
+  background: rgba(0,0,0,.75); z-index: 110;
+  align-items: center; justify-content: center;
+}
+#dh-overlay.open { display: flex; }
+#dh-modal {
+  background: var(--panel); border: 1px solid var(--border);
+  border-radius: 8px; width: 820px; max-width: 97vw; max-height: 92vh;
+  display: flex; flex-direction: column; overflow: hidden;
+}
+#dh-header {
+  display: flex; align-items: center; gap: 10px;
+  padding: 12px 16px; border-bottom: 1px solid var(--border); flex-shrink: 0;
+}
+#dh-header h2 { font-size: 18px; font-weight: 700; color: var(--accent); flex: 1; }
+#dh-body { flex: 1; overflow-y: auto; padding: 14px 16px; }
+#dh-desc {
+  font-size: 14px; color: var(--muted); background: var(--panel2);
+  border: 1px solid var(--border); border-radius: 6px;
+  padding: 10px 14px; margin-bottom: 14px; line-height: 1.7;
+}
+#dh-desc code {
+  background: #0d1117; padding: 1px 5px; border-radius: 3px;
+  font-family: 'Courier New', monospace; color: var(--accent); font-size: 13px;
+}
+#dh-table-wrap { overflow-x: auto; }
+#dh-table {
+  width: 100%; border-collapse: collapse; font-size: 15px;
+}
+#dh-table th {
+  background: var(--panel2); color: var(--muted); font-size: 13px;
+  font-weight: 700; text-transform: uppercase; letter-spacing: .06em;
+  padding: 7px 10px; border: 1px solid var(--border); text-align: center;
+  white-space: nowrap;
+}
+#dh-table td {
+  padding: 5px 6px; border: 1px solid var(--border); text-align: center; vertical-align: middle;
+}
+#dh-table tr:nth-child(even) td { background: #111820; }
+.dh-jlabel {
+  font-size: 16px; font-weight: 800; padding: 5px 10px;
+  white-space: nowrap;
+}
+.dh-inp {
+  width: 90px; padding: 5px 6px;
+  background: var(--bg); border: 1px solid var(--border);
+  border-radius: 4px; color: var(--text);
+  font-size: 15px; font-family: 'Courier New', monospace; text-align: right;
+}
+.dh-inp:focus { outline: none; border-color: var(--accent); }
+.dh-inp.modified { border-color: var(--yellow); color: var(--yellow); }
+.dh-desc-cell {
+  font-size: 13px; color: var(--muted); text-align: left; padding: 5px 10px; white-space: nowrap;
+}
+#dh-footer {
+  display: flex; align-items: center; gap: 8px;
+  padding: 10px 16px; border-top: 1px solid var(--border); flex-shrink: 0; flex-wrap: wrap;
+}
+#dh-status { flex: 1; font-size: 14px; color: var(--muted); font-family: 'Courier New', monospace; }
+#dh-preset {
+  padding: 5px 8px; background: var(--bg); border: 1px solid var(--border);
+  border-radius: 4px; color: var(--text); font-size: 14px; cursor: pointer;
+}
+#dh-preset:focus { outline: none; border-color: var(--accent); }
+
+/* ── 로봇 프리셋 버튼 ────────────────────────────────────────── */
+#dh-robot-presets {
+  display: flex; gap: 8px; flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+.rp-btn {
+  flex: 1; min-width: 140px;
+  padding: 10px 8px; border-radius: 6px;
+  border: 2px solid var(--border);
+  background: var(--panel2); cursor: pointer;
+  text-align: center; transition: border-color .15s, background .15s;
+}
+.rp-btn:hover { border-color: var(--accent); background: #0d1f38; }
+.rp-btn.rp-active { border-color: var(--green); background: #0a1f0a; }
+.rp-icon  { font-size: 22px; display: block; margin-bottom: 4px; }
+.rp-name  { font-size: 14px; font-weight: 700; color: var(--text); }
+.rp-desc  { font-size: 12px; color: var(--muted); margin-top: 2px; }
+.dh-fbtn {
+  padding: 6px 16px; border-radius: 5px; border: 1px solid var(--border);
+  background: var(--panel2); color: var(--text); font-size: 15px; font-weight: 600; cursor: pointer;
+}
+.dh-fbtn:hover { border-color: var(--accent); }
+.dh-fbtn.apply { background: #0d1f38; border-color: var(--accent); color: var(--accent); }
+.dh-fbtn.apply:hover { background: #132a4a; }
+.dh-fbtn.save  { background: #132313; border-color: var(--green);  color: var(--green); }
+.dh-fbtn.save:hover  { background: #1a3018; }
+
+/* ── LOG ──────────────────────────────────────────────────────────── */
+#logrow { flex-shrink: 0; height: 76px; padding: 4px 8px 8px; }
+#log {
+  width: 100%; height: 100%; background: var(--panel);
+  border: 1px solid var(--border); border-radius: 6px;
+  overflow-y: auto; padding: 4px 8px;
+  font-size: 15px; font-family: 'Courier New', monospace; color: var(--muted);
+}
+.linfo { color: var(--text); }
+.lok   { color: var(--green); }
+.lerr  { color: var(--red); }
+.lwarn { color: var(--yellow); }
+.lstm  { color: var(--accent); }
+</style>
+</head>
+<body>
+
+<!-- TOP BAR -->
+<div id="topbar">
+  <h1>⚙ <span>6-AXIS ARTICULATED</span> &nbsp;·&nbsp; HMI</h1>
+  <div style="display:flex;gap:4px;margin-left:10px;">
+    <button class="view-tab active"  id="tab-agv"    onclick="switchView('agv')" style="border-color:#3fb950;color:#3fb950;">🚗 AGV</button>
+  </div>
+  <div class="spacer"></div>
+  <select id="port-select" title="시리얼 포트 선택">
+    <option value="">-- 포트 없음 --</option>
+  </select>
+  <button class="tbtn" onclick="refreshPorts()" title="포트 목록 새로고침" style="padding:4px 8px;">⟳</button>
+  <button class="tbtn" onclick="toggleConn()">Connect</button>
+  <button class="tbtn" onclick="openDH()"     style="border-color:#c678dd;color:#c678dd;">⬡ DH 파라미터</button>
+  <button class="tbtn" onclick="openParams()" style="border-color:#58a6ff;color:#58a6ff;">⚙ 파라미터</button>
+  <span id="conn-badge" class="offline">● OFFLINE</span>
+</div>
+
+<!-- ══ AGV VIEW ═══════════════════════════════════════════════════════════ -->
+<div id="view-agv">
+
+  <!-- Status row -->
+  <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
+    <div class="panel" style="min-width:240px;padding:10px 14px;">
+      <div class="ph">AGV Drive Status</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px 12px;margin-top:6px;font-size:13px;">
+        <span style="color:var(--muted)">Left (J1)</span>
+        <span id="agv-cia-left" style="color:var(--yellow)">—</span>
+        <span style="color:var(--muted)">Right (J2)</span>
+        <span id="agv-cia-right" style="color:var(--yellow)">—</span>
+        <span style="color:var(--muted)">All Ready</span>
+        <span id="agv-ready" style="color:var(--red)">NO</span>
+        <span style="color:var(--muted)">Run Enable</span>
+        <span id="agv-run-enable">L:— R:—</span>
+      </div>
+    </div>
+    <div class="panel" style="min-width:240px;padding:10px 14px;">
+      <div class="ph">Wheel Odometry</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px 12px;margin-top:6px;font-size:13px;">
+        <span style="color:var(--muted)">Pos Left</span>
+        <span id="agv-pos-left">0</span>
+        <span style="color:var(--muted)">Pos Right</span>
+        <span id="agv-pos-right">0</span>
+        <span style="color:var(--muted)">Vel Left</span>
+        <span id="agv-vel-left">0</span>
+        <span style="color:var(--muted)">Vel Right</span>
+        <span id="agv-vel-right">0</span>
+      </div>
+    </div>
+    <div style="display:flex;gap:8px;align-items:center;margin-left:auto;">
+      <button id="agv-btn-run-enable" class="tbtn" onclick="agvRunEnable(true)"  style="border-color:var(--green);color:var(--green);padding:6px 16px;">▶ Run Enable</button>
+      <button class="tbtn" onclick="agvRunEnable(false)" style="border-color:var(--red);color:var(--red);padding:6px 16px;">■ Disable</button>
+      <button class="tbtn" onclick="agvStop()"           style="border-color:var(--red);color:var(--red);font-weight:bold;padding:6px 16px;">⊗ E-STOP</button>
+    </div>
+  </div>
+
+  <!-- Velocity sliders + joystick -->
+  <div style="display:flex;gap:10px;flex-wrap:wrap;">
+
+    <!-- Sliders -->
+    <div class="panel" style="min-width:280px;padding:10px 14px;flex:1;">
+      <div class="ph">속도 설정</div>
+      <div style="display:grid;gap:10px;margin-top:8px;">
+        <label style="font-size:13px;color:var(--muted)">
+          Max Linear &nbsp;<b id="agv-lbl-lin">0.3 m/s</b>
+          <input type="range" id="agv-max-linear" min="0.05" max="1.5" step="0.05" value="0.3"
+                 style="width:100%;margin-top:4px;"
+                 oninput="el('agv-lbl-lin').textContent=parseFloat(this.value).toFixed(2)+' m/s'">
+        </label>
+        <label style="font-size:13px;color:var(--muted)">
+          Max Angular &nbsp;<b id="agv-lbl-ang">0.5 rad/s</b>
+          <input type="range" id="agv-max-angular" min="0.1" max="3.0" step="0.1" value="0.5"
+                 style="width:100%;margin-top:4px;"
+                 oninput="el('agv-lbl-ang').textContent=parseFloat(this.value).toFixed(2)+' rad/s'">
+        </label>
+        <label style="font-size:13px;color:var(--muted)">
+          Send Rate &nbsp;<b id="agv-lbl-rate">50 ms</b>
+          <input type="range" id="agv-send-rate" min="20" max="500" step="10" value="50"
+                 style="width:100%;margin-top:4px;"
+                 oninput="el('agv-lbl-rate').textContent=this.value+' ms'">
+        </label>
+      </div>
+    </div>
+
+    <!-- Virtual joystick -->
+    <div class="panel" style="padding:10px 14px;display:flex;flex-direction:column;align-items:center;gap:8px;">
+      <div class="ph" style="align-self:flex-start;">Virtual Joystick</div>
+      <canvas id="agv-joystick" width="200" height="200"
+              style="border:2px solid var(--border);border-radius:50%;cursor:crosshair;touch-action:none;">
+      </canvas>
+      <div style="font-size:12px;color:var(--muted);text-align:center;">
+        V: <b id="agv-disp-lin">0.00</b> m/s &nbsp;|&nbsp;
+        ω: <b id="agv-disp-ang">0.00</b> rad/s
+      </div>
+      <div style="display:flex;gap:6px;">
+        <button class="tbtn" id="agv-jog-fwd"  style="padding:4px 10px;">▲</button>
+        <button class="tbtn" id="agv-jog-stop" style="padding:4px 10px;border-color:var(--red);color:var(--red);">■</button>
+        <button class="tbtn" id="agv-jog-bwd"  style="padding:4px 10px;">▼</button>
+      </div>
+      <div style="display:flex;gap:6px;">
+        <button class="tbtn" id="agv-jog-left"  style="padding:4px 10px;">◀</button>
+        <div style="width:36px;"></div>
+        <button class="tbtn" id="agv-jog-right" style="padding:4px 10px;">▶</button>
+      </div>
+    </div>
+
+    <!-- Keyboard hint -->
+    <div class="panel" style="padding:10px 14px;min-width:200px;">
+      <div class="ph">키보드 단축키</div>
+      <div style="font-size:12px;color:var(--muted);margin-top:8px;line-height:1.9;">
+        <b style="color:var(--text)">W / ↑</b> 전진<br>
+        <b style="color:var(--text)">S / ↓</b> 후진<br>
+        <b style="color:var(--text)">A / ←</b> 좌회전<br>
+        <b style="color:var(--text)">D / →</b> 우회전<br>
+        <b style="color:var(--text)">Space</b> 정지<br>
+        <b style="color:var(--text)">Q</b> 속도 감소 &nbsp;
+        <b style="color:var(--text)">E</b> 속도 증가<br>
+        <small style="color:var(--muted)">(AGV 탭 포커스 시 활성)</small>
+      </div>
+    </div>
+
+  </div><!-- /flex row -->
+
+  <!-- unit_scale Measurement Wizard -->
+  <div class="panel" style="margin:10px 0 0 0;padding:14px 18px;width:100%;box-sizing:border-box;">
+    <div class="ph" style="margin-bottom:10px;">unit_scale 측정 마법사</div>
+    <div style="display:flex;flex-wrap:wrap;gap:16px;align-items:flex-start;">
+
+      <!-- Step 1: Live encoder -->
+      <div style="min-width:200px;">
+        <div style="font-size:12px;color:var(--muted);margin-bottom:6px;">현재 엔코더 위치 (HW counts)</div>
+        <div style="display:grid;grid-template-columns:auto 1fr;gap:4px 10px;font-size:13px;align-items:center;">
+          <span style="color:var(--muted);">J1 (좌):</span>
+          <b id="us-pos-left"  style="color:var(--accent);">—</b>
+          <span style="color:var(--muted);">J2 (우):</span>
+          <b id="us-pos-right" style="color:var(--accent);">—</b>
+        </div>
+      </div>
+
+      <!-- Step 2: Capture start -->
+      <div style="display:flex;flex-direction:column;gap:8px;min-width:160px;">
+        <button class="tbtn" id="us-btn-start" onclick="usMeasStart()" style="padding:6px 14px;">① 측정 시작 (현재 위치 기록)</button>
+        <div style="font-size:12px;color:var(--muted);">
+          시작 J1: <b id="us-start-left">—</b><br>
+          시작 J2: <b id="us-start-right">—</b>
+        </div>
+      </div>
+
+      <!-- Step 3: Drive & distance input -->
+      <div style="display:flex;flex-direction:column;gap:8px;min-width:180px;">
+        <div style="font-size:12px;color:var(--muted);">② 로봇을 직선으로 이동시킨 후 이동 거리 입력</div>
+        <div style="display:flex;align-items:center;gap:6px;">
+          <input id="us-distance" type="number" min="1" step="1" value="500"
+                 style="width:80px;padding:4px 6px;background:var(--bg2);color:var(--text);
+                        border:1px solid var(--border);border-radius:4px;font-size:13px;">
+          <span style="font-size:13px;color:var(--muted);">mm</span>
+        </div>
+      </div>
+
+      <!-- Step 4: Capture end & calculate -->
+      <div style="display:flex;flex-direction:column;gap:8px;min-width:160px;">
+        <button class="tbtn" id="us-btn-end" onclick="usMeasEnd()" style="padding:6px 14px;" disabled>③ 측정 완료 (종료 위치 기록)</button>
+        <div style="font-size:12px;color:var(--muted);">
+          종료 J1: <b id="us-end-left">—</b><br>
+          종료 J2: <b id="us-end-right">—</b>
+        </div>
+      </div>
+
+      <!-- Step 5: Result & apply -->
+      <div style="display:flex;flex-direction:column;gap:8px;min-width:200px;">
+        <div style="font-size:12px;color:var(--muted);">산출된 unit_scale (counts/mm)</div>
+        <div style="display:grid;grid-template-columns:auto 1fr;gap:4px 10px;font-size:13px;align-items:center;">
+          <span style="color:var(--muted);">J1 (좌):</span>
+          <b id="us-result-left"  style="color:var(--green);">—</b>
+          <span style="color:var(--muted);">J2 (우):</span>
+          <b id="us-result-right" style="color:var(--green);">—</b>
+        </div>
+        <div id="us-msg" style="font-size:12px;min-height:16px;"></div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;">
+          <button class="tbtn" id="us-btn-read" onclick="usReadFromFlash()"
+                  style="padding:5px 12px;border-color:var(--muted);color:var(--muted);">
+            현재값 읽어오기
+          </button>
+          <button class="tbtn" id="us-btn-apply" onclick="usApply()" disabled
+                  style="padding:5px 12px;border-color:var(--green);color:var(--green);">
+            양쪽 적용
+          </button>
+          <button class="tbtn" id="us-btn-save" onclick="usSaveFlash()" disabled
+                  style="padding:5px 12px;border-color:var(--accent);color:var(--accent);">
+            플래시 저장
+          </button>
+          <button class="tbtn" onclick="usMeasReset()"
+                  style="padding:5px 12px;">초기화</button>
+        </div>
+      </div>
+
+    </div><!-- /flex wrap -->
+  </div><!-- /unit_scale wizard -->
+
+</div><!-- /view-agv -->
+
+<!-- LOG (shared) -->
+<div id="logrow">
+  <div id="log"></div>
+</div>
+
+<!-- PARAMETER MODAL -->
+<div id="param-overlay" onclick="overlayClick(event)">
+<div id="param-modal">
+  <div id="pm-header">
+    <h2>⚙ 축 파라미터 설정</h2>
+    <div id="pm-axis-tabs">
+      <button class="pm-tab active" id="pmt-0" onclick="pmTab(0)">J1</button>
+      <button class="pm-tab"        id="pmt-1" onclick="pmTab(1)">J2</button>
+      <button class="pm-tab"        id="pmt-2" onclick="pmTab(2)">J3</button>
+      <button class="pm-tab"        id="pmt-3" onclick="pmTab(3)">J4</button>
+      <button class="pm-tab"        id="pmt-4" onclick="pmTab(4)">J5</button>
+      <button class="pm-tab"        id="pmt-5" onclick="pmTab(5)">J6</button>
+    </div>
+    <button class="pm-fbtn read" onclick="send({cmd:'param_read_req'})" style="margin-left:8px;">⟳ 읽기</button>
+    <button class="pm-fbtn" onclick="closeParams()" style="margin-left:4px;">✕</button>
+  </div>
+  <div id="pm-body">
+    <div class="pm-group">
+      <div class="pm-group-title">기계 파라미터</div>
+      <div class="pm-row">
+        <div>
+          <div class="pm-label">스케일 (unit_scale)</div>
+          <div class="pm-hint">감속비 × 엔코더분해능 ÷ 360</div>
+        </div>
+        <input class="pm-inp" id="p-scale" type="number" min="1" step="1">
+        <span class="pm-unit">cnt/°</span>
+      </div>
+      <div class="pm-row">
+        <div>
+          <div class="pm-label">이송 속도</div>
+          <div class="pm-hint">조그 및 SYNC 기본 속도</div>
+        </div>
+        <input class="pm-inp" id="p-vel" type="number" min="1" step="1">
+        <span class="pm-unit">°/s</span>
+      </div>
+      <div class="pm-row">
+        <div class="pm-label">가속 시간</div>
+        <input class="pm-inp" id="p-acc" type="number" min="0" step="10">
+        <span class="pm-unit">ms</span>
+      </div>
+      <div class="pm-row">
+        <div class="pm-label">감속 시간</div>
+        <input class="pm-inp" id="p-dec" type="number" min="0" step="10">
+        <span class="pm-unit">ms</span>
+      </div>
+    </div>
+    <div class="pm-group">
+      <div class="pm-group-title">드라이브 파라미터</div>
+      <div class="pm-row">
+        <div>
+          <div class="pm-label">토크 제한</div>
+          <div class="pm-hint">0 = 제한 없음</div>
+        </div>
+        <input class="pm-inp" id="p-torq" type="number" min="0" max="1000" step="10">
+        <span class="pm-unit">‰</span>
+      </div>
+      <div class="pm-row">
+        <div>
+          <div class="pm-label">위치 게인 (Kp)</div>
+          <div class="pm-hint">0 = 드라이브 내부값 사용</div>
+        </div>
+        <input class="pm-inp" id="p-gain" type="number" min="0" step="1">
+        <span class="pm-unit"></span>
+      </div>
+    </div>
+    <div class="pm-group">
+      <div class="pm-group-title">소프트웨어 리밋</div>
+      <div class="pm-row">
+        <div class="pm-label">+ 리밋</div>
+        <input class="pm-inp" id="p-lp" type="number" step="1">
+        <span class="pm-unit">°</span>
+      </div>
+      <div class="pm-row">
+        <div class="pm-label">− 리밋</div>
+        <input class="pm-inp" id="p-lm" type="number" step="1">
+        <span class="pm-unit">°</span>
+      </div>
+      <div class="pm-row" style="margin-top:6px;">
+        <div class="pm-label" style="font-size:15px;color:var(--muted)">현재 위치로 캡처</div>
+        <button class="pm-smbtn" onclick="pmCapLimit(1)">현재→ +리밋</button>
+        <button class="pm-smbtn" onclick="pmCapLimit(-1)">현재→ −리밋</button>
+      </div>
+    </div>
+    <div class="pm-group">
+      <div class="pm-group-title">원점 (Home)</div>
+      <div class="pm-row">
+        <div>
+          <div class="pm-label">원점 오프셋 (HW)</div>
+          <div class="pm-hint">읽기 전용 — 드라이브 엔코더 카운트</div>
+        </div>
+        <input class="pm-inp" id="p-home" type="number" step="1" style="color:var(--muted)">
+        <span class="pm-unit">cnt</span>
+      </div>
+      <div class="pm-row" style="margin-top:6px;gap:6px;">
+        <div class="pm-label" style="font-size:15px;color:var(--muted)">현재 위치를 원점으로 설정</div>
+        <button class="pm-smbtn warn" onclick="pmSetHome()">⌂ 원점 셋</button>
+      </div>
+    </div>
+    <div class="pm-group" style="grid-column:1/-1;">
+      <div class="pm-group-title">HW 리밋 참조값 (읽기 전용)</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+        <div class="pm-row">
+          <div class="pm-label">+ 리밋 (HW 카운트)</div>
+          <input class="pm-inp" id="p-lphw" type="number" readonly style="color:var(--muted);width:140px;">
+          <span class="pm-unit">cnt</span>
+        </div>
+        <div class="pm-row">
+          <div class="pm-label">− 리밋 (HW 카운트)</div>
+          <input class="pm-inp" id="p-lmhw" type="number" readonly style="color:var(--muted);width:140px;">
+          <span class="pm-unit">cnt</span>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div id="pm-footer">
+    <span id="pm-status">파라미터를 읽으려면 ⟳ 읽기를 누르세요.</span>
+    <button class="pm-fbtn read"  onclick="send({cmd:'param_read_req'})">⟳ 읽기</button>
+    <button class="pm-fbtn apply" onclick="pmApply()">✓ 적용</button>
+    <button class="pm-fbtn save"  onclick="pmApplyAndSave()">💾 적용 + 저장</button>
+    <button class="pm-fbtn"       onclick="closeParams()">닫기</button>
+  </div>
+</div><!-- /param-modal -->
+</div><!-- /param-overlay -->
+
+<!-- ══ DH PARAMETER MODAL ═══════════════════════════════════════════ -->
+<div id="dh-overlay" onclick="dhOverlayClick(event)">
+<div id="dh-modal">
+
+  <div id="dh-header">
+    <h2>⬡ DH 파라미터 설정</h2>
+    <button class="dh-fbtn" onclick="closeDH()" style="padding:4px 10px;">✕ 닫기</button>
+  </div>
+
+  <div id="dh-body">
+
+    <!-- ── 로봇 프리셋 선택 ─────────────────────────────────── -->
+    <div style="margin-bottom:4px;font-size:13px;font-weight:700;
+                color:var(--muted);text-transform:uppercase;letter-spacing:.06em;">
+      로봇 구조 선택
+    </div>
+    <div id="dh-robot-presets">
+      <button class="rp-btn" id="rp-cart3" onclick="dhApplyRobotPreset('cart3')">
+        <span class="rp-icon">📐</span>
+        <span class="rp-name">3축 직교</span>
+        <span class="rp-desc">X / Y / Z 직선 이동</span>
+      </button>
+      <button class="rp-btn" id="rp-cart6" onclick="dhApplyRobotPreset('cart6')">
+        <span class="rp-icon">🦾</span>
+        <span class="rp-name">직교 + 손목</span>
+        <span class="rp-desc">J1-J3 직선 + J4-J6 회전</span>
+      </button>
+      <button class="rp-btn" id="rp-artic" onclick="dhApplyRobotPreset('artic')">
+        <span class="rp-icon">🔗</span>
+        <span class="rp-name">6축 다관절</span>
+        <span class="rp-desc">전축 회전 DH 체인</span>
+      </button>
+    </div>
+    <div id="rp-hint" style="font-size:13px;padding:6px 10px;border-radius:4px;
+         margin-bottom:12px;border:1px solid var(--border);color:var(--muted);
+         background:var(--panel2);"></div>
+
+    <!-- 설명 -->
+    <div id="dh-desc">
+      각 관절의 <strong>Denavit-Hartenberg 파라미터</strong>를 입력하면 3D 모니터의 TCP 경로가 실제 끝단 위치로 계산됩니다.<br>
+      변환행렬: <code>T_i = Rz(θ+θ_off) · Tz(d) · Tx(a) · Rx(α)</code><br>
+      <span style="color:var(--accent)">a</span> = 링크 길이 (x방향, mm) &nbsp;|&nbsp;
+      <span style="color:var(--green)">d</span> = 링크 오프셋 (z방향, mm) &nbsp;|&nbsp;
+      <span style="color:var(--yellow)">α</span> = 링크 비틀림 (x축 회전, °) &nbsp;|&nbsp;
+      <span style="color:var(--c4)">θ_off</span> = 관절 영점 보정 (°)
+    </div>
+
+    <!-- FK 모드 선택 -->
+    <div style="margin-bottom:12px;display:flex;align-items:center;gap:12px;
+                background:var(--panel2);border:1px solid var(--border);
+                border-radius:6px;padding:10px 14px;">
+      <span style="font-size:15px;font-weight:700;color:var(--text);">FK 모드 선택</span>
+      <label style="display:flex;align-items:center;gap:6px;cursor:pointer;">
+        <input type="radio" name="fk-mode" id="fk-cartesian" value="cartesian"
+               onchange="dhFkModeChange('cartesian')" style="accent-color:var(--accent);">
+        <span style="color:var(--accent);font-weight:700;">📐 직교 구조</span>
+        <span style="color:var(--muted);font-size:13px;">J1→X  J2→Y  J3→Z (mm 직접 매핑)</span>
+      </label>
+      <label style="display:flex;align-items:center;gap:6px;cursor:pointer;">
+        <input type="radio" name="fk-mode" id="fk-dh" value="dh"
+               onchange="dhFkModeChange('dh')" style="accent-color:var(--c4);">
+        <span style="color:var(--c4);font-weight:700;">🔗 DH 링크 체인</span>
+        <span style="color:var(--muted);font-size:13px;">전축 DH 변환행렬 (다관절 로봇)</span>
+      </label>
+    </div>
+    <div id="dh-mode-hint" style="font-size:13px;padding:6px 10px;border-radius:4px;
+         margin-bottom:10px;background:#0d1f38;border:1px solid var(--accent);
+         color:var(--accent);"></div>
+
+    <!-- 파라미터 테이블 -->
+    <div id="dh-table-wrap">
+    <table id="dh-table">
+      <thead>
+        <tr>
+          <th>관절</th>
+          <th>타입</th>
+          <th style="color:var(--accent)">a &nbsp;(mm)</th>
+          <th style="color:var(--green)">d &nbsp;(mm)</th>
+          <th style="color:var(--yellow)">α &nbsp;(°)</th>
+          <th style="color:var(--c4)">θ_offset &nbsp;(°)</th>
+          <th>설명</th>
+        </tr>
+      </thead>
+      <tbody id="dh-tbody"></tbody>
+    </table>
+    </div>
+
+    <!-- TCP 오프셋 -->
+    <div style="margin-top:14px;background:var(--panel2);border:1px solid var(--border);border-radius:6px;padding:10px 14px;">
+      <div style="font-size:14px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px;">
+        TCP 오프셋 (플랜지 → 툴 끝단)
+      </div>
+      <div style="display:flex;gap:14px;flex-wrap:wrap;align-items:center;">
+        <label style="font-size:14px;color:var(--muted);">Tx&nbsp;(mm)
+          <input id="dh-tcp-x" class="dh-inp" type="number" step="1" value="0" style="width:80px;margin-left:4px;">
+        </label>
+        <label style="font-size:14px;color:var(--muted);">Ty&nbsp;(mm)
+          <input id="dh-tcp-y" class="dh-inp" type="number" step="1" value="0" style="width:80px;margin-left:4px;">
+        </label>
+        <label style="font-size:14px;color:var(--muted);">Tz&nbsp;(mm)
+          <input id="dh-tcp-z" class="dh-inp" type="number" step="1" value="0" style="width:80px;margin-left:4px;">
+        </label>
+      </div>
+    </div>
+
+    <!-- 현재 TCP 위치 표시 -->
+    <div style="margin-top:10px;display:flex;gap:6px;align-items:center;">
+      <span style="font-size:14px;color:var(--muted);">현재 TCP 위치 (FK 결과):</span>
+      <span id="dh-tcp-live" style="font-family:'Courier New',monospace;font-size:14px;color:var(--accent);">—</span>
+    </div>
+  </div>
+
+  <div id="dh-footer">
+    <span id="dh-status">기본값 (미저장)</span>
+    <select id="dh-preset" title="프리셋 선택">
+      <option value="cartesian_wrist">직교+손목 (J1-J3 직선 / J4-J6 회전)</option>
+      <option value="generic">Generic 6-axis 다관절 (전축 회전)</option>
+      <option value="ur5">UR5 (Universal Robots)</option>
+      <option value="zero">모두 0 (초기화)</option>
+    </select>
+    <button class="dh-fbtn" onclick="dhLoadPreset()">프리셋 로드</button>
+    <button class="dh-fbtn apply" onclick="dhApply()">▶ 적용 (FK 반영)</button>
+    <button class="dh-fbtn save"  onclick="dhSave()">💾 저장</button>
+  </div>
+
+</div><!-- /dh-modal -->
+</div><!-- /dh-overlay -->
+
+<script>
+'use strict';
+
+// ── Config ───────────────────────────────────────────────────────────────────
+const AXIS_COUNT    = 6;
+const AXIS_NAMES    = ['J1', 'J2', 'J3', 'J4', 'J5', 'J6'];
+const AXIS_COLORS   = ['#58a6ff', '#3fb950', '#f0a30a', '#e06c75', '#c678dd', '#56b6c2'];
+
+// ── State ─────────────────────────────────────────────────────────────────────
+let ws        = null;
+let curPos    = [0, 0, 0, 0, 0, 0];
+let allEnable = false;
+
+// Parameter modal state
+let pmAxisIdx = 0;
+let pmLoaded  = [null, null, null, null, null, null];
+const PARAM = {
+  UNIT_SCALE: 0x01, HOME_OFFSET: 0x02,
+  LIMIT_PLUS_HW: 0x03, LIMIT_MINUS_HW: 0x04,
+  LIMIT_PLUS_USER: 0x05, LIMIT_MINUS_USER: 0x06,
+  PROFILE_VEL: 0x07, PROFILE_ACCEL_MS: 0x08, PROFILE_DECEL_MS: 0x09,
+  TORQUE_LIMIT: 0x0A, POSITION_GAIN: 0x0B, LIMITS_ENABLED: 0x0C,
+  RAMP_VEL: 0x20,
+};
+
+
+// ── View switching ────────────────────────────────────────────────────────────
+let currentView = 'agv';
+function switchView(name) {
+  currentView = name;
+  el('view-agv').classList.toggle('active', name === 'agv');
+  el('tab-agv').classList.toggle('active', name === 'agv');
+  if (name === 'agv') agvStartSendLoop(); else agvStopSendLoop();
+  setTimeout(c3dResize, 30);
+}
+
+// ── AGV control ───────────────────────────────────────────────────────────────
+
+let _agvLinear  = 0;   // current commanded linear  [m/s]
+let _agvAngular = 0;   // current commanded angular [rad/s]
+let _agvSendTid = null;
+
+function agvSend(linear, angular) {
+  _agvLinear  = linear;
+  _agvAngular = angular;
+  el('agv-disp-lin').textContent = linear.toFixed(2);
+  el('agv-disp-ang').textContent = angular.toFixed(2);
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({cmd:'agv_velocity', linear_mps: linear, angular_rps: angular}));
+  }
+}
+
+function agvStop()      { agvSend(0, 0); }
+function agvRunEnable(en) {
+  if (ws && ws.readyState === WebSocket.OPEN)
+    ws.send(JSON.stringify({cmd:'run_enable', axis:255, enable:en}));
+}
+
+function agvStartSendLoop() {
+  if (_agvSendTid) return;
+  _agvSendTid = setInterval(() => {
+    if (_agvLinear !== 0 || _agvAngular !== 0) agvSend(_agvLinear, _agvAngular);
+  }, parseInt(el('agv-send-rate').value, 10));
+}
+function agvStopSendLoop() {
+  if (_agvSendTid) { clearInterval(_agvSendTid); _agvSendTid = null; }
+  agvSend(0, 0);
+}
+
+// -- Virtual joystick canvas --
+(function() {
+  let joyActive = false, joyX = 0, joyY = 0;
+  function initJoystick() {
+    const cvs = el('agv-joystick');
+    if (!cvs) return;
+    const ctx = cvs.getContext('2d');
+    const R = cvs.width / 2, r = 28;
+
+    function draw() {
+      ctx.clearRect(0, 0, cvs.width, cvs.height);
+      // background rings
+      ctx.strokeStyle = '#30363d'; ctx.lineWidth = 1;
+      for (let ri of [R*0.33, R*0.66, R]) {
+        ctx.beginPath(); ctx.arc(R, R, ri, 0, 2*Math.PI); ctx.stroke();
+      }
+      // crosshair
+      ctx.beginPath(); ctx.moveTo(R,0); ctx.lineTo(R,cvs.height); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(0,R); ctx.lineTo(cvs.width,R); ctx.stroke();
+      // thumb
+      const tx = R + joyX*(R-r), ty = R - joyY*(R-r);
+      ctx.beginPath(); ctx.arc(tx, ty, r, 0, 2*Math.PI);
+      ctx.fillStyle = joyActive ? '#58a6ff88' : '#58a6ff44';
+      ctx.fill();
+      ctx.strokeStyle = '#58a6ff'; ctx.lineWidth = 2; ctx.stroke();
+    }
+    draw();
+
+    function setJoy(px, py) {
+      const rect = cvs.getBoundingClientRect();
+      let dx = (px - rect.left  - R) / (R - r);
+      let dy = (py - rect.top   - R) / (R - r);
+      const mag = Math.sqrt(dx*dx + dy*dy);
+      if (mag > 1) { dx /= mag; dy /= mag; }
+      joyX = dx; joyY = -dy;
+      draw();
+      const maxLin = parseFloat(el('agv-max-linear').value);
+      const maxAng = parseFloat(el('agv-max-angular').value);
+      agvSend(joyY * maxLin, -joyX * maxAng);
+    }
+    function releaseJoy() {
+      joyActive = false; joyX = 0; joyY = 0; draw(); agvSend(0, 0);
+    }
+
+    cvs.addEventListener('mousedown', e => { joyActive = true; setJoy(e.clientX, e.clientY); });
+    cvs.addEventListener('mousemove', e => { if (joyActive) setJoy(e.clientX, e.clientY); });
+    cvs.addEventListener('mouseup',   () => releaseJoy());
+    cvs.addEventListener('mouseleave',() => { if (joyActive) releaseJoy(); });
+    cvs.addEventListener('touchstart', e => { e.preventDefault(); joyActive = true; setJoy(e.touches[0].clientX, e.touches[0].clientY); }, {passive:false});
+    cvs.addEventListener('touchmove',  e => { e.preventDefault(); setJoy(e.touches[0].clientX, e.touches[0].clientY); }, {passive:false});
+    cvs.addEventListener('touchend',   () => releaseJoy());
+  }
+  document.addEventListener('DOMContentLoaded', initJoystick);
+})();
+
+// -- Button jog --
+document.addEventListener('DOMContentLoaded', () => {
+  function btnHold(id, lin, ang) {
+    const btn = el(id); if (!btn) return;
+    btn.addEventListener('mousedown',  () => agvSend(lin, ang));
+    btn.addEventListener('mouseup',    () => agvSend(0, 0));
+    btn.addEventListener('mouseleave', () => agvSend(0, 0));
+    btn.addEventListener('touchstart', e => { e.preventDefault(); agvSend(lin, ang); }, {passive:false});
+    btn.addEventListener('touchend',   () => agvSend(0, 0));
+  }
+  function getSpd() { return parseFloat(el('agv-max-linear').value) * 0.5; }
+  function getAng() { return parseFloat(el('agv-max-angular').value) * 0.5; }
+  el('agv-jog-fwd')  && el('agv-jog-fwd').addEventListener('mousedown',  () => agvSend( getSpd(), 0));
+  el('agv-jog-bwd')  && el('agv-jog-bwd').addEventListener('mousedown',  () => agvSend(-getSpd(), 0));
+  el('agv-jog-left') && el('agv-jog-left').addEventListener('mousedown', () => agvSend(0,  getAng()));
+  el('agv-jog-right')&& el('agv-jog-right').addEventListener('mousedown',() => agvSend(0, -getAng()));
+  el('agv-jog-stop') && el('agv-jog-stop').addEventListener('click',     () => agvSend(0, 0));
+  ['agv-jog-fwd','agv-jog-bwd','agv-jog-left','agv-jog-right'].forEach(id => {
+    const b = el(id); if (b) { b.addEventListener('mouseup', () => agvSend(0,0)); b.addEventListener('mouseleave', () => agvSend(0,0)); }
+  });
+});
+
+// -- Keyboard control (active only when AGV view is shown) --
+document.addEventListener('keydown', e => {
+  if (currentView !== 'agv') return;
+  const maxLin = parseFloat(el('agv-max-linear').value);
+  const maxAng = parseFloat(el('agv-max-angular').value);
+  const spd = maxLin * 0.6, ang = maxAng * 0.6;
+  switch(e.key) {
+    case 'w': case 'W': case 'ArrowUp':    agvSend( spd, 0);   break;
+    case 's': case 'S': case 'ArrowDown':  agvSend(-spd, 0);   break;
+    case 'a': case 'A': case 'ArrowLeft':  agvSend(0,  ang);   break;
+    case 'd': case 'D': case 'ArrowRight': agvSend(0, -ang);   break;
+    case ' ':                              agvSend(0,  0);      e.preventDefault(); break;
+    case 'q': case 'Q': {
+      const sl = el('agv-max-linear');
+      sl.value = Math.max(parseFloat(sl.min), parseFloat(sl.value) - 0.1).toFixed(2);
+      el('agv-lbl-lin').textContent = parseFloat(sl.value).toFixed(2) + ' m/s'; break;
+    }
+    case 'e': case 'E': {
+      const sl = el('agv-max-linear');
+      sl.value = Math.min(parseFloat(sl.max), parseFloat(sl.value) + 0.1).toFixed(2);
+      el('agv-lbl-lin').textContent = parseFloat(sl.value).toFixed(2) + ' m/s'; break;
+    }
+  }
+});
+document.addEventListener('keyup', e => {
+  if (currentView !== 'agv') return;
+  const keys = ['w','s','a','d','W','S','A','D','ArrowUp','ArrowDown','ArrowLeft','ArrowRight'];
+  if (keys.includes(e.key)) agvSend(0, 0);
+});
+
+// -- AGV status/odometry display update (called from WS handler) --
+function agvUpdateStatus(msg) {
+  if (msg.type === 'agv_status') {
+    const ready = msg.all_ready;
+    el('agv-ready').textContent = ready ? 'YES' : 'NO';
+    el('agv-ready').style.color = ready ? 'var(--green)' : 'var(--red)';
+    el('agv-cia-left').textContent  = msg.cia402_left;
+    el('agv-cia-right').textContent = msg.cia402_right;
+    const lColor = msg.cia402_left  === 'OP_ENABLED' ? 'var(--green)' : 'var(--yellow)';
+    const rColor = msg.cia402_right === 'OP_ENABLED' ? 'var(--green)' : 'var(--yellow)';
+    el('agv-cia-left').style.color  = lColor;
+    el('agv-cia-right').style.color = rColor;
+    el('agv-run-enable').textContent =
+      `L:${msg.run_enable_left?'ON':'OFF'} R:${msg.run_enable_right?'ON':'OFF'}`;
+    const enabled = msg.run_enable_left || msg.run_enable_right;
+    const btnRE = el('agv-btn-run-enable');
+    btnRE.style.borderColor = enabled ? 'var(--red)'   : 'var(--green)';
+    btnRE.style.color       = enabled ? 'var(--red)'   : 'var(--green)';
+  }
+  if (msg.type === 'agv_odometry') {
+    el('agv-pos-left').textContent  = msg.pos_left_hw;
+    el('agv-pos-right').textContent = msg.pos_right_hw;
+    el('agv-vel-left').textContent  = msg.vel_left_hw;
+    el('agv-vel-right').textContent = msg.vel_right_hw;
+    usUpdateLivePos(msg.pos_left_hw, msg.pos_right_hw);
+  }
+}
+
+// ── unit_scale Measurement Wizard ────────────────────────────────────────────
+let _usStartLeft  = null;
+let _usStartRight = null;
+let _usEndLeft    = null;
+let _usEndRight   = null;
+let _usScaleLeft  = null;
+let _usScaleRight = null;
+
+// Called by agvUpdateStatus — keep live pos displays in sync
+function usUpdateLivePos(posLeft, posRight) {
+  el('us-pos-left').textContent  = posLeft;
+  el('us-pos-right').textContent = posRight;
+}
+
+function usMeasStart() {
+  const l = parseInt(el('us-pos-left').textContent,  10);
+  const r = parseInt(el('us-pos-right').textContent, 10);
+  if (isNaN(l) || isNaN(r)) {
+    el('us-msg').textContent = '⚠ 먼저 AGV를 연결하고 오도메트리 수신을 확인하세요.';
+    el('us-msg').style.color = 'var(--red)';
+    return;
+  }
+  _usStartLeft  = l;
+  _usStartRight = r;
+  _usEndLeft    = null;
+  _usEndRight   = null;
+  _usScaleLeft  = null;
+  _usScaleRight = null;
+  el('us-start-left').textContent  = l;
+  el('us-start-right').textContent = r;
+  el('us-end-left').textContent    = '—';
+  el('us-end-right').textContent   = '—';
+  el('us-result-left').textContent  = '—';
+  el('us-result-right').textContent = '—';
+  el('us-btn-end').disabled   = false;
+  el('us-btn-apply').disabled = true;
+  el('us-btn-save').disabled  = true;
+  el('us-msg').textContent = '로봇을 직선으로 이동 후 [③ 측정 완료]를 누르세요.';
+  el('us-msg').style.color = 'var(--muted)';
+}
+
+function usMeasEnd() {
+  if (_usStartLeft === null) {
+    el('us-msg').textContent = '⚠ 먼저 [① 측정 시작]을 누르세요.';
+    el('us-msg').style.color = 'var(--red)';
+    return;
+  }
+  const l = parseInt(el('us-pos-left').textContent,  10);
+  const r = parseInt(el('us-pos-right').textContent, 10);
+  if (isNaN(l) || isNaN(r)) {
+    el('us-msg').textContent = '⚠ 오도메트리 데이터를 수신할 수 없습니다.';
+    el('us-msg').style.color = 'var(--red)';
+    return;
+  }
+  const dist = parseFloat(el('us-distance').value);
+  if (!dist || dist <= 0) {
+    el('us-msg').textContent = '⚠ 이동 거리(mm)를 올바르게 입력하세요.';
+    el('us-msg').style.color = 'var(--red)';
+    return;
+  }
+  _usEndLeft  = l;
+  _usEndRight = r;
+  const deltaL = Math.abs(l - _usStartLeft);
+  const deltaR = Math.abs(r - _usStartRight);
+  el('us-end-left').textContent  = l;
+  el('us-end-right').textContent = r;
+
+  if (deltaL < 10 || deltaR < 10) {
+    el('us-msg').textContent = '⚠ 이동량이 너무 작습니다. 더 긴 거리를 이동하세요 (권장 300mm 이상).';
+    el('us-msg').style.color = 'var(--red)';
+    return;
+  }
+
+  _usScaleLeft  = Math.round(deltaL / dist);
+  _usScaleRight = Math.round(deltaR / dist);
+  el('us-result-left').textContent  = _usScaleLeft  + ' counts/mm';
+  el('us-result-right').textContent = _usScaleRight + ' counts/mm';
+
+  const diff = Math.abs(_usScaleLeft - _usScaleRight) / ((_usScaleLeft + _usScaleRight) / 2) * 100;
+  if (diff > 5) {
+    el('us-msg').textContent = `⚠ J1/J2 편차 ${diff.toFixed(1)}% — 직선 주행을 확인하세요.`;
+    el('us-msg').style.color = 'orange';
+  } else {
+    el('us-msg').textContent = `✓ 측정 완료 (편차 ${diff.toFixed(1)}%) — [양쪽 적용]을 눌러 적용하세요.`;
+    el('us-msg').style.color = 'var(--green)';
+  }
+  el('us-btn-apply').disabled = false;
+}
+
+function usApply() {
+  if (_usScaleLeft === null || _usScaleRight === null) return;
+  ws.send(JSON.stringify({ cmd: 'set_param', axis: 0, param_id: 1, value: _usScaleLeft  }));
+  ws.send(JSON.stringify({ cmd: 'set_param', axis: 1, param_id: 1, value: _usScaleRight }));
+  el('us-msg').textContent = `적용됨 — J1: ${_usScaleLeft}, J2: ${_usScaleRight} counts/mm. [플래시 저장]으로 영구 저장하세요.`;
+  el('us-msg').style.color = 'var(--green)';
+  el('us-btn-save').disabled = false;
+}
+
+function usSaveFlash() {
+  ws.send(JSON.stringify({ cmd: 'save_flash' }));
+  el('us-msg').textContent = '플래시 저장 요청 전송됨.';
+  el('us-msg').style.color = 'var(--accent)';
+  el('us-btn-save').disabled = true;
+}
+
+function usMeasReset() {
+  _usStartLeft = _usStartRight = null;
+  _usEndLeft   = _usEndRight   = null;
+  _usScaleLeft = _usScaleRight = null;
+  ['us-start-left','us-start-right','us-end-left','us-end-right',
+   'us-result-left','us-result-right'].forEach(id => el(id).textContent = '—');
+  el('us-msg').textContent = '';
+  el('us-btn-end').disabled   = true;
+  el('us-btn-apply').disabled = true;
+  el('us-btn-save').disabled  = true;
+}
+
+function usReadFromFlash() {
+  el('us-msg').textContent = '읽는 중…';
+  el('us-msg').style.color = 'var(--muted)';
+  el('us-btn-read').disabled = true;
+  send({ cmd: 'param_read_req' });
+}
+
+// Called from onParams when a param_report arrives — populate wizard current-value display
+function usShowCurrentScale() {
+  const j1 = pmLoaded[0], j2 = pmLoaded[1];
+  if (!j1 || !j2) return;
+  _usScaleLeft  = j1.unit_scale;
+  _usScaleRight = j2.unit_scale;
+  el('us-result-left').textContent  = _usScaleLeft  + ' counts/mm';
+  el('us-result-right').textContent = _usScaleRight + ' counts/mm';
+  el('us-msg').textContent = `현재 저장된 값 — J1: ${_usScaleLeft}, J2: ${_usScaleRight} counts/mm`;
+  el('us-msg').style.color = 'var(--green)';
+  el('us-btn-apply').disabled = true;  // read-only display; no need to re-apply
+  el('us-btn-save').disabled  = true;
+  el('us-btn-read').disabled  = false;
+}
+
+// ── Port selector ─────────────────────────────────────────────────────────────
+// 접속한 호스트를 기준으로 URL 결정 (원격 접속 시에도 정상 동작)
+const _HOST     = window.location.hostname || 'localhost';
+const WS_URL    = `ws://${_HOST}:8765`;
+const HTTP_BASE = `http://${_HOST}:5100`;
+
+async function refreshPorts() {
+  const sel = el('port-select');
+  const prev = sel.value;
+  try {
+    const ctrl = new AbortController();
+    const tid = setTimeout(() => ctrl.abort(), 3000);
+    const r = await fetch(`${HTTP_BASE}/ports`, { signal: ctrl.signal });
+    clearTimeout(tid);
+    const data = await r.json();
+    sel.innerHTML = '';
+    if (data.ports.length === 0) {
+      sel.innerHTML = '<option value="">-- 포트 없음 --</option>';
+    } else {
+      data.ports.forEach(p => {
+        const opt = document.createElement('option');
+        opt.value = p; opt.textContent = p;
+        sel.appendChild(opt);
+      });
+      const target = prev || data.current || data.ports[0];
+      if (target) sel.value = target;
+    }
+  } catch(e) {
+    sel.innerHTML = '<option value="">-- 포트 없음 --</option>';
+    if (e.name !== 'AbortError')
+      logMsg(`포트 목록 조회 실패 — 브리지 서버 실행 확인 (${e.message})`, 'lerr');
+  }
+}
+
+// ── WebSocket ────────────────────────────────────────────────────────────────
+function toggleConn() {
+  if (ws && ws.readyState === WebSocket.OPEN) ws.close();
+  else connect();
+}
+function connect() {
+  const port = el('port-select').value;
+  if (!port) { logMsg('COM 포트를 선택하세요', 'lwarn'); return; }
+  logMsg(`Connecting … (${port})`, 'linfo');
+  ws = new WebSocket(WS_URL);
+  ws.onopen = () => {
+    send({ cmd: 'set_port', port });
+    setTimeout(() => send({ cmd: 'param_read_req' }), 500);
+  };
+  ws.onmessage = e => onMsg(JSON.parse(e.data));
+  ws.onerror   = () => logMsg('WebSocket error', 'lerr');
+  ws.onclose   = () => { setBadge(false); logMsg('Disconnected', 'lwarn'); };
+}
+function send(obj) {
+  if (!ws || ws.readyState !== WebSocket.OPEN) { logMsg('Not connected', 'lerr'); return; }
+  ws.send(JSON.stringify(obj));
+}
+
+// ── Message handler ───────────────────────────────────────────────────────────
+function onMsg(m) {
+  switch (m.type) {
+    case 'status':        onStatus(m);       break;
+    case 'ack':           onAck(m);          break;
+    case 'log':           logMsg('[STM32] ' + m.msg, 'lstm'); break;
+    case 'param_report':  onParams(m);       break;
+    case 'point_report':  onPointReport(m);  break;
+    case 'agv_odometry':
+    case 'agv_status':    agvUpdateStatus(m); break;
+    case 'connected':
+      setBadge(true, m.port, m.baud);
+      logMsg(`Connected: ${m.port} @ ${m.baud}`, 'lok');
+      send({cmd:'param_read_req'});
+      break;
+    case 'disconnected':
+      setBadge(false);
+      logMsg('Serial disconnected', 'lwarn');
+      break;
+  }
+}
+
+// ── 확장 명령 핸들러 ──────────────────────────────────────────────────────────
+function applySpeedOverride() {
+  const ovrEl = el('ovr-slider');
+  const pct = ovrEl ? parseInt(ovrEl.value, 10) : 100;
+  send({ cmd: 'speed_override', percent: pct });
+  logMsg(`속도 오버라이드: ${pct}%`, 'linfo');
+}
+
+function onPointReport(m) {
+  const j = m.joints;
+  const parts = ['J1','J2','J3','J4','J5','J6'].map(
+    k => `${k}:${Number(j[k.toLowerCase()]).toFixed(2)}°`
+  );
+  const txt = parts.join('  ');
+  logMsg(`[CAPTURE] ${txt}`, 'lok');
+}
+
+function onStatus(m) {
+  m.axes.forEach((ax, i) => {
+    // 시뮬 실행 중에는 curPos를 실제 인코더로 덮어쓰지 않음
+    // (simAnimateSync가 curPos를 관리하며, onStatus가 덮어쓰면 DRO 깜빡임 발생)
+    if (!simRunning) curPos[i] = ax.pos_deg;
+
+    const dispVal = simRunning ? curPos[i] : ax.pos_deg;
+    const sign    = dispVal >= 0 ? '+' : '';
+    const posStr  = sign + dispVal.toFixed(2);
+    // 3D overlay (joint angle readout)
+    const c3dEl = el(`c3d-${i}`);
+    if (c3dEl) c3dEl.textContent = posStr;
+  });
+
+  if (!simRunning) {
+    // 각축 속도 중 최대값 (°/s)
+    const maxVelDegS = Math.max(...m.axes.map(ax => Math.abs(ax.velocity)));
+    const isSlow     = maxVelDegS <= 500;   // 조그·저속 이동 판단 기준
+
+    // 포인터: 저속(조그/느린이동) 또는 목표 도달 시에만 갱신
+    // → 고속 다회전 이동 중 원 궤도 튐 방지
+    if (isSlow || m.all_targets_reached) {
+      c3dUpdateCurrent(curPos);
+    }
+
+    // 경로 점: 목표 도달 시에만 추가
+    if (m.all_targets_reached) {
+      c3dFeedJoints(curPos);
+    }
+  }
+
+  // DONE 상태가 되면 항상 ACK 전송 → 인터폴레이터가 IDLE로 복귀
+  if (m.interp === 'DONE') send({ cmd: 'interp_ack' });
+
+  // AGV status update (odometry fields forwarded through status message)
+  agvUpdateStatus(m);
+
+  // 3D path: joint-space robot — no Cartesian path to draw
+}
+
+function onAck(m) {
+  const cls = m.result === 'OK' ? 'lok' : 'lerr';
+  logMsg(`ACK seq=${m.seq} → ${m.result}`, cls);
+}
+function onParams(m) {
+  logMsg(`PARAM_REPORT received (${m.axes.length} axes)`, 'linfo');
+  m.axes.forEach((ax, i) => {
+    pmLoaded[i] = ax;
+    logMsg(`  [${AXIS_NAMES[i]}] scale=${ax.unit_scale} vel=${ax.profile_velocity}°/s ` +
+           `lim=[${ax.limit_minus_user},${ax.limit_plus_user}]°`, 'lstm');
+  });
+  pmPopulate();
+  el('pm-status').textContent = `마지막 읽기: ${new Date().toTimeString().slice(0,8)}`;
+  usShowCurrentScale();
+}
+
+function toggleEnable() { send({ cmd: 'run_enable', axis: 0xFF, enable: !allEnable }); }
+
+// ── Go to Home ────────────────────────────────────────────────────────────────
+function goHome() {
+  /* 수동 탭 또는 자동 탭 — 현재 활성화된 DUR 입력 값 읽기 */
+  const durEl = currentView === 'auto'
+    ? el('home-dur-auto')
+    : el('home-dur');
+  const dur = Math.max(0.5, parseFloat(durEl?.value) || 3.0);
+
+  send({
+    cmd: 'move_joint_sync',
+    j1: 0, j2: 0, j3: 0,
+    j4: 0, j5: 0, j6: 0,
+    duration: dur,
+  });
+  logMsg(`[HOME MOVE] 전 관절 0° 이동 — ${dur.toFixed(1)}초`, 'linfo');
+}
+
+function parseJoints(line) {
+  const j = [0, 1, 2, 3, 4, 5].map(i => {
+    const re = new RegExp(`J${i+1}[=\\s]*([-+]?[\\d.]+)`);
+    const m = line.match(re);
+    return m ? parseFloat(m[1]) : curPos[i];
+  });
+  return { j1: j[0], j2: j[1], j3: j[2], j4: j[3], j5: j[4], j6: j[5] };
+}
+
+// ── Simulation Mode (disabled — AGV-only build) ──────────────────────────────
+let simRunning = false;   // always false; checked in onStatus to guard curPos update
+
+
+
+// ── DH Parameter System ───────────────────────────────────────────────────────
+
+const DH_JOINT_LABELS = ['J1 (베이스 회전)', 'J2 (어깨)', 'J3 (팔꿈치)',
+                          'J4 (손목 롤)', 'J5 (손목 피치)', 'J6 (손목 요)'];
+
+// type: 'R' = 회전 관절 (Revolute)  — 입력값: 각도(°), θ 가 변수
+//       'P' = 직선 관절 (Prismatic) — 입력값: 거리(mm), d 가 변수
+const DH_PRESETS = {
+  cartesian_wrist: {
+    name: '직교+손목 (J1-J3 직선 / J4-J6 회전)',
+    params: [
+      { type:'P', a:  0, d:   0, alpha:  0, theta_off:  0 },  // J1: X 직선
+      { type:'P', a:  0, d:   0, alpha: 90, theta_off:  0 },  // J2: Y 직선
+      { type:'P', a:  0, d:   0, alpha:-90, theta_off:  0 },  // J3: Z 직선
+      { type:'R', a:  0, d: 100, alpha:-90, theta_off:  0 },  // J4: 손목 롤
+      { type:'R', a:  0, d:   0, alpha: 90, theta_off:  0 },  // J5: 손목 피치
+      { type:'R', a:  0, d:  80, alpha:  0, theta_off:  0 },  // J6: 손목 요
+    ],
+    tcp: { x: 0, y: 0, z: 0 },
+  },
+  generic: {
+    name: 'Generic 6-axis 다관절 (전축 회전)',
+    params: [
+      { type:'R', a:    0, d: 400, alpha:   0, theta_off:   0 },
+      { type:'R', a:  300, d:   0, alpha: -90, theta_off:   0 },
+      { type:'R', a:    0, d:   0, alpha:  90, theta_off:   0 },
+      { type:'R', a:    0, d: 350, alpha: -90, theta_off:   0 },
+      { type:'R', a:    0, d:   0, alpha:  90, theta_off:   0 },
+      { type:'R', a:    0, d: 100, alpha:   0, theta_off:   0 },
+    ],
+    tcp: { x: 0, y: 0, z: 0 },
+  },
+  ur5: {
+    name: 'UR5 (전축 회전)',
+    params: [
+      { type:'R', a:       0, d:  89.2, alpha:  90, theta_off:   0 },
+      { type:'R', a:  -425.0, d:     0, alpha:   0, theta_off:   0 },
+      { type:'R', a:  -392.2, d:     0, alpha:   0, theta_off:   0 },
+      { type:'R', a:       0, d: 109.3, alpha:  90, theta_off:   0 },
+      { type:'R', a:       0, d:  94.75,alpha: -90, theta_off:   0 },
+      { type:'R', a:       0, d:  82.5, alpha:   0, theta_off:   0 },
+    ],
+    tcp: { x: 0, y: 0, z: 0 },
+  },
+  zero: {
+    name: '모두 0 (초기화)',
+    params: Array(6).fill(null).map(() => ({ type:'R', a:0, d:0, alpha:0, theta_off:0 })),
+    tcp: { x: 0, y: 0, z: 0 },
+  },
+};
+
+// 현재 사용 중인 DH 파라미터 (localStorage → 기본값 순)
+let dhParams  = [];
+let dhTCP     = { x: 0, y: 0, z: 0 };
+// FK 모드: 'dh' = DH 체인(다관절), 'cartesian' = 직교+손목
+let dhFkMode  = 'cartesian';
+
+function dhLoadFromStorage() {
+  try {
+    const raw = localStorage.getItem('dh_params');
+    if (raw) {
+      const saved = JSON.parse(raw);
+      if (saved.params && saved.params.length === 6) {
+        dhParams = saved.params;
+        dhTCP    = saved.tcp    || { x:0, y:0, z:0 };
+        dhFkMode = saved.fkMode || 'cartesian';
+        return true;
+      }
+    }
+  } catch(_) {}
+  return false;
+}
+
+function dhInitDefaults() {
+  dhParams = JSON.parse(JSON.stringify(DH_PRESETS.cartesian_wrist.params));
+  dhTCP    = { ...DH_PRESETS.cartesian_wrist.tcp };
+  dhFkMode = 'cartesian';
+}
+
+// ── DH 4×4 변환행렬 ──────────────────────────────────────────────────────────
+function dhTransform(a, d, alpha_deg, theta_deg) {
+  const al = alpha_deg * Math.PI / 180;
+  const th = theta_deg * Math.PI / 180;
+  const ca = Math.cos(al), sa = Math.sin(al);
+  const ct = Math.cos(th), st = Math.sin(th);
+  return [
+    [ct, -st*ca,  st*sa, a*ct],
+    [st,  ct*ca, -ct*sa, a*st],
+    [ 0,     sa,     ca,    d],
+    [ 0,      0,      0,    1],
+  ];
+}
+
+function matMul4(A, B) {
+  const C = [[0,0,0,0],[0,0,0,0],[0,0,0,0],[0,0,0,1]];
+  for (let i = 0; i < 3; i++)
+    for (let j = 0; j < 4; j++) {
+      C[i][j] = 0;
+      for (let k = 0; k < 4; k++) C[i][j] += A[i][k] * B[k][j];
+    }
+  return C;
+}
+
+// ── 순기구학 (DH 기반, 회전+직선 혼합 지원) ──────────────────────────────────
+// type='R' 회전 관절: joints 값 = 각도(°), θ 가 변수, d는 고정
+// type='P' 직선 관절: joints 값 = 거리(mm), d 가 변수(d_fixed + joint_val), θ는 고정
+function dhFK(joints_val) {
+  let T = [[1,0,0,0],[0,1,0,0],[0,0,1,0],[0,0,0,1]];
+  for (let i = 0; i < 6; i++) {
+    const p    = dhParams[i];
+    const type = p.type || 'R';   // 기본값: 회전 관절
+    let   a_i, d_i, alpha_i, theta_i;
+
+    if (type === 'P') {
+      // 직선 관절: d 가 변수, θ = theta_off (상수)
+      a_i     = p.a;
+      d_i     = p.d + joints_val[i];          // d_fixed + 이동 거리(mm)
+      alpha_i = p.alpha;
+      theta_i = p.theta_off;                  // θ 고정
+    } else {
+      // 회전 관절: θ 가 변수
+      a_i     = p.a;
+      d_i     = p.d;
+      alpha_i = p.alpha;
+      theta_i = joints_val[i] + p.theta_off;  // θ = 입력 각도 + 오프셋
+    }
+
+    T = matMul4(T, dhTransform(a_i, d_i, alpha_i, theta_i));
+  }
+  const tx = dhTCP.x, ty = dhTCP.y, tz = dhTCP.z;
+  return {
+    x: T[0][3] + T[0][0]*tx + T[0][1]*ty + T[0][2]*tz,
+    y: T[1][3] + T[1][0]*tx + T[1][1]*ty + T[1][2]*tz,
+    z: T[2][3] + T[2][0]*tx + T[2][1]*ty + T[2][2]*tz,
+  };
+}
+
+// ── 직교 구조 FK (J1=X, J2=Y, J3=Z 직접 매핑 + J4-J6 손목 DH) ─────────────
+function cartesianFK(joints) {
+  // J1, J2, J3 → 직접 X, Y, Z 좌표 (단위: mm)
+  let T = [
+    [1, 0, 0, joints[0]],
+    [0, 1, 0, joints[1]],
+    [0, 0, 1, joints[2]],
+    [0, 0, 0, 1],
+  ];
+
+  // J4-J6 손목 회전 (DH 체인)
+  for (let i = 3; i < 6; i++) {
+    const p  = dhParams[i];
+    const th = joints[i] + (p.theta_off || 0);
+    T = matMul4(T, dhTransform(p.a || 0, p.d || 0, p.alpha || 0, th));
+  }
+
+  const tx = dhTCP.x, ty = dhTCP.y, tz = dhTCP.z;
+  return {
+    x: T[0][3] + T[0][0]*tx + T[0][1]*ty + T[0][2]*tz,
+    y: T[1][3] + T[1][0]*tx + T[1][1]*ty + T[1][2]*tz,
+    z: T[2][3] + T[2][0]*tx + T[2][1]*ty + T[2][2]*tz,
+  };
+}
+
+// ── FK 모드에 따라 분기 ───────────────────────────────────────────────────────
+function simFK(j) {
+  return dhFkMode === 'cartesian' ? cartesianFK(j) : dhFK(j);
+}
+
+// ── DH 모달 UI ────────────────────────────────────────────────────────────────
+
+function dhBuildTable() {
+  const tbody = el('dh-tbody');
+  tbody.innerHTML = '';
+  const colors = ['var(--c0)','var(--c1)','var(--c2)','var(--c3)','var(--c4)','var(--c5)'];
+  dhParams.forEach((p, i) => {
+    const type = p.type || 'R';
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td><span class="dh-jlabel" style="color:${colors[i]}">${['J1','J2','J3','J4','J5','J6'][i]}</span></td>
+      <td>
+        <select id="dh-type-${i}" oninput="dhMarkModified(this);dhUpdateTypeHint(${i})"
+                style="background:var(--bg);border:1px solid var(--border);border-radius:4px;
+                       color:var(--text);font-size:14px;padding:4px 6px;cursor:pointer;width:80px;">
+          <option value="R" ${type==='R'?'selected':''}>R 회전</option>
+          <option value="P" ${type==='P'?'selected':''}>P 직선</option>
+        </select>
+      </td>
+      <td><input class="dh-inp" id="dh-a-${i}"   type="number" step="1"   value="${p.a}"         oninput="dhMarkModified(this)"></td>
+      <td><input class="dh-inp" id="dh-d-${i}"   type="number" step="1"   value="${p.d}"         oninput="dhMarkModified(this)"></td>
+      <td><input class="dh-inp" id="dh-al-${i}"  type="number" step="0.1" value="${p.alpha}"     oninput="dhMarkModified(this)"></td>
+      <td><input class="dh-inp" id="dh-to-${i}"  type="number" step="0.1" value="${p.theta_off}" oninput="dhMarkModified(this)"></td>
+      <td class="dh-desc-cell" style="color:${colors[i]}" id="dh-hint-${i}">
+        ${type==='P' ? '📏 직선 (mm 입력)' : '🔄 회전 (° 입력)'}
+      </td>`;
+    tbody.appendChild(tr);
+  });
+  el('dh-tcp-x').value = dhTCP.x;
+  el('dh-tcp-y').value = dhTCP.y;
+  el('dh-tcp-z').value = dhTCP.z;
+  dhUpdateLive();
+}
+
+function dhMarkModified(inp) { inp.classList.add('modified'); }
+
+// ── 로봇 프리셋 정의 ──────────────────────────────────────────────────────────
+const ROBOT_PRESETS = {
+  cart3: {
+    label:  '3축 직교 로봇',
+    hint:   'J1→X, J2→Y, J3→Z 직선 이동만 사용. J4~J6 비활성(0). 3D 그래프: 이동 궤적 직접 표시.',
+    fkMode: 'cartesian',
+    params: [
+      { type:'P', a:0, d:0, alpha:  0, theta_off:0 },
+      { type:'P', a:0, d:0, alpha: 90, theta_off:0 },
+      { type:'P', a:0, d:0, alpha:-90, theta_off:0 },
+      { type:'R', a:0, d:0, alpha:  0, theta_off:0 },
+      { type:'R', a:0, d:0, alpha:  0, theta_off:0 },
+      { type:'R', a:0, d:0, alpha:  0, theta_off:0 },
+    ],
+    tcp: { x:0, y:0, z:0 },
+  },
+  cart6: {
+    label:  '직교 + 손목 로봇',
+    hint:   'J1~J3 직선 이동 + J4~J6 손목 회전. J4~J6 DH 파라미터를 실제 손목 치수에 맞게 수정하세요.',
+    fkMode: 'cartesian',
+    params: DH_PRESETS.cartesian_wrist.params,
+    tcp:    DH_PRESETS.cartesian_wrist.tcp,
+  },
+  artic: {
+    label:  '6축 다관절 로봇',
+    hint:   '전축 회전 관절. DH 파라미터(a, d, α, θ_off)를 실제 로봇 사양서에 맞게 입력하세요.',
+    fkMode: 'dh',
+    params: DH_PRESETS.generic.params,
+    tcp:    DH_PRESETS.generic.tcp,
+  },
+};
+
+let _activeRobotPreset = '';
+
+function dhApplyRobotPreset(key) {
+  const pre = ROBOT_PRESETS[key];
+  if (!pre) return;
+
+  // 파라미터 적용
+  dhParams  = JSON.parse(JSON.stringify(pre.params));
+  dhTCP     = { ...pre.tcp };
+  dhFkMode  = pre.fkMode;
+
+  // UI 갱신
+  dhBuildTable();
+  const rb = el(dhFkMode === 'cartesian' ? 'fk-cartesian' : 'fk-dh');
+  if (rb) rb.checked = true;
+  setTimeout(() => dhFkModeChange(dhFkMode), 10);
+
+  // 프리셋 버튼 활성 표시
+  _activeRobotPreset = key;
+  ['rp-cart3','rp-cart6','rp-artic'].forEach(id => {
+    const b = el(id);
+    if (b) b.classList.toggle('rp-active', id === `rp-${key}`);
+  });
+
+  // 힌트 메시지
+  const hint = el('rp-hint');
+  if (hint) {
+    hint.textContent = `✓ ${pre.label} — ${pre.hint}`;
+    hint.style.borderColor = 'var(--green)';
+    hint.style.color       = 'var(--green)';
+    hint.style.background  = '#0a1f0a';
+  }
+
+  // 경로 초기화
+  c3dClearPath();
+  logMsg(`[DH] 로봇 프리셋: ${pre.label}`, 'lok');
+}
+
+function dhRobotPresetHighlight() {
+  // 저장된 fkMode + params 기반으로 현재 활성 프리셋 표시
+  ['rp-cart3','rp-cart6','rp-artic'].forEach(id => {
+    const b = el(id);
+    if (b) b.classList.remove('rp-active');
+  });
+  if (_activeRobotPreset) {
+    const b = el(`rp-${_activeRobotPreset}`);
+    if (b) b.classList.add('rp-active');
+  }
+}
+
+function dhFkModeChange(mode) {
+  dhFkMode = mode;
+  const hint = el('dh-mode-hint');
+  if (mode === 'cartesian') {
+    hint.textContent = '직교 모드: J1=X, J2=Y, J3=Z 값(mm)을 TCP 좌표로 직접 사용. ' +
+                       'J4-J6은 손목 회전(DH)으로 처리. 아래 테이블 J4-J6 파라미터만 사용됩니다.';
+    hint.style.borderColor = 'var(--accent)';
+    hint.style.color       = 'var(--accent)';
+    hint.style.background  = '#0d1f38';
+    // J1-J3 행을 흐리게 표시
+    for (let i = 0; i < 3; i++) {
+      const tr = el('dh-tbody').rows[i];
+      if (tr) tr.style.opacity = '0.4';
+    }
+    for (let i = 3; i < 6; i++) {
+      const tr = el('dh-tbody').rows[i];
+      if (tr) tr.style.opacity = '1';
+    }
+  } else {
+    hint.textContent = 'DH 체인 모드: 전 관절 DH 변환행렬 적용. 모든 행의 파라미터가 사용됩니다.';
+    hint.style.borderColor = 'var(--c4)';
+    hint.style.color       = 'var(--c4)';
+    hint.style.background  = '#1a0a2a';
+    for (let i = 0; i < 6; i++) {
+      const tr = el('dh-tbody').rows[i];
+      if (tr) tr.style.opacity = '1';
+    }
+  }
+  c3dClearPath();
+  logMsg(`[DH] FK 모드 변경: ${mode === 'cartesian' ? '직교 구조' : 'DH 링크 체인'}`, 'linfo');
+}
+
+function dhUpdateTypeHint(i) {
+  const type = el(`dh-type-${i}`).value;
+  const hint = el(`dh-hint-${i}`);
+  if (hint) hint.textContent = type === 'P' ? '📏 직선 (mm 입력)' : '🔄 회전 (° 입력)';
+}
+
+function dhReadInputs() {
+  const p = [];
+  for (let i = 0; i < 6; i++) {
+    p.push({
+      type:      el(`dh-type-${i}`)?.value || 'R',
+      a:         parseFloat(el(`dh-a-${i}`).value)  || 0,
+      d:         parseFloat(el(`dh-d-${i}`).value)  || 0,
+      alpha:     parseFloat(el(`dh-al-${i}`).value) || 0,
+      theta_off: parseFloat(el(`dh-to-${i}`).value) || 0,
+    });
+  }
+  const tcp = {
+    x: parseFloat(el('dh-tcp-x').value) || 0,
+    y: parseFloat(el('dh-tcp-y').value) || 0,
+    z: parseFloat(el('dh-tcp-z').value) || 0,
+  };
+  return { params: p, tcp };
+}
+
+function dhUpdateLive() {
+  try {
+    const pt = dhFK(curPos);
+    el('dh-tcp-live').textContent =
+      `X: ${pt.x.toFixed(1)} mm  Y: ${pt.y.toFixed(1)} mm  Z: ${pt.z.toFixed(1)} mm`;
+  } catch(_) { el('dh-tcp-live').textContent = '계산 오류'; }
+}
+
+function dhApply() {
+  const { params, tcp } = dhReadInputs();
+  dhParams = params;
+  dhTCP    = tcp;
+  el('dh-status').textContent = '적용됨 (미저장)';
+  el('dh-status').style.color = 'var(--yellow)';
+  // 기존 경로 초기화 (새 FK 기준으로 다시 기록)
+  c3dClearPath();
+  dhUpdateLive();
+  logMsg('[DH] 파라미터 적용 완료 — 경로 초기화', 'lok');
+}
+
+function dhSave() {
+  const { params, tcp } = dhReadInputs();
+  dhParams = params;
+  dhTCP    = tcp;
+  localStorage.setItem('dh_params', JSON.stringify({ params, tcp, fkMode: dhFkMode }));
+  el('dh-status').textContent = `저장됨 (${new Date().toTimeString().slice(0,8)})`;
+  el('dh-status').style.color = 'var(--green)';
+  c3dClearPath();
+  dhUpdateLive();
+  logMsg('[DH] 파라미터 저장 완료', 'lok');
+  // 수정 표시 제거
+  document.querySelectorAll('.dh-inp.modified').forEach(el2 => el2.classList.remove('modified'));
+}
+
+function dhLoadPreset() {
+  const key = el('dh-preset').value;
+  const pre = DH_PRESETS[key];
+  if (!pre) return;
+  dhParams = JSON.parse(JSON.stringify(pre.params));
+  dhTCP    = { ...pre.tcp };
+  dhBuildTable();
+  el('dh-status').textContent = `프리셋 "${pre.name}" 로드됨 (미저장)`;
+  el('dh-status').style.color = 'var(--yellow)';
+}
+
+function openDH() {
+  dhBuildTable();
+  // 라디오 버튼 복원
+  const rb = el(dhFkMode === 'cartesian' ? 'fk-cartesian' : 'fk-dh');
+  if (rb) rb.checked = true;
+  el('dh-overlay').classList.add('open');
+  // 힌트 및 행 표시 상태 초기화
+  setTimeout(() => dhFkModeChange(dhFkMode), 10);
+  if (!_dhLiveTimer) _dhLiveTimer = setInterval(dhUpdateLive, 200);
+}
+function closeDH() {
+  el('dh-overlay').classList.remove('open');
+  if (_dhLiveTimer) { clearInterval(_dhLiveTimer); _dhLiveTimer = null; }
+}
+function dhOverlayClick(e) { if (e.target === el('dh-overlay')) closeDH(); }
+let _dhLiveTimer = null;
+
+// ── G-Code Editor — Line Edit ────────────────────────────────────────────────
+
+/* 현재 커서가 위치한 줄 번호 반환 (0-based) */
+function _curLineIdx() {
+  const ta = el('gc-editor');
+  return ta.value.substring(0, ta.selectionStart).split('\n').length - 1;
+}
+
+/* lines 배열에서 lineIdx번째 줄의 문자 시작 위치 반환 */
+function _lineStart(lines, lineIdx) {
+  let n = 0;
+  for (let i = 0; i < lineIdx; i++) n += lines[i].length + 1;
+  return n;
+}
+
+/* 현재 줄 삭제 — 하위 줄 자동으로 올라옴 */
+function editorDeleteLine() {
+  const ta = el('gc-editor');
+  const lines = ta.value.split('\n');
+  if (lines.length === 0) return;
+
+  const idx = Math.min(_curLineIdx(), lines.length - 1);
+  lines.splice(idx, 1);
+  ta.value = lines.join('\n');
+
+  /* 커서: 같은 위치(없으면 마지막 줄) 첫 칸으로 이동 */
+  const newIdx = Math.min(idx, Math.max(lines.length - 1, 0));
+  const newPos = _lineStart(lines, newIdx);
+  ta.setSelectionRange(newPos, newPos);
+  ta.focus();
+  editorUpdate();
+  logMsg(`[EDIT] ${idx + 1}번 줄 삭제`, 'linfo');
+}
+
+/* 현재 줄 위에 빈 줄 삽입 — 하위 줄 자동으로 내려감 */
+function editorInsertAbove() {
+  const ta = el('gc-editor');
+  const lines = ta.value === '' ? [''] : ta.value.split('\n');
+  const idx = Math.min(_curLineIdx(), lines.length - 1);
+
+  lines.splice(idx, 0, '');
+  ta.value = lines.join('\n');
+
+  const newPos = _lineStart(lines, idx);
+  ta.setSelectionRange(newPos, newPos);
+  ta.focus();
+  editorUpdate();
+  logMsg(`[EDIT] ${idx + 1}번 줄 위에 빈 줄 삽입`, 'linfo');
+}
+
+/* 현재 줄 아래에 빈 줄 삽입 — 하위 줄 자동으로 내려감 */
+function editorInsertBelow() {
+  const ta = el('gc-editor');
+  const lines = ta.value === '' ? [''] : ta.value.split('\n');
+  const idx     = Math.min(_curLineIdx(), lines.length - 1);
+  const insertAt = idx + 1;
+
+  lines.splice(insertAt, 0, '');
+  ta.value = lines.join('\n');
+
+  const newPos = _lineStart(lines, insertAt);
+  ta.setSelectionRange(newPos, newPos);
+  ta.focus();
+  editorUpdate();
+  logMsg(`[EDIT] ${idx + 1}번 줄 아래에 빈 줄 삽입`, 'linfo');
+}
+
+/* 키보드 단축키
+   Ctrl+D            → 현재 줄 삭제
+   Ctrl+Shift+Enter  → 위에 빈 줄 삽입
+   Ctrl+Enter        → 아래에 빈 줄 삽입          */
+function gcEditorKeyDown(e) {
+  if (e.ctrlKey && e.key === 'd') {
+    e.preventDefault();
+    editorDeleteLine();
+    return;
+  }
+  if (e.ctrlKey && e.shiftKey && e.key === 'Enter') {
+    e.preventDefault();
+    editorInsertAbove();
+    return;
+  }
+  if (e.ctrlKey && e.key === 'Enter') {
+    e.preventDefault();
+    editorInsertBelow();
+    return;
+  }
+}
+
+// ── G-Code Editor ─────────────────────────────────────────────────────────────
+let editorDirty = false;
+let editorFilename = '새 파일';
+
+function editorUpdate() {
+  editorDirty = true;
+  syncLineNums();
+  const lines = el('gc-editor').value.split('\n').length;
+  const execCount = el('gc-editor').value.split('\n')
+    .filter(l => l.replace(/[;(].*/,'').trim().length > 0).length;
+  el('esb-line').textContent = `줄 0 / ${execCount}`;
+}
+
+function syncLineNums() {
+  const ta   = el('gc-editor');
+  const nums = el('line-nums');
+  const count = ta.value.split('\n').length;
+  nums.textContent = Array.from({length: count}, (_, i) => i + 1).join('\n');
+  nums.scrollTop = ta.scrollTop;
+}
+
+function editorNew() {
+  if (editorDirty && el('gc-editor').value.trim()) {
+    if (!confirm('저장하지 않은 내용이 있습니다. 새로 만드시겠습니까?')) return;
+  }
+  el('gc-editor').value = '';
+  editorFilename = '새 파일';
+  el('editor-filename').textContent = editorFilename;
+  editorDirty = false;
+  _fileHandle = null;
+  editorUpdate();
+}
+
+async function editorOpen() {
+  if ('showOpenFilePicker' in window) {
+    try {
+      const [handle] = await window.showOpenFilePicker({
+        types: [{ description: 'G-code 파일', accept: { 'text/plain': ['.nc','.gcode','.txt','.gc'] } }],
+        startIn: _lastDirHandle ?? 'documents',
+      });
+      const file = await handle.getFile();
+      el('gc-editor').value = await file.text();
+      editorFilename = file.name;
+      el('editor-filename').textContent = file.name;
+      editorDirty = false;
+      _fileHandle = handle;
+      _lastDirHandle = handle;   // 폴더 기억
+      editorUpdate();
+      logMsg(`[EDITOR] 파일 로드: ${file.name}`, 'lok');
+    } catch (e) {
+      if (e.name !== 'AbortError') logMsg(`[EDITOR] 열기 오류: ${e.message}`, 'lerr');
+    }
+  } else {
+    el('file-input').click();   // 폴백 (구형 브라우저)
+  }
+}
+
+function editorFileLoad(event) {
+  // showOpenFilePicker 미지원 브라우저용 폴백
+  const file = event.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = e => {
+    el('gc-editor').value = e.target.result;
+    editorFilename = file.name;
+    el('editor-filename').textContent = editorFilename;
+    editorDirty = false;
+    _fileHandle = null;
+    editorUpdate();
+    logMsg(`[EDITOR] 파일 로드: ${file.name}`, 'lok');
+  };
+  reader.readAsText(file);
+  event.target.value = '';
+}
+
+let _fileHandle    = null;   // File System Access API handle (재저장용)
+let _lastDirHandle = null;   // 마지막으로 열거나 저장한 파일 핸들 (폴더 기억용)
+
+async function editorSave() {
+  if (_fileHandle) {
+    await _writeToHandle(_fileHandle);
+  } else {
+    await editorSaveAs();
+  }
+}
+
+async function editorSaveAs() {
+  if ('showSaveFilePicker' in window) {
+    try {
+      const suggestedName = (editorFilename === '새 파일')
+        ? 'program.nc'
+        : editorFilename.replace(/\.[^.]*$/, '') + '.nc';
+      const handle = await window.showSaveFilePicker({
+        suggestedName,
+        types: [{
+          description: 'G-code 파일',
+          accept: { 'text/plain': ['.nc', '.gcode', '.txt', '.gc'] },
+        }],
+        startIn: _lastDirHandle ?? 'documents',
+      });
+      _fileHandle = handle;
+      _lastDirHandle = handle;   // 폴더 기억
+      editorFilename = handle.name;
+      el('editor-filename').textContent = handle.name;
+      await _writeToHandle(handle);
+    } catch (e) {
+      if (e.name !== 'AbortError') logMsg(`[EDITOR] 저장 오류: ${e.message}`, 'lerr');
+    }
+  } else {
+    // 폴백: 브라우저 다운로드
+    _doSaveDownload(editorFilename === '새 파일' ? 'program.nc' : editorFilename);
+  }
+}
+
+async function _writeToHandle(handle) {
+  try {
+    const writable = await handle.createWritable();
+    await writable.write(el('gc-editor').value);
+    await writable.close();
+    editorDirty = false;
+    logMsg(`[EDITOR] 저장 완료: ${handle.name}`, 'lok');
+  } catch (e) {
+    logMsg(`[EDITOR] 쓰기 오류: ${e.message}`, 'lerr');
+  }
+}
+
+function _doSaveDownload(filename) {
+  const blob = new Blob([el('gc-editor').value], { type: 'text/plain' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(a.href);
+  editorDirty = false;
+  logMsg(`[EDITOR] 다운로드 저장: ${filename}`, 'lok');
+}
+
+// ── 3D Canvas Renderer ────────────────────────────────────────────────────────
+const c3d = {
+  canvas: null, ctx: null,
+  rotX: -0.4, rotY: 0.6,
+  path: [],           // [{x,y,z}]
+  MAX_PATH: 5000,
+  drag: false, lastMX: 0, lastMY: 0,
+  scale: 1.0,
+  panX: 0, panY: 0, panZ: 0,   // 3D world offset applied before projection
+};
+
+// Preset views
+const C3D_VIEWS = {
+  iso:   { rotX: -0.52, rotY: 0.65 },
+  top:   { rotX: -Math.PI / 2 + 0.01, rotY: 0 },
+  front: { rotX: 0, rotY: 0 },
+  side:  { rotX: 0, rotY: Math.PI / 2 },
+};
+let c3dActiveView = 'iso';
+
+function c3dInit() {
+  c3d.canvas = el('canvas3d');
+  c3d.ctx    = c3d.canvas.getContext('2d');
+  c3dResize();
+  window.addEventListener('resize', c3dResize);
+
+  c3d.canvas.addEventListener('mousedown', e => { c3d.drag = true; c3d.lastMX = e.clientX; c3d.lastMY = e.clientY; });
+  c3d.canvas.addEventListener('mousemove', e => {
+    if (!c3d.drag) return;
+    c3d.rotY += (e.clientX - c3d.lastMX) * 0.008;
+    c3d.rotX += (e.clientY - c3d.lastMY) * 0.008;
+    c3d.lastMX = e.clientX; c3d.lastMY = e.clientY;
+    c3dActiveView = 'custom';
+    document.querySelectorAll('.cvbtn').forEach(b => b.classList.remove('active'));
+    c3dDraw();
+  });
+  c3d.canvas.addEventListener('mouseup',   () => { c3d.drag = false; });
+  c3d.canvas.addEventListener('mouseleave',() => { c3d.drag = false; });
+  c3d.canvas.addEventListener('wheel', e => {
+    e.preventDefault();
+    c3d.scale *= e.deltaY > 0 ? 0.9 : 1.1;
+    c3d.scale = Math.max(0.001, Math.min(100, c3d.scale));
+    c3dDraw();
+  }, { passive: false });
+
+  setInterval(c3dDraw, 1000 / 15);  // 15fps
+}
+
+function c3dResize() {
+  if (!c3d.canvas) return;
+  const wrap = el('canvas3d-wrap');
+  if (!wrap) return;
+  c3d.canvas.width  = wrap.clientWidth;
+  c3d.canvas.height = wrap.clientHeight;
+  c3dDraw();
+}
+
+function c3dSetView(name) {
+  const v = C3D_VIEWS[name];
+  if (!v) return;
+  c3d.rotX = v.rotX; c3d.rotY = v.rotY;
+  c3d.panX = 0; c3d.panY = 0; c3d.panZ = 0;
+  c3dActiveView = name;
+  document.querySelectorAll('.cvbtn').forEach(b => b.classList.remove('active'));
+  const btn = el('cv-' + name);
+  if (btn) btn.classList.add('active');
+  c3dDraw();
+}
+
+function c3dFitPath() {
+  if (c3d.path.length === 0) return;
+  // Bounding box of path
+  let xmin = Infinity, xmax = -Infinity;
+  let ymin = Infinity, ymax = -Infinity;
+  let zmin = Infinity, zmax = -Infinity;
+  for (const p of c3d.path) {
+    if (p.x < xmin) xmin = p.x; if (p.x > xmax) xmax = p.x;
+    if (p.y < ymin) ymin = p.y; if (p.y > ymax) ymax = p.y;
+    if (p.z < zmin) zmin = p.z; if (p.z > zmax) zmax = p.z;
+  }
+  // Pan world center to path bounding center so it projects to screen center
+  const cx3 = (xmin + xmax) / 2, cy3 = (ymin + ymax) / 2, cz3 = (zmin + zmax) / 2;
+  c3d.panX = -cx3; c3d.panY = -cy3; c3d.panZ = -cz3;
+  const halfSpan = Math.max(
+    (xmax - xmin) / 2, (ymax - ymin) / 2, (zmax - zmin) / 2, 10
+  );
+  // baseScale = min(w,h) * 0.0035 * scale; fit halfSpan to 38% of canvas minor axis
+  const minWH = Math.min(c3d.canvas.width || 400, c3d.canvas.height || 300);
+  c3d.scale = 0.38 / (halfSpan * 0.0035);
+  c3d.scale = Math.max(0.001, Math.min(100, c3d.scale));
+  // 회전은 현재 뷰 그대로 유지 — 수동 뷰를 건드리지 않음
+  c3dDraw();
+  logMsg(`[3D] 경로 맞춤: 범위 X[${xmin.toFixed(0)},${xmax.toFixed(0)}] Y[${ymin.toFixed(0)},${ymax.toFixed(0)}] scale=${c3d.scale.toFixed(3)}`, 'linfo');
+}
+
+function c3dZoom(factor) {
+  c3d.scale = Math.max(0.001, Math.min(100, c3d.scale * factor));
+  c3dDraw();
+}
+
+function c3dResetView() {
+  c3d.scale = 1.0;
+  c3d.rotX  = -0.52; c3d.rotY = 0.65;
+  c3d.panX  = 0; c3d.panY = 0; c3d.panZ = 0;
+  c3dActiveView = 'iso';
+  document.querySelectorAll('.cvbtn').forEach(b =>
+    b.classList.toggle('active', b.id === 'cv-iso'));
+  c3dDraw();
+}
+
+function c3dClearPath() {
+  c3d.path      = [];
+  _prevFKJoints = null;
+  // 포인터는 유지 (_c3dCurPt) — 현재 위치는 남겨둠
+  c3dDraw();
+  logMsg('[3D] 경로 지워짐', 'linfo');
+}
+
+/* ── 현재 TCP 포인터 (경로와 독립, 정규화 없음) ─────────────────── */
+let _c3dCurPt = null;
+
+function c3dUpdateCurrent(joints) {
+  if (!joints.every(j => isFinite(j))) return;
+  const pt = simFK(joints);   // 정규화 없이 그대로 사용
+  if (isFinite(pt.x) && isFinite(pt.y) && isFinite(pt.z)) {
+    _c3dCurPt = pt;
+  }
+}
+
+/* ── 경로 점 추가 (목표 도달 시에만 호출) ───────────────────────── */
+let _prevFKJoints = null;
+
+function c3dFeedJoints(joints) {
+  if (!joints.every(j => isFinite(j))) return;
+  const fkPt = simFK(joints);
+  if (!isFinite(fkPt.x) || !isFinite(fkPt.y) || !isFinite(fkPt.z)) return;
+  _prevFKJoints = joints.slice();
+  c3dAddPoint(fkPt.x, fkPt.y, fkPt.z);
+}
+
+function c3dAddPoint(x, y, z) {
+  if (!isFinite(x) || !isFinite(y) || !isFinite(z)) return;
+  const path = c3d.path;
+  let gap = false;
+
+  if (path.length > 0) {
+    const last = path[path.length - 1];
+    const dx = last.x - x, dy = last.y - y, dz = last.z - z;
+    const distSq = dx*dx + dy*dy + dz*dz;
+
+    if (distSq < 1.0) return;          // 1mm 미만 이동 → skip
+
+    // 직전 점으로부터 5000mm(5m) 이상 점프 → 선 연결 안 함(gap)
+    if (distSq > 5000 * 5000) gap = true;
+  }
+
+  path.push({ x, y, z, gap });
+  if (path.length > c3d.MAX_PATH) path.shift();
+}
+
+function c3dProject(x, y, z) {
+  const w = c3d.canvas.width, h = c3d.canvas.height;
+  const cx = w / 2, cy = h / 2;
+  const baseScale = Math.min(w, h) * 0.0035 * c3d.scale;
+
+  x += c3d.panX; y += c3d.panY; z += c3d.panZ;
+
+  // Rotate Y then X
+  let rx  =  x * Math.cos(c3d.rotY) + z * Math.sin(c3d.rotY);
+  let ry  =  y;
+  let rz  = -x * Math.sin(c3d.rotY) + z * Math.cos(c3d.rotY);
+  let rx2 =  rx;
+  let ry2 =  ry * Math.cos(c3d.rotX) - rz * Math.sin(c3d.rotX);
+  let rz2 =  ry * Math.sin(c3d.rotX) + rz * Math.cos(c3d.rotX);
+
+  const fov = 600;
+  const pz  = rz2 + fov;
+
+  // 카메라 뒤쪽(pz ≤ 0)은 null 반환 → 호출부에서 skip
+  if (pz < 1) return null;
+
+  return {
+    sx:    cx + (rx2 / pz) * fov * baseScale,
+    sy:    cy - (ry2 / pz) * fov * baseScale,
+    depth: rz2,
+    valid: true,
+  };
+}
+
+/* 스케일에 따라 격자 범위·간격을 동적으로 결정 */
+function c3dGridConfig() {
+  const s = c3d.scale;
+  if (s > 5.0)  return { range: 40,   step: 10   };
+  if (s > 2.0)  return { range: 100,  step: 25   };
+  if (s > 0.8)  return { range: 250,  step: 50   };
+  if (s > 0.35) return { range: 600,  step: 100  };
+  if (s > 0.15) return { range: 1500, step: 250  };
+  if (s > 0.06) return { range: 3000, step: 500  };
+  return               { range: 8000, step: 1000 };
+}
+
+function c3dDraw() {
+  if (!c3d.ctx) return;
+  const ctx = c3d.ctx;
+  const w = c3d.canvas.width, h = c3d.canvas.height;
+  ctx.clearRect(0, 0, w, h);
+
+  ctx.fillStyle = '#0d1117';
+  ctx.fillRect(0, 0, w, h);
+
+  // ── 적응형 격자 ───────────────────────────────────────────────
+  const { range, step } = c3dGridConfig();
+  ctx.strokeStyle = '#21262d';
+  ctx.lineWidth = 0.5;
+  for (let v = -range; v <= range; v += step) {
+    const a = c3dProject(v, -range, 0), b = c3dProject(v, range, 0);
+    if (a && b) { ctx.beginPath(); ctx.moveTo(a.sx, a.sy); ctx.lineTo(b.sx, b.sy); ctx.stroke(); }
+    const c = c3dProject(-range, v, 0), d = c3dProject(range, v, 0);
+    if (c && d) { ctx.beginPath(); ctx.moveTo(c.sx, c.sy); ctx.lineTo(d.sx, d.sy); ctx.stroke(); }
+  }
+
+  // ── 축 (길이는 격자 범위에 비례) ─────────────────────────────
+  const axLen = range * 0.35;
+  const O  = c3dProject(0, 0, 0);
+  const AX = c3dProject(axLen, 0, 0);
+  const AY = c3dProject(0, axLen, 0);
+  const AZ = c3dProject(0, 0, axLen);
+  if (O) {
+    const drawAxis = (p, col, label) => {
+      if (!p) return;
+      ctx.strokeStyle = col; ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.moveTo(O.sx, O.sy); ctx.lineTo(p.sx, p.sy); ctx.stroke();
+      ctx.fillStyle = col; ctx.font = 'bold 13px Segoe UI';
+      ctx.fillText(label, p.sx + 4, p.sy - 4);
+    };
+    drawAxis(AX, '#58a6ff', 'X');
+    drawAxis(AY, '#3fb950', 'Y');
+    drawAxis(AZ, '#f0a30a', 'Z');
+
+    ctx.beginPath();
+    ctx.arc(O.sx, O.sy, 3, 0, Math.PI * 2);
+    ctx.fillStyle = '#8b949e'; ctx.fill();
+  }
+
+  // ── 경로 (null 클리핑: 카메라 뒤 선분은 moveTo로 끊기) ────────
+  if (c3d.path.length > 1) {
+    ctx.strokeStyle = '#58a6ff88';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    let penDown = false;
+    for (let i = 0; i < c3d.path.length; i++) {
+      const pt = c3d.path[i];
+      const p  = c3dProject(pt.x, pt.y, pt.z);
+      if (!p || pt.gap) { penDown = false; continue; }  // 카메라뒤·대도약 → 선 끊기
+      if (!penDown) { ctx.moveTo(p.sx, p.sy); penDown = true; }
+      else          { ctx.lineTo(p.sx, p.sy); }
+    }
+    ctx.stroke();
+  }
+
+  // ── 현재 TCP 포인터 (정규화 각도 기반, 경로와 독립) ─────────────
+  const curDot = _c3dCurPt;
+  if (curDot) {
+    const lp = c3dProject(curDot.x, curDot.y, curDot.z);
+    if (lp) {
+      // 빨간 점
+      ctx.beginPath();
+      ctx.arc(lp.sx, lp.sy, 6, 0, Math.PI * 2);
+      ctx.fillStyle = '#f85149'; ctx.fill();
+      ctx.strokeStyle = '#ff8080'; ctx.lineWidth = 1.5; ctx.stroke();
+
+      // XY 평면으로 수직 점선
+      const lp0 = c3dProject(curDot.x, curDot.y, 0);
+      if (lp0) {
+        ctx.beginPath();
+        ctx.moveTo(lp.sx, lp.sy); ctx.lineTo(lp0.sx, lp0.sy);
+        ctx.strokeStyle = '#f8514966'; ctx.lineWidth = 1;
+        ctx.setLineDash([3, 3]); ctx.stroke(); ctx.setLineDash([]);
+      }
+    }
+  }
+
+  // ── 격자 단위 + 스케일 표시 ──────────────────────────────────
+  ctx.fillStyle = '#30363d';
+  ctx.font = '12px Courier New';
+  ctx.fillText(`grid ${step} mm  drag:rotate  scroll:zoom`, 6, h - 6);
+
+  // 스케일 레이블 (툴바 span 업데이트)
+  const lbl = el('c3d-scale-lbl');
+  if (lbl) lbl.textContent = '×' + c3d.scale.toFixed(2);
+}
+
+// ── Parameter Modal ───────────────────────────────────────────────────────────
+function openParams() { el('param-overlay').classList.add('open'); pmPopulate(); if (!pmLoaded[pmAxisIdx]) { send({ cmd: 'param_read_req' }); el('pm-status').textContent = '읽는 중…'; } }
+function closeParams() { el('param-overlay').classList.remove('open'); }
+function overlayClick(e) { if (e.target === el('param-overlay')) closeParams(); }
+function pmTab(idx) {
+  pmAxisIdx = idx;
+  document.querySelectorAll('.pm-tab').forEach((t, i) => t.classList.toggle('active', i === idx));
+  pmPopulate();
+}
+function pmPopulate() {
+  const ax = pmLoaded[pmAxisIdx];
+  if (!ax) return;
+  const tabColors = ['var(--cx)', 'var(--cy)', 'var(--cz)'];
+  el('pm-body').style.borderTop = `2px solid ${tabColors[pmAxisIdx]}`;
+  pmSet('p-scale', ax.unit_scale);
+  pmSet('p-vel',   ax.profile_velocity);
+  pmSet('p-acc',   ax.profile_accel_ms);
+  pmSet('p-dec',   ax.profile_decel_ms);
+  pmSet('p-torq',  ax.torque_limit);
+  pmSet('p-gain',  ax.position_gain);
+  pmSet('p-lp',    ax.limit_plus_user);
+  pmSet('p-lm',    ax.limit_minus_user);
+  pmSet('p-home',  ax.home_offset);
+  el('p-lphw').value = ax.limit_plus_hw;
+  el('p-lmhw').value = ax.limit_minus_hw;
+  document.querySelectorAll('.pm-inp').forEach(inp => inp.classList.remove('dirty'));
+}
+function pmSet(id, val) {
+  const inp = el(id);
+  inp.value = val; inp.dataset.orig = val; inp.classList.remove('dirty');
+  inp.oninput = () => inp.classList.toggle('dirty', String(inp.value) !== String(inp.dataset.orig));
+}
+function pmApply() {
+  const ax = pmAxisIdx;
+  const changes = [];
+  function chk(inputId, paramId, toInt = v => Math.round(parseFloat(v))) {
+    const inp = el(inputId);
+    if (!inp.classList.contains('dirty')) return;
+    const val = toInt(inp.value);
+    send({ cmd: 'set_param', axis: ax, param_id: paramId, value: val });
+    changes.push(`${inputId}→${val}`);
+    inp.dataset.orig = inp.value; inp.classList.remove('dirty');
+  }
+  chk('p-scale', PARAM.UNIT_SCALE);
+  chk('p-vel',   PARAM.PROFILE_VEL);
+  chk('p-acc',   PARAM.PROFILE_ACCEL_MS);
+  chk('p-dec',   PARAM.PROFILE_DECEL_MS);
+  chk('p-torq',  PARAM.TORQUE_LIMIT);
+  chk('p-gain',  PARAM.POSITION_GAIN);
+  chk('p-lp',    PARAM.LIMIT_PLUS_USER);
+  chk('p-lm',    PARAM.LIMIT_MINUS_USER);
+  if (changes.length === 0) { el('pm-status').textContent = '변경된 항목 없음'; }
+  else {
+    el('pm-status').textContent = `적용: ${changes.length}개 항목 → [${AXIS_NAMES[ax]}]`;
+    logMsg(`[PARAM] ${AXIS_NAMES[ax]}축 적용: ${changes.join(', ')}`, 'lok');
+    setTimeout(() => send({ cmd: 'param_read_req' }), 150);
+  }
+}
+function pmApplyAndSave() {
+  pmApply();
+  setTimeout(() => send({ cmd: 'save_flash' }), 120);
+  el('pm-status').textContent = '적용 + Flash 저장 요청됨';
+}
+function pmCapLimit(sign) {
+  const pos = curPos[pmAxisIdx];
+  const posInt = Math.round(pos);
+  if (sign > 0) { el('p-lp').value = posInt; el('p-lp').classList.add('dirty'); }
+  else          { el('p-lm').value = posInt; el('p-lm').classList.add('dirty'); }
+  el('pm-status').textContent = `현재 위치 ${posInt}° → ${sign>0?'+':'−'} 리밋 (미적용)`;
+}
+function pmSetHome() {
+  if (!confirm(`[${AXIS_NAMES[pmAxisIdx]}] 현재 위치를 원점(0)으로 설정합니다.\n계속하시겠습니까?`)) return;
+  send({ cmd: 'home', axis: pmAxisIdx, type: 0 });
+  logMsg(`[HOME] ${AXIS_NAMES[pmAxisIdx]}축 원점 설정`, 'lok');
+  el('pm-status').textContent = `${AXIS_NAMES[pmAxisIdx]}축 원점 설정 완료`;
+  setTimeout(() => send({ cmd: 'param_read_req' }), 300);
+}
+
+// ── UI helpers ────────────────────────────────────────────────────────────────
+function el(id) { return document.getElementById(id); }
+function setBadge(online, port, baud) {
+  const b = el('conn-badge');
+  if (online) { b.textContent = `● ${port ?? 'CONNECTED'}`; b.className = 'online'; }
+  else        { b.textContent = '● OFFLINE'; b.className = 'offline'; }
+}
+function setDot(id, on) {
+  const d = el(id);
+  if (!d) return;
+  d.classList.toggle('don',  !!on);
+  d.classList.toggle('doff', !on);
+}
+function logMsg(text, cls = '') {
+  const log = el('log');
+  const ts  = new Date().toTimeString().slice(0, 8);
+  const row = document.createElement('div');
+  if (cls) row.className = cls;
+  row.textContent = `[${ts}] ${text}`;
+  log.appendChild(row);
+  while (log.children.length > 200) log.removeChild(log.firstChild);
+  log.scrollTop = log.scrollHeight;
+}
+
+// ── Init ──────────────────────────────────────────────────────────────────────
+window.addEventListener('load', () => {
+  // DH 파라미터 초기화 (저장된 값 우선, 없으면 Generic 기본값)
+  if (!dhLoadFromStorage()) dhInitDefaults();
+
+  logMsg('HMI ready — COM 포트를 선택 후 Connect', 'linfo');
+  c3dInit();
+  el('view-agv').classList.add('active');
+  refreshPorts();  // 포트 목록 자동 조회
+});
+window.addEventListener('resize', c3dResize);
+</script>
+</body>
+</html>

@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell(Get-Content \"D:\\\\Ethercat_STM32SP\\\\STM32CubeIDE\\\\Appli\\\\.project\" | Select-String \"soem|ethercat\" -CaseSensitive:$false | Select-Object -First 20 | ForEach-Object { $_.Line })"
+    ]
+  }
+}

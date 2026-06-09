@@ -1,0 +1,142 @@
+<?xml version="1.0"?>
+<!--
+  AGV Differential Drive Robot — URDF/Xacro
+  ─────────────────────────────────────────
+  Wheel base : 0.60 m  (AGV_WHEEL_BASE_M in firmware)
+  Wheel radius: 0.15 m  (AGV_WHEEL_RADIUS_M in firmware)
+
+  TF tree (static links from this URDF):
+    base_link
+      ├── base_footprint
+      ├── left_wheel_link
+      ├── right_wheel_link
+      └── camera_link
+            (realsense2_camera publishes camera_link → depth/color optical frames)
+
+  Camera mount override via xacro args:
+    camera_x     (default 0.25 m  — forward from base_link centre)
+    camera_z     (default 0.30 m  — height above ground)
+    camera_pitch (default 0.0 rad — tilt down positive)
+-->
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="agv">
+
+  <!-- ── Parameters ─────────────────────────────────────────────────────── -->
+  <xacro:arg name="camera_x"     default="0.25"/>
+  <xacro:arg name="camera_y"     default="0.0"/>
+  <xacro:arg name="camera_z"     default="0.30"/>
+  <xacro:arg name="camera_pitch" default="0.0"/>
+
+  <xacro:property name="wheel_base"   value="0.60"/>
+  <xacro:property name="wheel_radius" value="0.15"/>
+  <xacro:property name="wheel_width"  value="0.05"/>
+  <xacro:property name="base_height"  value="0.20"/>
+  <xacro:property name="base_radius"  value="0.30"/>
+
+  <!-- ── Materials ──────────────────────────────────────────────────────── -->
+  <material name="dark_grey">  <color rgba="0.2 0.2 0.2 1.0"/> </material>
+  <material name="light_grey"> <color rgba="0.6 0.6 0.6 1.0"/> </material>
+  <material name="blue">       <color rgba="0.1 0.4 0.8 1.0"/> </material>
+
+  <!-- ── base_link ─────────────────────────────────────────────────────── -->
+  <link name="base_link">
+    <visual>
+      <origin xyz="0 0 ${base_height/2}" rpy="0 0 0"/>
+      <geometry><cylinder radius="${base_radius}" length="${base_height}"/></geometry>
+      <material name="dark_grey"/>
+    </visual>
+    <collision>
+      <origin xyz="0 0 ${base_height/2}" rpy="0 0 0"/>
+      <geometry><cylinder radius="${base_radius}" length="${base_height}"/></geometry>
+    </collision>
+    <inertial>
+      <mass value="20.0"/>
+      <inertia ixx="0.5" ixy="0" ixz="0" iyy="0.5" iyz="0" izz="0.8"/>
+    </inertial>
+  </link>
+
+  <!-- ── base_footprint (ground projection) ────────────────────────────── -->
+  <link name="base_footprint"/>
+  <joint name="base_footprint_joint" type="fixed">
+    <parent link="base_link"/>
+    <child  link="base_footprint"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+  </joint>
+
+  <!-- ── Left wheel (J1) ───────────────────────────────────────────────── -->
+  <link name="left_wheel_link">
+    <visual>
+      <origin xyz="0 0 0" rpy="${pi/2} 0 0"/>
+      <geometry><cylinder radius="${wheel_radius}" length="${wheel_width}"/></geometry>
+      <material name="light_grey"/>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="${pi/2} 0 0"/>
+      <geometry><cylinder radius="${wheel_radius}" length="${wheel_width}"/></geometry>
+    </collision>
+    <inertial>
+      <mass value="2.0"/>
+      <inertia ixx="0.01" ixy="0" ixz="0" iyy="0.01" iyz="0" izz="0.02"/>
+    </inertial>
+  </link>
+  <joint name="left_wheel_joint" type="continuous">
+    <parent link="base_link"/>
+    <child  link="left_wheel_link"/>
+    <origin xyz="0 ${wheel_base/2} 0" rpy="0 0 0"/>
+    <axis xyz="0 1 0"/>
+  </joint>
+
+  <!-- ── Right wheel (J2) ──────────────────────────────────────────────── -->
+  <link name="right_wheel_link">
+    <visual>
+      <origin xyz="0 0 0" rpy="${pi/2} 0 0"/>
+      <geometry><cylinder radius="${wheel_radius}" length="${wheel_width}"/></geometry>
+      <material name="light_grey"/>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="${pi/2} 0 0"/>
+      <geometry><cylinder radius="${wheel_radius}" length="${wheel_width}"/></geometry>
+    </collision>
+    <inertial>
+      <mass value="2.0"/>
+      <inertia ixx="0.01" ixy="0" ixz="0" iyy="0.01" iyz="0" izz="0.02"/>
+    </inertial>
+  </link>
+  <joint name="right_wheel_joint" type="continuous">
+    <parent link="base_link"/>
+    <child  link="right_wheel_link"/>
+    <origin xyz="0 ${-wheel_base/2} 0" rpy="0 0 0"/>
+    <axis xyz="0 1 0"/>
+  </joint>
+
+  <!-- ── Camera link (Intel RealSense D435/D455) ───────────────────────── -->
+  <!--
+    realsense2_camera will publish the optical frames as children of camera_link.
+    camera_name parameter in realsense2_camera must match the parent frame
+    specified in its launch (default: "camera").
+    Set camera_name:=camera in realsense2_camera launch so frames are:
+      camera_link → camera_depth_optical_frame
+      camera_link → camera_color_optical_frame
+  -->
+  <link name="camera_link">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry><box size="0.025 0.090 0.025"/></geometry>
+      <material name="blue"/>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry><box size="0.025 0.090 0.025"/></geometry>
+    </collision>
+    <inertial>
+      <mass value="0.072"/>
+      <inertia ixx="1e-4" ixy="0" ixz="0" iyy="1e-4" iyz="0" izz="1e-4"/>
+    </inertial>
+  </link>
+  <joint name="camera_joint" type="fixed">
+    <parent link="base_link"/>
+    <child  link="camera_link"/>
+    <origin xyz="$(arg camera_x) $(arg camera_y) $(arg camera_z)"
+            rpy="0 $(arg camera_pitch) 0"/>
+  </joint>
+
+</robot>

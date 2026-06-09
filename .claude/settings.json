@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell(make*)",
+      "PowerShell(*STM32_Programmer_CLI*)",
+      "PowerShell(*arm-none-eabi*)",
+      "Bash(make*)",
+      "Bash(*STM32_Programmer_CLI*)"
+    ]
+  }
+}

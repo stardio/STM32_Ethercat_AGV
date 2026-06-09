@@ -1,0 +1,44 @@
+# rtabmap_params.yaml — RTAB-Map configuration for AGV (RealSense D435/D455)
+#
+# Reference:
+#   https://github.com/introlab/rtabmap_ros/tree/humble-devel
+#
+# subscribe_rgb + subscribe_depth = RGBD mode (D435 depth aligned to color)
+# approx_sync = true  because /odom is 100Hz and camera is 30Hz
+
+rtabmap:
+  ros__parameters:
+    frame_id:            base_link
+    odom_frame_id:       odom
+    map_frame_id:        map
+    subscribe_rgb:       true
+    subscribe_depth:     true
+    subscribe_scan:      false
+    approx_sync:         true
+    queue_size:          10
+    use_sim_time:        false
+
+    # ── Detection & Loop Closure ────────────────────────────────────────────
+    Rtabmap/DetectionRate:          "2"     # Hz — loop closure check rate (save CPU)
+    Rtabmap/TimeThr:                "700"   # ms — max processing time per iteration
+
+    # ── Memory ─────────────────────────────────────────────────────────────
+    Mem/ImagePreDecimation:         "2"     # downsample images 1/2 for speed
+    Mem/NotLinkedNodesKept:         "false"
+
+    # ── 2D occupancy grid (for Nav2 costmap) ───────────────────────────────
+    Grid/3D:                        "false"
+    Grid/RayTracing:                "true"
+    Grid/MaxGroundHeight:           "0.10"  # m — ignore ground up to 10 cm
+    Grid/MaxObstacleHeight:         "2.00"  # m
+    Grid/CellSize:                  "0.05"  # m — 5 cm resolution
+
+    # ── Visual Odometry (disabled — using wheel odom) ───────────────────────
+    Odom/Strategy:                  "0"
+    Vis/EstimationType:             "1"     # homography (2D planar)
+
+    # ── Map cleanup ────────────────────────────────────────────────────────
+    RGBD/AngularUpdate:             "0.10"  # rad — add keyframe every 5.7 deg
+    RGBD/LinearUpdate:              "0.10"  # m  — add keyframe every 10 cm
+    RGBD/OptimizeFromGraphEnd:      "false"
+    Optimizer/Strategy:             "1"     # g2o

@@ -1,0 +1,16 @@
+[Unit]
+Description=AGV Navigation Stack (RTAB-Map Localization + Nav2)
+After=network.target agv-bridge.service
+Wants=agv-bridge.service
+
+[Service]
+Type=simple
+User=bs
+WorkingDirectory=/home/bs/Ethercat_N753-6AX_AGV/ros2_ws
+ExecStart=/bin/bash /home/bs/Ethercat_N753-6AX_AGV/ros2_ws/start_nav.sh
+Restart=no
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

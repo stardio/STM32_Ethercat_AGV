@@ -78,3 +78,22 @@ cmake_install.cmake
 
 # IDE metadata
 .metadata/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# ROS2 build artifacts
+ros2_ws/build/
+ros2_ws/install/
+ros2_ws/log/
+
+# PlatformIO build artifacts
+ESP32/agv_firmware/.pio/
+
+# PC_GUI runtime
+PC_GUI/bridge/programs/
+
+# Maps / runtime data
+ros2_ws/maps/

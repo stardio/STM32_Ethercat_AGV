@@ -635,41 +635,57 @@ local_costmap:
 
 ---
 
-## 8. 파일 구조 (신규 추가)
+## 8. 파일 구조 (실제 구현)
+
+> ✅ Phase 1~5 모두 구현 완료 (2026-06)
 
 ```
-PC_GUI/
-├── bridge/                     ← 기존 (최소 수정)
-│   ├── bridge.py               ← AGV_VELOCITY 명령 추가
-│   └── packet_defs.py          ← 0x30~0x32 패킷 추가
-│
-└── agv/                        ← 신규 추가
-    ├── requirements.txt
-    ├── config/
-    │   ├── mission.yaml        ← 작업 스케줄 정의
-    │   ├── nav2_params.yaml    ← Nav2 설정
-    │   ├── ekf.yaml            ← 센서 융합 설정
-    │   └── robot.yaml          ← 로봇 물리 파라미터
-    ├── launch/
-    │   ├── slam.launch.py      ← 맵핑 모드 실행
-    │   ├── nav.launch.py       ← 자율 주행 실행
-    │   └── full_system.launch.py
-    ├── maps/                   ← 생성된 맵 저장
-    │   ├── orchard_spring.db
-    │   ├── orchard_summer.db
-    │   └── orchard_autumn.db
-    └── src/
-        ├── stm32_bridge_node.py    ← ROS2 ↔ STM32 인터페이스
-        ├── row_follower.py         ← 나무 열 추종
-        ├── obstacle_classifier.py  ← 장애물 분류 대응
-        ├── task_scheduler.py       ← 작업 스케줄 관리
-        └── orchard_navigator.py    ← 과수원 전용 경로 생성
-
 Appli/Core/
 ├── Inc/
-│   └── uart_protocol.h    ← 0x30~0x32 패킷 추가
+│   ├── robot_config.h         ← AGV 설정 (AXIS_COUNT=2, wheel params, Flash magic)
+│   ├── axis_types.h           ← AxisId_t (AXIS_J1=0, AXIS_J2=1)
+│   ├── soem_port.h            ← AGV CSV master API
+│   └── uart_protocol.h        ← 0x30 AGV_VELOCITY / 0x31 AGV_ODOMETRY / 0x32 AGV_STATUS
 └── Src/
-    └── uart_protocol.c    ← AGV 명령 디스패처 추가
+    ├── main.c                 ← FreeRTOS tasks (350줄, 6축 레거시 제거)
+    ├── soem_port.c            ← EtherCAT SOEM CSV 모드, SOEM_SetTargetVelocity()
+    ├── uart_protocol.c        ← SLIP 프레임, AGV_VELOCITY(0x30) 핸들러
+    ├── axis_config.c          ← 전역 축 파라미터 2축
+    └── ui_flash_storage.c     ← Flash 저장 Bank2 Sector7 0x081E0000
+
+PC_GUI/
+├── bridge/
+│   ├── bridge.py              ← UART↔WebSocket, AGV 패킷 핸들러 포함
+│   └── packet_defs.py         ← 0x30~0x32 패킷 빌더/파서
+└── UartWeb/wwwroot/
+    └── index.html             ← Web HMI + AGV 탭 (드라이브 상태/수동제어/스케줄러)
+
+ros2_ws/src/
+├── agv_bringup/
+│   ├── package.xml            ← robot_localization 의존성 포함
+│   ├── setup.py               ← 4개 entry_points 등록
+│   ├── agv_bringup/
+│   │   ├── stm32_bridge_node.py   ← /cmd_vel→STM32, /odom 발행
+│   │   ├── row_follower.py        ← depth PID 열 추종 (Phase 3+4 통합)
+│   │   ├── obstacle_classifier.py ← YOLOv8 + Geofence 안전 레이어 (Phase 4)
+│   │   └── task_scheduler.py      ← cron 스케줄 + HTTP REST API (Phase 5)
+│   ├── config/
+│   │   ├── rtabmap_params.yaml    ← RTAB-Map 설정
+│   │   ├── nav2_params.yaml       ← Nav2/DWB 설정
+│   │   ├── ekf.yaml               ← robot_localization odom+IMU EKF (Phase 3)
+│   │   ├── geofence.yaml          ← 금지구역 다각형 (Phase 4, enabled:false)
+│   │   └── mission.yaml           ← 작업 스케줄 정의 (Phase 5)
+│   └── launch/
+│       ├── hardware.launch.py     ← STM32 브릿지 + URDF
+│       ├── slam.launch.py         ← RealSense + RTAB-Map 맵핑
+│       ├── localization.launch.py ← RTAB-Map 위치추정
+│       ├── nav2.launch.py         ← Nav2 자율주행
+│       ├── full_slam.launch.py    ← 전체 스택 맵핑
+│       ├── full_nav.launch.py     ← 전체 스택 자율주행
+│       ├── row_follow.launch.py   ← STM32+카메라+EKF+열추종+장애물 (Phase 3+4)
+│       └── obstacle.launch.py     ← 장애물 감지 단독 테스트 (Phase 4)
+└── agv_description/
+    └── urdf/agv.urdf.xacro        ← 차동구동 URDF (wheel_base=0.60m, radius=0.15m)
 ```
 
 ---
@@ -702,36 +718,98 @@ Appli/Core/
 
 ## 10. 구현 로드맵
 
-```
-Phase 1 — 기본 주행 (2주)
-  └─ STM32 AGV_VELOCITY 패킷 추가
-  └─ 엔코더 오도메트리 구현
-  └─ ROS2 /cmd_vel → STM32 인터페이스
-  └─ 조이스틱 수동 주행 검증
+> ✅ Phase 1~6 + Phase D 구현 완료 (2026-06-13)
 
-Phase 2 — 맵핑 (3주)
-  └─ Jetson + RealSense D435i + RTAB-Map 설치
-  └─ 과수원 수동 주행으로 첫 맵 생성
-  └─ 계절별 맵 3종 생성 및 저장
+### ✅ Phase 1+2 — 기본 주행 + 인프라 (완료)
 
-Phase 3 — 자율 주행 (2주)
-  └─ Nav2 설정 (DWB 로컬 플래너)
-  └─ 웨이포인트 자동 주행 검증
-  └─ 나무 열 추종 알고리즘 구현 및 튜닝
+- 6축 로봇 레거시 코드 18개 파일 삭제, main.c 2044→350줄 축소
+- `robot_config.h` AGV 설정 (AXIS_COUNT=2, wheel_base/radius, Flash magic)
+- STM32 CSV 모드 속도제어, AGV 패킷 3종 (0x30~0x32)
+- `stm32_bridge_node.py`: /cmd_vel → STM32, /odom 발행
+- URDF (wheel_base=0.60m, radius=0.15m)
+- launch 6종 (hardware/slam/localization/nav2/full_slam/full_nav)
+- 빌드: FLASH 116KB/1920KB (5.92%), RAM 256KB/448KB (55.93%)
 
-Phase 4 — 장애물 회피 (2주)
-  └─ YOLOv8 장애물 분류 적용
-  └─ 3단계 안전 레이어 통합
-  └─ 사람·동물·차량 감지 대응 검증
+### ✅ Phase 3 — 열 추종 + EKF 센서 융합 (완료)
 
-Phase 5 — 작업 자동화 (2주)
-  └─ 작업 스케줄러 구현 (mission.yaml)
-  └─ 방제기·수확 장치 액추에이터 연동
-  └─ 원격 모니터링 웹 대시보드 추가
-  └─ 착과 감지 데이터 수집 및 저장
+- `row_follower.py`: RealSense 정렬 depth 이미지 기반 PID 제어
+  - 좌/우 60% 높이 스캔라인 깊이 중앙값 비교로 error 산출
+  - PID(kp=0.5, ki=0.01, kd=0.1), 전방 10퍼센트타일로 장애물/열끝 판정
+  - /row_follow/enable(Bool), /row_follow/speed(Float32) 수신 → /cmd_vel 발행
+- `ekf.yaml`: robot_localization EKF, /odom + /camera/imu → /odometry/filtered
+- `row_follow.launch.py`: STM32 + RealSense + EKF + row_follower 통합
 
-Total: 약 11주
-```
+### ✅ Phase 4 — YOLOv8 장애물 + Geofence 안전 레이어 (완료)
+
+- `obstacle_classifier.py`: COCO 클래스 매핑으로 3단계 우선순위 액션 결정
+  - person → FULL_STOP, vehicle → WAIT, animal → SLOW_AVOID
+  - hysteresis: confirm_frames=3 에스컬레이션, clear_frames=5 해제
+  - /obstacle/action (String) 발행 → row_follower 구독
+- `geofence.yaml`: 금지구역 다각형 (enabled:false — 현장 좌표 보정 후 활성화)
+- `obstacle.launch.py`: 장애물 감지 단독 테스트용 launch
+
+### ✅ Phase 5 — 미션 스케줄러 (완료)
+
+- `task_scheduler.py`: cron 스타일 HH:MM + 요일 스케줄 실행
+  - HTTP REST API (port 8080): GET /api/status, /api/schedule; POST /api/run/{name}, /api/stop
+  - ROW_END 자동 완료, 60분 타임아웃 보호
+- `mission.yaml`: 아침 순찰(06:00), 방제(09:30 화·금), 착과(14:00), 귀환(18:00)
+
+### ✅ Phase 6 — Web HMI 전면 재작성 + D435i 카메라 연동 (완료, 2026-06-10)
+
+- `index.html` 완전 재작성 (2686→1228줄, 레거시 완전 제거)
+  - Row 1: Drive Status / Wheel Odometry / Safety Layer / Drive Control / 속도설정
+  - Row 2: Virtual Joystick (캔버스) + 열 추종 제어
+  - Row 3: Mission Scheduler 패널
+  - Row 4: JSON 프로그램 실행 패널 + 프로그램 로그
+  - 우측 1/3: 오도메트리 경로 맵 (Canvas 2D, 드래그·휠 줌·원점 재설정)
+- `bridge.py` RealSense D435i MJPEG 스트리밍 (port 5100/camera/stream, ~15fps)
+  - /camera/status, /camera/data (depth mm + IMU 가속도) 엔드포인트
+  - ThreadingHTTPServer — 동시 연결 지원
+
+### ✅ Phase A~C — JSON 프로그램 인터프리터 (완료)
+
+- `json_interpreter.py`: 비동기 AGV JSON 프로그램 실행 엔진
+  - **Phase A**: move / stop / wait / log
+  - **Phase B**: set / calc / inc / dec / if / while / repeat / label / goto / call / return / abort
+  - **Phase C**: read_sensor / wait_until — D435i depth, IMU, 엔코더, 장애물 상태 조건 분기
+- `editor.html`: JSON 프로그램 편집기 (AI 어시스턴트 Claude API 연동)
+- `/program/*` REST API: 저장·로드·실행·삭제
+
+### ✅ Phase D — I/O 확장 (완료, 2026-06-13)
+
+베이스보드 제작 사전 준비 — DI:8 / DO:8 / AI:4 / PWM:4
+
+#### STM32 펌웨어
+
+| 파일 | 내용 |
+|------|------|
+| `Appli/Core/Inc/io_handler.h` | I/O 드라이버 헤더 (핀 배치, 상수, API) |
+| `Appli/Core/Src/io_handler.c` | DO(GPIOF PF0-7), DI(GPIOD PD0-7 Pull-up), TIM3 PWM 20kHz(PC6-9), ADC1 DMA Circular(PA3-6) |
+| `Appli/Core/Inc/uart_protocol.h` | IO_SET(0x33) / IO_STATUS(0x34) 패킷 구조체 추가 |
+| `Appli/Core/Src/uart_protocol.c` | 0x33 수신 핸들러 + UartProto_SendIoStatus() 구현 |
+| `Appli/Core/Src/main.c` | IO_Init() 호출 + 200ms 주기 IO_STATUS 자동 송신 |
+| `Appli/CMakeLists.txt` | io_handler.c, stm32h7xx_hal_adc.c/ex 추가 |
+
+**핀 배치**
+
+| 기능 | 핀 | 비고 |
+|------|----|------|
+| DO 0~7 | PF0–PF7 | Push-pull 출력, 전용 포트 |
+| DI 0~7 | PD0–PD7 | Pull-up 입력 (옵토커플러 Active LOW) |
+| AI 0~3 | PA3–PA6 | ADC1 CH15/18/19/3, 12-bit, DMA Circular |
+| PWM 0~3 | PC6–PC9 | TIM3 CH1~4, 20kHz, 0.1% 분해능 |
+
+**빌드 결과**: FLASH 134KB/1920KB (6.86%), RAM 256KB/448KB (56.00%)
+
+#### PC 측 (bridge + HMI)
+
+| 파일 | 추가 내용 |
+|------|-----------|
+| `PC_GUI/bridge/packet_defs.py` | `PKT_IO_SET=0x33`, `PKT_IO_STATUS=0x34`, `build_io_set()`, `IoStatus`, `parse_io_status()` |
+| `PC_GUI/bridge/bridge.py` | 0x34 수신 → 인터프리터 센서 갱신, `POST /io/set`, `GET /io/status`, WS 신규 클라이언트에 캐시 전송 |
+| `PC_GUI/bridge/json_interpreter.py` | `do_set` / `pwm_set` / `read_io` 명령 추가, DI/AI 센서 스토어 연결, `send_io_set` 콜백 |
+| `PC_GUI/bridge/index.html` | 상단바 📟 I/O 버튼, I/O 모달 (DI LED 8개, DO 토글 8개, AI 바/전압 4채널, PWM 슬라이더 4채널) |
 
 ---
 

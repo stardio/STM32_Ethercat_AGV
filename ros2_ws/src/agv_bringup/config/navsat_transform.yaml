@@ -1,0 +1,42 @@
+# navsat_transform.yaml — GPS lat/lon → 로컬 ENU 좌표 변환
+#
+# navsat_transform_node (robot_localization)
+#
+# 입력:
+#   /gps/fix            sensor_msgs/NavSatFix   — U-blox NMEA 위치
+#   /imu/data           sensor_msgs/Imu         — D435i IMU (yaw)
+#   /odometry/filtered  nav_msgs/Odometry       — EKF 융합 결과
+#
+# 출력:
+#   /odometry/gps       nav_msgs/Odometry       — GPS → odom 프레임 x/y(m)
+#   /gps/filtered       sensor_msgs/NavSatFix   — 필터 결과 역변환 (디버그)
+
+navsat_transform_node:
+  ros__parameters:
+    frequency: 10.0
+    delay: 0.0
+
+    # 한국 중부 자기 편각: 약 -7.5° = -0.1309 rad
+    # 정확한 값: https://www.magnetic-declination.com/
+    # 현장 좌표 입력 후 수정할 것
+    magnetic_declination_radians: -0.1309
+
+    # GPS 안테나 장착 방향 오프셋 (로봇 전방 기준, 라디안)
+    # 안테나가 로봇 정중앙/전방 일직선이면 0.0
+    yaw_offset: 0.0
+
+    # AGV는 평지 이동 → 고도 무시
+    zero_altitude: true
+
+    # UTM 좌표계 TF 발행 (map_frame 기준 글로벌 위치, RTAB-Map 연동용)
+    broadcast_utm_transform: true
+    broadcast_utm_transform_as_parent_frame: false
+
+    # 필터 결과를 GPS 좌표(lat/lon)로 역변환하여 /gps/filtered 발행
+    publish_filtered_gps: true
+
+    # yaw는 IMU/오덤 우선 (GPS heading은 저속 구간에서 노이즈 큼)
+    use_odometry_yaw: true
+
+    # false = 첫 GPS fix를 자동으로 로컬 원점(datum)으로 설정
+    wait_for_datum: false

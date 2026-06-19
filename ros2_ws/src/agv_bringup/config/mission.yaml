@@ -1,0 +1,45 @@
+# mission.yaml — AGV 미션 스케줄 정의
+#
+# task_scheduler.py 가 이 파일을 읽어 자동 작업을 실행한다.
+# time   : HH:MM (24시간) — 매일 해당 시각에 실행
+# days   : 요일 목록 (0=월, 1=화, ..., 6=일), 생략 시 매일
+# task   : survey | spray | fruit_detect | return_home
+# speed  : 작업 속도 [m/s] — row_follower max_linear_mps 덮어씀
+# 변경 후 task_scheduler 노드를 재시작해야 반영됨.
+
+agv:
+  wheel_base:   0.60    # m — robot_config.h AGV_WHEEL_BASE_MM / 1000
+  wheel_radius: 0.15    # m — robot_config.h AGV_WHEEL_RADIUS_MM / 1000
+  max_speed:    0.40    # m/s — 안전 상한 (이 값 초과 요청은 클램프)
+  row_count:    12      # 과수원 총 열 수
+  row_spacing:  3.0     # m — 열 간격 (U턴 이동 거리)
+
+schedule:
+
+  - name: morning_survey
+    time: "06:00"
+    days: [0, 1, 2, 3, 4, 5, 6]   # 매일
+    task: survey
+    speed: 0.40
+    description: "아침 과수원 순찰"
+
+  - name: spray_morning
+    time: "09:30"
+    days: [1, 4]                   # 화·금
+    task: spray
+    speed: 0.25
+    description: "방제 작업 (화·금 오전)"
+
+  - name: fruit_monitoring
+    time: "14:00"
+    days: [0, 2, 4]                # 월·수·금
+    task: fruit_detect
+    speed: 0.20
+    save_images: true
+    description: "착과 상태 모니터링"
+
+  - name: evening_return
+    time: "18:00"
+    days: [0, 1, 2, 3, 4, 5, 6]   # 매일
+    task: return_home
+    description: "충전 스테이션 복귀"

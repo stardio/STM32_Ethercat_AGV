@@ -1,17 +1,17 @@
 /**
  * @file    ui_flash_storage.c
- * @brief   6-axis articulated robot — flash persistence implementation
+ * @brief   AGV wheel axis — flash persistence implementation
  *
  * Storage  : Bank 2 Sector 7  (FLASH_SETTINGS_ADDR = 0x081E0000)
  * Word size: 256 bits = 32 bytes  (STM32H753ZI HAL requirement)
  *
- * One RobotFlashData_t record (320 bytes = 10 flash words) covers all
- * six axes.  CRC32 is computed over the axis[] payload only.
+ * One RobotFlashData_t record (128 bytes = 4 flash words) covers all
+ * two wheel axes.  CRC32 is computed over the axis[] payload only.
  *
  * Write sequence
  *   1. Unlock flash
  *   2. Erase Sector 7 (128 KB)
- *   3. Program 10 × 32-byte words
+ *   3. Program 4 × 32-byte words
  *   4. Lock flash
  *   5. Invalidate D-cache, verify by memcmp
  */
@@ -25,7 +25,7 @@
 
 /* Build-time layout checks — fail fast if AxisParam_t is resized. */
 _Static_assert(sizeof(AxisParam_t)      == 48U,  "AxisParam_t size changed — update RobotFlashData_t._pad");
-_Static_assert(sizeof(RobotFlashData_t) == 320U, "RobotFlashData_t must be exactly 320 bytes (10 × 32B flash words)");
+_Static_assert(sizeof(RobotFlashData_t) == 128U, "RobotFlashData_t must be exactly 128 bytes (4 × 32B flash words)");
 _Static_assert((sizeof(RobotFlashData_t) % 32U) == 0U, "Flash layout must be a multiple of 32 bytes");
 
 /* ── Internal helpers ────────────────────────────────────────────────────── */

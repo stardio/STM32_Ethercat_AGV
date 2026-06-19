@@ -1,0 +1,50 @@
+# geofence.yaml — 가상 울타리(Geofence) 설정
+#
+# 진입 금지 구역을 지도 좌표계(map frame)에서 다각형으로 정의한다.
+# obstacle_classifier 가 /odometry/filtered 를 통해 로봇 위치를 확인하고
+# 다각형 내부 진입 시 /obstacle/action 을 해당 action으로 발행한다.
+#
+# 좌표계 : ROS2 map frame (RTAB-Map SLAM 맵 기준)
+# 단위   : 미터 [m]
+# action : FULL_STOP | WAIT | SLOW_STOP | SLOW_AVOID
+#
+# ── 첫 배포 시 설정 순서 ──────────────────────────────────────────────────────
+# 1. enabled: false 상태로 SLAM 맵핑 실행 (ros2 launch agv_bringup slam.launch.py)
+# 2. rviz2 에서 맵 좌표 확인 (토픽: /clicked_point)
+# 3. 아래 polygon 좌표를 실측값으로 수정
+# 4. enabled: true 로 변경 후 재시작
+
+geofence:
+  enabled: false   # 좌표 보정 전까지 false 유지
+
+  zones:
+
+    # ── 예시 1: 북측 수로 (절대 진입 금지) ──────────────────────────────
+    - name: "irrigation_ditch_north"
+      description: "북측 관개 수로"
+      action: FULL_STOP
+      polygon:   # 시계/반시계 방향 모두 허용, 최소 3꼭짓점
+        - [10.0,  5.0]
+        - [12.0,  5.0]
+        - [12.0, 25.0]
+        - [10.0, 25.0]
+
+    # ── 예시 2: 남쪽 농로 (일시 정지 후 통과) ───────────────────────────
+    - name: "road_crossing_south"
+      description: "남쪽 농로 교차 구역"
+      action: WAIT
+      polygon:
+        - [  0.0, -2.5]
+        - [ 30.0, -2.5]
+        - [ 30.0, -0.5]
+        - [  0.0, -0.5]
+
+    # ── 예시 3: 충전 스테이션 진입로 (서행) ─────────────────────────────
+    - name: "charging_approach"
+      description: "충전 스테이션 진입 구역"
+      action: SLOW_AVOID
+      polygon:
+        - [-2.0, -2.0]
+        - [ 2.0, -2.0]
+        - [ 2.0,  0.5]
+        - [-2.0,  0.5]

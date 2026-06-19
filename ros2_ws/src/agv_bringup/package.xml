@@ -12,6 +12,7 @@
   <depend>rtabmap_ros</depend>
   <depend>realsense2_camera</depend>
   <depend>robot_state_publisher</depend>
+  <depend>robot_localization</depend>
 
   <export>
     <build_type>ament_python</build_type>

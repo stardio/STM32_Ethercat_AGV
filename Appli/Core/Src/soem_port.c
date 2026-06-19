@@ -1,6 +1,6 @@
 /**
  * @file    soem_port.c
- * @brief   3-axis EtherCAT CSP master implementation
+ * @brief   AGV EtherCAT CSV master implementation (2-wheel differential drive)
  *
  * Architecture
  * ────────────
@@ -121,7 +121,7 @@ typedef struct {
     /* SDO stability gate counter */
     uint16_t stable_cycles;
 
-    /* Interpolator active flag — suppresses soft-limit clamp in update_target */
+    /* Bypass flag — suppresses soft-limit clamp when target is set directly */
     volatile uint8_t interp_active;
 
     /* External fault-reset request (set by DefaultTask, cleared by EtherCAT_Task) */
@@ -320,7 +320,7 @@ static void soem_update_target_output(uint8_t ax)
     if (err_actual < 0) err_actual = -err_actual;
 
     if (err_actual <= (int64_t)ROBOT_TARGET_TOLERANCE_HW) {
-        /* During interpolation skip soft-limit clamp so arcs aren't cut short */
+        /* Skip soft-limit clamp when target was set via direct bypass */
         g_rt[ax].target_hw_out = g_rt[ax].interp_active
                                  ? cmd
                                  : axis_clamp_hw(ax, cmd);
@@ -545,11 +545,12 @@ static void soem_cia402_step(uint8_t ax)
     if (g_rt[ax].rxpdo == NULL || g_rt[ax].txpdo == NULL) return;
 
     uint16_t sw  = g_rt[ax].txpdo->statusword;
+    uint16_t sw_log = (uint16_t)(sw & (uint16_t)~0x0400U); /* ignore volatile TargetReached bit */
     uint16_t cw  = g_rt[ax].last_controlword;
 
     /* Log statusword transitions */
-    if (sw != g_rt[ax].last_statusword) {
-        g_rt[ax].last_statusword = sw;
+    if (sw_log != g_rt[ax].last_statusword) {
+        g_rt[ax].last_statusword = sw_log;
         soem_logf("[Ax%s] SW=0x%04X", robot_axis_name(ax), sw);
         Cia402State_t st = decode_cia402(sw);
         if ((uint8_t)st != g_rt[ax].last_cia402_state) {
@@ -828,7 +829,7 @@ void SOEM_PortInit(void)
     }
     if (ecx_init(&soem_context, SOEM_IFNAME) > 0) {
         g_initialized = 1U;
-        soem_log("SOEM: init ok (6-axis articulated)");
+        soem_log("SOEM: init ok (AGV 2-wheel differential drive)");
     } else {
         soem_log("SOEM: init failed");
     }
@@ -1092,8 +1093,8 @@ void SOEM_SetInterpolatedTarget(AxisId_t ax, int32_t hw)
 {
     if (!axis_valid((uint8_t)ax)) return;
     /* Bypass the ramp generator: set both target and output to the same
-     * interpolated value.  soem_update_target_output() will see diff=0
-     * and pass the value straight through to the PDO.               */
+     * value so soem_update_target_output() sees diff=0 and passes it
+     * straight through to the PDO.                                  */
     g_rt[ax].interp_active = 1U;
     g_rt[ax].target_hw     = hw;
     g_rt[ax].target_hw_out = hw;

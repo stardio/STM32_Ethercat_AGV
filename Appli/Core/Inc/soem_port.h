@@ -1,10 +1,10 @@
 /**
  * @file    soem_port.h
- * @brief   3-axis EtherCAT CSP master — public API
+ * @brief   AGV EtherCAT CSV master — public API (2-wheel differential drive)
  *
- * All motion functions take an AxisId_t (AXIS_J1/Y/Z) parameter.
- * The single-axis legacy names are retained as axis-0 wrappers
- * for backward compatibility with existing main.c code until full migration.
+ * All motion functions take an AxisId_t parameter:
+ *   AXIS_J1 — left wheel
+ *   AXIS_J2 — right wheel
  *
  * Thread safety:
  *   EtherCAT_Task (1ms, Realtime priority) : calls SOEM_PeriodicPoll()
@@ -79,7 +79,7 @@ uint8_t  SOEM_AllTargetsReached(void);
  * @brief  Force a CiA402 fault-reset cycle on the specified axis (or all).
  *         Clears fault_active and restarts the enable sequence from Shutdown.
  *         Safe to call from DefaultTask at any time; takes effect within 1 ms.
- * @param  ax  AxisId_t (AXIS_J1..AXIS_J6), or AXIS_ALL (0xFF) for all active axes.
+ * @param  ax  AxisId_t (AXIS_J1..AXIS_J2), or AXIS_ALL (0xFF) for all active axes.
  */
 void SOEM_FaultReset(AxisId_t ax);
 
@@ -102,12 +102,10 @@ void SOEM_SetTargetHw(AxisId_t ax, int32_t pos_hw);
 void SOEM_SetTargetDelta(AxisId_t ax, int32_t delta_user);
 
 /**
- * @brief  Set the next interpolated target for G01/G02/G03.
- *         Writes BOTH target_hw and target_hw_out to bypass the SOEM ramp
- *         generator.  Call once per axis per 1ms tick from Interp_Tick(),
- *         before SOEM_PeriodicPoll() executes.
- * @note   NOT clamped to soft limits (interpolator is responsible for
- *         planning within the workspace envelope).
+ * @brief  Set target position directly, bypassing the SOEM ramp generator.
+ *         Writes BOTH target_hw and target_hw_out so the PDO sees the value
+ *         immediately (diff=0 → no ramp step taken).
+ * @note   NOT clamped to soft limits.
  */
 void SOEM_SetInterpolatedTarget(AxisId_t ax, int32_t hw);
 

@@ -10,19 +10,11 @@ set(APPLI_SOURCES
     Core/Src/stm32h7xx_it.c
     Core/Src/system_stm32h7xx.c
     Core/Src/freertos.c
-    Core/Src/settings_persistence.c
     Core/Src/ui_flash_storage.c
     Core/Src/soem_port.c
     Core/Src/axis_config.c
-    Core/Src/interpolator.c
     Core/Src/uart_protocol.c
-    Core/Src/interlock_manager.c
-    Core/Src/press_state_machine.c
-    Core/Src/recipe_manager.c
-    Core/Src/cycle_logger.c
-    Core/Src/alarm_manager.c
-    Core/Src/user_auth.c
-    Core/Src/maint_counter.c
+    Core/Src/io_handler.c
     Core/Src/syscalls.c
     ${CMAKE_CURRENT_SOURCE_DIR}/startup_stm32h753xx.s
 )
@@ -44,6 +36,8 @@ set(HAL_SOURCES
     ${HAL_DIR}/stm32h7xx_hal_pwr_ex.c
     ${HAL_DIR}/stm32h7xx_hal_rcc.c
     ${HAL_DIR}/stm32h7xx_hal_rcc_ex.c
+    ${HAL_DIR}/stm32h7xx_hal_adc.c
+    ${HAL_DIR}/stm32h7xx_hal_adc_ex.c
     ${HAL_DIR}/stm32h7xx_hal_tim.c
     ${HAL_DIR}/stm32h7xx_hal_tim_ex.c
     ${HAL_DIR}/stm32h7xx_hal_uart.c

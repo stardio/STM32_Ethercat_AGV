@@ -6,7 +6,7 @@ hardware.launch.py — STM32 브릿지 노드 + URDF robot_state_publisher
   ros2 launch agv_bringup hardware.launch.py ws_url:=ws://192.168.1.10:8765
 """
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
+from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, TimerAction
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
 from launch_ros.actions import Node
@@ -44,6 +44,28 @@ def generate_launch_description():
         output='screen',
     )
 
+    gps_port = LaunchConfiguration('gps_port', default='/dev/gps')
+    gps_baud = LaunchConfiguration('gps_baud', default='38400')
+
+    # GPS 드라이버 (하드웨어 레이어 — EKF/navsat 없음, 다른 launch에서 추가)
+    gps_config = Node(
+        package='agv_bringup',
+        executable='gps_config',
+        name='gps_config',
+        output='screen',
+        parameters=[{'port': gps_port, 'baud': gps_baud}],
+    )
+    gps_driver = TimerAction(
+        period=4.0,
+        actions=[Node(
+            package='agv_bringup',
+            executable='gps_driver_node',
+            name='gps_driver',
+            output='screen',
+            parameters=[{'port': gps_port, 'baud': gps_baud, 'frame_id': 'gps_link'}],
+        )],
+    )
+
     return LaunchDescription([
         DeclareLaunchArgument('ws_url',       default_value='ws://localhost:8765',
                               description='bridge.py WebSocket URL'),
@@ -52,7 +74,11 @@ def generate_launch_description():
         DeclareLaunchArgument('camera_x',     default_value='0.25'),
         DeclareLaunchArgument('camera_z',     default_value='0.30'),
         DeclareLaunchArgument('camera_pitch', default_value='0.0'),
+        DeclareLaunchArgument('gps_port',     default_value='/dev/gps'),
+        DeclareLaunchArgument('gps_baud',     default_value='38400'),
 
         description_launch,
         bridge_node,
+        gps_config,
+        gps_driver,
     ])

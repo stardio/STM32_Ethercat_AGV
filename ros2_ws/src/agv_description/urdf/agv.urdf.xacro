@@ -108,6 +108,22 @@
     <axis xyz="0 1 0"/>
   </joint>
 
+  <!-- ── GPS antenna link (U-blox receiver) ───────────────────────────── -->
+  <!--
+    gps_link: GPS 안테나 위치.
+    navsat_transform_node의 frame_id 와 일치해야 함 (gps_driver_node: frame_id='gps_link').
+    xyz: 로봇 중심 기준 오프셋 (현장 실측 후 수정)
+      x=0.0  — 전후 중앙
+      y=0.0  — 좌우 중앙
+      z=0.35 — base_height(0.20) + 여유 0.15m (안테나 상단)
+  -->
+  <link name="gps_link"/>
+  <joint name="gps_joint" type="fixed">
+    <parent link="base_link"/>
+    <child  link="gps_link"/>
+    <origin xyz="0.0 0.0 0.35" rpy="0 0 0"/>
+  </joint>
+
   <!-- ── Camera link (Intel RealSense D435/D455) ───────────────────────── -->
   <!--
     realsense2_camera will publish the optical frames as children of camera_link.

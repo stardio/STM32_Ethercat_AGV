@@ -18,7 +18,12 @@ setup(
     zip_safe=True,
     entry_points={
         'console_scripts': [
-            'stm32_bridge_node = agv_bringup.stm32_bridge_node:main',
+            'stm32_bridge_node    = agv_bringup.stm32_bridge_node:main',
+            'row_follower         = agv_bringup.row_follower:main',
+            'obstacle_classifier  = agv_bringup.obstacle_classifier:main',
+            'task_scheduler       = agv_bringup.task_scheduler:main',
+            'gps_config           = agv_bringup.gps_config:main',
+            'gps_driver_node      = agv_bringup.gps_driver_node:main',
         ],
     },
 )

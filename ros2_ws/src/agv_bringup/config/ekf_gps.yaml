@@ -1,0 +1,68 @@
+# ekf_gps.yaml — GPS 융합 EKF (gps.launch.py 전용)
+#
+# 입력:
+#   /odom           — STM32 바퀴 엔코더 (즉시)
+#   /odometry/gps   — navsat_transform ENU 좌표 (t≈8s 이후, 자동 연결)
+# 출력:
+#   /odometry/filtered — odom+GPS 융합 위치 (navsat_transform → 이 EKF로 다시 공급)
+#
+# 아키텍처:
+#   /odom → EKF → /odometry/filtered → navsat_transform → /odometry/gps → EKF (피드백)
+#
+# row_follow.launch의 ekf_filter_node와 이름 분리 (ekf_gps_node) → 충돌 없음
+# publish_tf: false — TF는 Nav2/RTAB-Map이 관리
+
+ekf_gps_node:
+  ros__parameters:
+    frequency:         20.0
+    sensor_timeout:     0.5
+    two_d_mode:        true
+    publish_tf:        false
+    print_diagnostics: false
+
+    map_frame:         map
+    odom_frame:        odom
+    base_link_frame:   base_link
+    world_frame:       odom
+
+    # ── 바퀴 엔코더 오도메트리 ──────────────────────────────────────────────
+    odom0: /odom
+    odom0_config: [true,  true,  false,
+                   false, false, true,
+                   true,  false, false,
+                   false, false, true,
+                   false, false, false]
+    odom0_differential: false
+    odom0_relative:     false
+    odom0_queue_size:   10
+
+    # ── GPS ENU 좌표 (navsat_transform 출력, t≈8s 이후 자동 연결) ──────────
+    # x, y 위치만 사용 (GPS 속도는 저속 구간에서 노이즈가 큼)
+    # differential=false: ENU 절대 위치로 사용
+    odom1: /odometry/gps
+    odom1_config: [true,  true,  false,
+                   false, false, false,
+                   false, false, false,
+                   false, false, false,
+                   false, false, false]
+    odom1_differential: false
+    odom1_relative:     false
+    odom1_queue_size:   10
+    odom1_nodelay:      false
+
+    process_noise_covariance:
+      [ 0.05,  0.0,   0.0,   0.0,   0.0,   0.0,   0.0,    0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,
+        0.0,   0.05,  0.0,   0.0,   0.0,   0.0,   0.0,    0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,
+        0.0,   0.0,   0.06,  0.0,   0.0,   0.0,   0.0,    0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,
+        0.0,   0.0,   0.0,   0.03,  0.0,   0.0,   0.0,    0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,
+        0.0,   0.0,   0.0,   0.0,   0.03,  0.0,   0.0,    0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,
+        0.0,   0.0,   0.0,   0.0,   0.0,   0.06,  0.0,    0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,
+        0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.025,  0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,
+        0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,    0.025, 0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,
+        0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,    0.0,   0.04,  0.0,   0.0,   0.0,   0.0,   0.0,   0.0,
+        0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,    0.0,   0.0,   0.01,  0.0,   0.0,   0.0,   0.0,   0.0,
+        0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,    0.0,   0.0,   0.0,   0.01,  0.0,   0.0,   0.0,   0.0,
+        0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,    0.0,   0.0,   0.0,   0.0,   0.02,  0.0,   0.0,   0.0,
+        0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,    0.0,   0.0,   0.0,   0.0,   0.0,   0.01,  0.0,   0.0,
+        0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,    0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.01,  0.0,
+        0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,    0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.015 ]

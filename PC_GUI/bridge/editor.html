@@ -1,0 +1,1525 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>JSON 프로그램 편집기</title>
+<style>
+:root {
+  --bg:     #0d1117;
+  --panel:  #161b22;
+  --panel2: #1c2128;
+  --border: #30363d;
+  --accent: #58a6ff;
+  --green:  #3fb950;
+  --yellow: #d29922;
+  --red:    #f85149;
+  --text:   #e6edf3;
+  --muted:  #8b949e;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; background: var(--bg); color: var(--text);
+  font-family: 'Segoe UI', system-ui, sans-serif; font-size: 14px; overflow: hidden; }
+body { display: flex; flex-direction: column; }
+
+/* ── TOP BAR ── */
+#topbar {
+  flex-shrink: 0; height: 44px; display: flex; align-items: center; gap: 8px;
+  padding: 0 14px; background: var(--panel); border-bottom: 1px solid var(--border);
+}
+#topbar .title { font-size: 16px; font-weight: 700; color: var(--accent); white-space: nowrap; }
+.spacer { flex: 1; }
+.tbtn {
+  padding: 4px 12px; border-radius: 4px; border: 1px solid var(--border);
+  background: var(--panel2); color: var(--text); font-size: 13px; font-weight: 600;
+  cursor: pointer; white-space: nowrap; transition: border-color 0.15s;
+}
+.tbtn:hover { border-color: var(--accent); color: var(--accent); }
+.abtn { padding: 4px 14px; border-radius: 4px; font-size: 13px; font-weight: 700; cursor: pointer; border: 1px solid; }
+.abtn.green { background:#132313; border-color:var(--green); color:var(--green); }
+.abtn.green:hover { background:#1a3018; }
+.abtn.red   { background:#2a1313; border-color:var(--red);   color:var(--red); }
+.abtn.red:hover   { background:#3a1818; }
+.shortcut-hint {
+  font-size: 11px; color: var(--muted);
+  display: flex; gap: 10px; flex-wrap: wrap;
+}
+.shortcut-hint kbd {
+  background: var(--panel2); border: 1px solid var(--border); border-radius: 3px;
+  padding: 1px 5px; font-family: monospace; font-size: 11px; color: var(--text);
+}
+
+/* ── FIND BAR ── */
+#find-bar {
+  display: none; flex-shrink: 0; height: 38px; background: var(--panel2);
+  border-bottom: 1px solid var(--border); padding: 0 14px;
+  align-items: center; gap: 8px;
+}
+#find-bar.open { display: flex; }
+#find-input {
+  padding: 4px 8px; background: var(--bg); border: 1px solid var(--border);
+  border-radius: 4px; color: var(--text); font-size: 13px; width: 240px; outline: none;
+}
+#find-input:focus { border-color: var(--accent); }
+#find-count { font-size: 12px; color: var(--muted); min-width: 60px; }
+
+/* ── MAIN LAYOUT ── */
+#layout {
+  flex: 1; display: flex; overflow: hidden;
+}
+
+/* ── LEFT SIDEBAR ── */
+#sidebar {
+  width: 200px; flex-shrink: 0; display: flex; flex-direction: column;
+  border-right: 1px solid var(--border); background: var(--panel);
+}
+#sidebar-header {
+  padding: 8px; display: flex; gap: 4px; flex-wrap: wrap;
+  border-bottom: 1px solid var(--border); background: var(--panel2);
+}
+#file-list { flex: 1; overflow-y: auto; }
+.file-item {
+  padding: 6px 10px; cursor: pointer; font-size: 12.5px;
+  font-family: 'Courier New', monospace; color: var(--muted);
+  border-bottom: 1px solid var(--border); white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis; user-select: none;
+  display: flex; align-items: center; gap: 4px;
+}
+.file-item:hover  { background: var(--panel2); color: var(--text); }
+.file-item.active {
+  background: #0d2137; color: var(--accent);
+  border-left: 3px solid var(--accent); padding-left: 7px;
+}
+.file-item .fi-del {
+  margin-left: auto; opacity: 0; font-size: 11px; padding: 1px 5px;
+  border: none; background: none; color: var(--red); cursor: pointer; border-radius: 3px;
+}
+.file-item:hover .fi-del { opacity: 1; }
+.file-item .fi-del:hover { background: #2a1313; }
+#sidebar-footer {
+  padding: 8px; border-top: 1px solid var(--border); background: var(--panel2);
+  display: flex; gap: 4px; flex-wrap: wrap;
+}
+
+/* ── EDITOR PANE ── */
+#editor-pane {
+  flex: 1; display: flex; flex-direction: column; overflow: hidden; min-width: 0;
+}
+#editor-toolbar {
+  flex-shrink: 0; display: flex; align-items: center; gap: 6px; padding: 6px 10px;
+  background: var(--panel2); border-bottom: 1px solid var(--border); flex-wrap: wrap;
+}
+#prog-edit-name {
+  font-family: 'Courier New', monospace; font-size: 13px; color: var(--accent);
+  max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+#prog-dirty-badge { display:none; color:var(--yellow); font-size:12px; white-space:nowrap; }
+.valid-badge { padding: 2px 8px; border-radius: 10px; font-size: 12px; font-weight: 700; white-space:nowrap; }
+.valid-ok  { background:#0d200d; color:var(--green);  border:1px solid var(--green); }
+.valid-err { background:#200d0d; color:var(--red);    border:1px solid var(--red);   }
+.valid-neu { background:var(--panel); color:var(--muted); border:1px solid var(--border); }
+#err-msg { font-size:11px; color:var(--red); font-family:'Courier New',monospace;
+           max-width:300px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+#linecount { font-size:11px; color:var(--muted); }
+
+.editor-container {
+  flex: 1; display: flex; overflow: hidden;
+  font-family: 'Courier New', Consolas, monospace; font-size: 13px; line-height: 1.65;
+}
+#line-nums {
+  width: 46px; padding: 10px 6px 10px 4px; text-align: right;
+  background: #161b22; color: #484f58;
+  border-right: 1px solid var(--border); overflow: hidden; flex-shrink: 0;
+  user-select: none; white-space: pre; font-family: inherit; font-size: inherit;
+  line-height: inherit;
+}
+#editor {
+  flex: 1; padding: 10px 14px; background: var(--bg); color: #cdd9e5;
+  border: none; outline: none; resize: none; tab-size: 2; line-height: 1.65;
+  font-family: inherit; font-size: inherit; overflow-y: scroll;
+  caret-color: var(--accent);
+}
+#editor::selection { background: #264f78; }
+
+/* ── RIGHT STATUS PANE ── */
+#status-pane {
+  width: 270px; flex-shrink: 0; display: flex; flex-direction: column;
+  border-left: 1px solid var(--border); background: var(--panel);
+  overflow: hidden;
+}
+
+/* ── PANEL TABS ── */
+.sp-tab-bar {
+  flex-shrink: 0; display: flex; background: var(--panel2);
+  border-bottom: 1px solid var(--border);
+}
+.sp-tab {
+  flex: 1; padding: 7px 2px; font-size: 11.5px; font-weight: 700; cursor: pointer;
+  background: transparent; border: none; color: var(--muted); white-space: nowrap;
+  border-bottom: 2px solid transparent; transition: color 0.15s, border-color 0.15s;
+}
+.sp-tab.active  { color: var(--accent); border-bottom-color: var(--accent); }
+.sp-tab:hover:not(.active) { color: var(--text); }
+
+#sp-exec   { flex: 1; display: flex; flex-direction: column; overflow-y: auto; }
+#sp-claude { flex: 1; display: none; flex-direction: column; overflow: hidden; }
+
+/* ── CLAUDE CHAT ── */
+.chat-msg { padding: 6px 8px; border-radius: 5px; margin-bottom: 6px; font-size: 12px; line-height: 1.65; word-break: break-word; }
+.chat-user { background: #0d2137; border-left: 3px solid var(--accent); color: var(--text); }
+.chat-asst { background: var(--panel2); border-left: 3px solid var(--green); color: var(--text); }
+.chat-asst code { background: #0d1117; padding: 1px 4px; border-radius: 3px; font-family: 'Courier New',monospace; font-size: 11px; }
+.chat-asst strong { color: var(--accent); }
+.code-block {
+  background: #0d1117; border: 1px solid var(--border); border-radius: 5px;
+  padding: 7px 9px; margin: 5px 0; overflow-x: auto;
+  font-family: 'Courier New',monospace; font-size: 11.5px; color: #cdd9e5; white-space: pre-wrap;
+}
+.apply-btn {
+  display: block; width: 100%; padding: 4px; margin-top: 4px;
+  background: #132313; border: 1px solid var(--green); border-radius: 4px;
+  color: var(--green); font-size: 11.5px; font-weight: 700; cursor: pointer;
+}
+.apply-btn:hover { background: #1a3018; }
+#claude-key-setup {
+  flex-shrink: 0; padding: 9px 10px; border-bottom: 1px solid var(--border);
+  background: #1a1200;
+}
+#claude-key-input {
+  width: 100%; padding: 5px 7px; background: var(--bg); border: 1px solid var(--yellow);
+  border-radius: 4px; color: var(--text); font-size: 12px; font-family: monospace;
+  outline: none; margin-top: 4px;
+}
+#claude-key-input:focus { border-color: var(--accent); }
+.qp-btn {
+  padding: 2px 7px; font-size: 11px; border: 1px solid var(--border);
+  background: var(--panel); border-radius: 3px; color: var(--muted); cursor: pointer;
+  white-space: nowrap;
+}
+.qp-btn:hover { border-color: var(--accent); color: var(--accent); }
+.sp-section { padding: 10px 12px; border-bottom: 1px solid var(--border); }
+.sp-title {
+  font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px;
+  color: var(--muted); margin-bottom: 8px;
+}
+#prog-state-badge {
+  padding: 3px 10px; border-radius: 10px; font-size: 12px; font-weight: 700;
+  border: 1px solid var(--muted); background: #1a1400; color: var(--muted);
+}
+.progress-wrap {
+  height: 5px; background: var(--border); border-radius: 3px;
+  overflow: hidden; margin: 8px 0 4px;
+}
+#prog-progress-fill {
+  height: 100%; width: 0%; background: var(--green);
+  transition: width 0.3s ease; border-radius: 3px;
+}
+#prog-line-info { font-size: 12px; color: var(--muted); font-family: 'Courier New',monospace; }
+#prog-cmd-lbl   { font-size: 12px; color: var(--yellow); font-family: 'Courier New',monospace; margin-top:3px; }
+#prog-time-lbl  { font-size: 12px; color: var(--muted); margin-top:2px; }
+.run-btns { display:flex; gap:6px; margin-top:8px; }
+
+.kv-row { display:flex; align-items:baseline; gap:4px; padding:2px 0; font-size:12px; font-family:'Courier New',monospace; }
+.kv-k   { color:var(--muted); flex-shrink:0; min-width:90px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.kv-v   { color:var(--text); flex:1; text-align:right; }
+.kv-empty { font-size:11px; color:var(--muted); font-style:italic; }
+
+/* ── DEBUG PANEL ── */
+#sp-debug { flex: 1; display: none; flex-direction: column; overflow: hidden; }
+.debug-section { padding: 7px 10px; border-bottom: 1px solid var(--border); flex-shrink: 0; }
+.trace-tbl {
+  width: 100%; border-collapse: collapse;
+  font-size: 11px; font-family: 'Courier New', monospace;
+}
+.trace-tbl th {
+  position: sticky; top: 0; background: var(--panel2); z-index: 1;
+  padding: 4px 3px; border-bottom: 1px solid var(--border);
+  font-size: 10px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: 0.5px; color: var(--muted); text-align: left;
+}
+.trace-tbl td { padding: 2px 3px; border-bottom: 1px solid #21262d; vertical-align: top; }
+.trace-tbl td.td-cmd { color: var(--accent); max-width: 72px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.trace-tbl td.td-delta { color: var(--text); font-size: 10px; word-break: break-all; }
+.trace-row-err  { background: #200d0d; }
+.trace-row-warn { background: #1a1400; }
+#debug-ai-result {
+  display: none; flex-shrink: 0; overflow-y: auto; max-height: 230px;
+  border-top: 2px solid var(--accent);
+}
+.dai-section { padding: 7px 10px; border-bottom: 1px solid var(--border); }
+
+/* ── LOG POPUP ── */
+#log-popup {
+  display: none; position: fixed; bottom: 10px; right: 10px;
+  width: 520px; height: 210px; z-index: 500;
+  background: var(--panel); border: 1px solid var(--border);
+  border-radius: 6px; box-shadow: 0 8px 32px rgba(0,0,0,0.65);
+  flex-direction: column; overflow: hidden;
+  resize: both; min-width: 280px; min-height: 110px;
+}
+#log-popup.open { display: flex; }
+#log-popup-hdr {
+  flex-shrink: 0; padding: 5px 10px; background: var(--panel2);
+  display: flex; align-items: center; gap: 6px;
+  font-size: 12px; font-weight: 700; border-bottom: 1px solid var(--border);
+  cursor: move; user-select: none;
+}
+#log-popup-content {
+  flex: 1; overflow-y: auto; padding: 5px 12px;
+  font-size: 12px; font-family: 'Courier New', monospace;
+  color: var(--muted); line-height: 1.5;
+}
+</style>
+</head>
+<body>
+
+<!-- ── TOP BAR ── -->
+<div id="topbar">
+  <button class="tbtn" onclick="goHMI()" style="border-color:var(--accent);color:var(--accent);">← HMI</button>
+  <span class="title">JSON 프로그램 편집기</span>
+  <div class="spacer"></div>
+  <button class="tbtn" onclick="toggleLog()" title="실행 로그 팝업" style="font-size:12px;padding:3px 9px;">📋 로그</button>
+  <div class="shortcut-hint">
+    <span><kbd>Ctrl+S</kbd> 저장</span>
+    <span><kbd>Ctrl+R</kbd> 실행</span>
+    <span><kbd>Ctrl+N</kbd> 새 파일</span>
+    <span><kbd>Ctrl+D</kbd> 복사</span>
+    <span><kbd>Ctrl+F</kbd> 찾기</span>
+  </div>
+</div>
+
+<!-- ── FIND BAR ── -->
+<div id="find-bar">
+  <span style="font-size:12px;color:var(--muted);">찾기</span>
+  <input id="find-input" type="text" placeholder="검색어 입력…" spellcheck="false">
+  <span id="find-count" class="kv-empty">—</span>
+  <button class="tbtn" onclick="findStep(false)" style="padding:3px 8px;font-size:12px;">▲ 이전</button>
+  <button class="tbtn" onclick="findStep(true)"  style="padding:3px 8px;font-size:12px;">▼ 다음</button>
+  <button class="tbtn" onclick="closeFind()"     style="padding:3px 8px;font-size:12px;">✕</button>
+</div>
+
+<!-- ── MAIN LAYOUT ── -->
+<div id="layout">
+
+  <!-- ── LEFT: 파일 사이드바 ── -->
+  <div id="sidebar">
+    <div id="sidebar-header">
+      <button class="tbtn" onclick="progNew()"    style="font-size:12px;padding:3px 8px;flex:1;">+ 새 파일</button>
+      <button class="tbtn" onclick="importFile()" style="font-size:12px;padding:3px 8px;"
+              title="JSON 파일 가져오기">📥</button>
+      <button class="tbtn" onclick="progRefreshList()" style="font-size:12px;padding:3px 6px;"
+              title="목록 새로고침">↺</button>
+    </div>
+
+    <div id="file-list"></div>
+
+    <div id="sidebar-footer">
+      <button class="tbtn" onclick="exportFile()" style="font-size:12px;padding:3px 8px;flex:1;"
+              title="현재 파일 다운로드">📤 내보내기</button>
+      <button class="tbtn" onclick="progRename()" style="font-size:12px;padding:3px 8px;"
+              title="이름 바꾸기">✏</button>
+    </div>
+  </div>
+
+  <!-- ── CENTER: 에디터 ── -->
+  <div id="editor-pane">
+
+    <!-- 툴바 -->
+    <div id="editor-toolbar">
+      <span id="prog-edit-name" style="color:var(--muted);">파일 없음</span>
+      <span id="prog-dirty-badge">● 수정됨</span>
+      <button class="tbtn" onclick="progSave()"   style="font-size:12px;padding:3px 9px;">💾 저장</button>
+      <button class="tbtn" onclick="formatJSON()" style="font-size:12px;padding:3px 9px;">⬛ 포맷</button>
+      <button class="tbtn" onclick="progCopy()"   style="font-size:12px;padding:3px 9px;">📋 복사</button>
+      <span id="valid-badge" class="valid-badge valid-neu">—</span>
+      <span id="err-msg"></span>
+      <span id="linecount" style="margin-left:auto;">0 줄</span>
+    </div>
+
+    <!-- 라인번호 + 에디터 -->
+    <div class="editor-container">
+      <div id="line-nums">1</div>
+      <textarea id="editor" spellcheck="false" autocomplete="off"
+        placeholder='프로그램을 선택하거나 [+ 새 파일]을 클릭하세요.&#10;&#10;JSON 편집기 단축키:&#10;  Ctrl+S   저장&#10;  Ctrl+R   실행 (저장 후)&#10;  Ctrl+N   새 파일&#10;  Ctrl+D   현재 파일 복사&#10;  Ctrl+F   찾기&#10;  Tab      들여쓰기 (2칸)'></textarea>
+    </div>
+
+  </div>
+
+  <!-- ── RIGHT: 실행 상태 / Claude AI ── -->
+  <div id="status-pane">
+
+    <!-- 탭 바 -->
+    <div class="sp-tab-bar">
+      <button class="sp-tab active" id="tab-exec"   onclick="switchTab('exec')">▶ 실행</button>
+      <button class="sp-tab"        id="tab-claude" onclick="switchTab('claude')">🤖 Claude</button>
+      <button class="sp-tab"        id="tab-debug"  onclick="switchTab('debug')">🐛 디버그</button>
+    </div>
+
+    <!-- ── 실행 탭 ── -->
+    <div id="sp-exec">
+
+      <!-- 실행 제어 -->
+      <div class="sp-section">
+        <div class="sp-title">실행 제어</div>
+        <div style="display:flex;align-items:center;gap:8px;">
+          <span id="prog-state-badge">IDLE</span>
+          <span id="prog-time-lbl" style="font-size:11px;color:var(--muted);"></span>
+        </div>
+        <div class="progress-wrap">
+          <div id="prog-progress-fill"></div>
+        </div>
+        <div id="prog-line-info" class="kv-empty" style="font-size:11px;">—</div>
+        <div id="prog-cmd-lbl"></div>
+        <div class="run-btns">
+          <button class="abtn green" onclick="progRun()">▶ 실행</button>
+          <button class="abtn red"   onclick="progStop()">■ 정지</button>
+        </div>
+      </div>
+
+      <!-- 변수 -->
+      <div class="sp-section">
+        <div class="sp-title">변수 <span id="var-prog-name" style="font-size:10px;color:var(--muted);text-transform:none;font-weight:400;"></span></div>
+        <div id="var-table"><div class="kv-empty">(실행 시 표시)</div></div>
+      </div>
+
+      <!-- 센서 -->
+      <div class="sp-section">
+        <div class="sp-title">센서 <span id="sensor-update-ts" style="font-size:10px;color:var(--muted);text-transform:none;font-weight:400;"></span></div>
+        <div id="sensor-table"><div class="kv-empty">bridge 연결 대기…</div></div>
+      </div>
+
+    </div><!-- /#sp-exec -->
+
+    <!-- ── Claude AI 탭 ── -->
+    <div id="sp-claude">
+
+      <!-- API 키 설정 (미설정 시) -->
+      <div id="claude-key-setup">
+        <div style="font-size:11px;color:var(--yellow);font-weight:700;">⚠ Anthropic API 키 미설정</div>
+        <input id="claude-key-input" type="password" placeholder="sk-ant-api03-…" autocomplete="off">
+        <div style="display:flex;gap:4px;margin-top:5px;align-items:center;">
+          <button class="tbtn" onclick="claudeSaveKey()" style="flex:1;font-size:12px;padding:3px 6px;">저장</button>
+          <span style="font-size:11px;color:var(--muted);">console.anthropic.com 에서 발급</span>
+        </div>
+      </div>
+
+      <!-- 모델 선택 + 파일 포함 옵션 -->
+      <div style="flex-shrink:0;padding:6px 8px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:6px;">
+        <select id="claude-model-sel"
+          style="flex:1;background:var(--bg);border:1px solid var(--border);border-radius:4px;
+                 color:var(--text);font-size:12px;padding:3px 5px;outline:none;">
+          <option value="claude-haiku-4-5-20251001">Haiku (빠름)</option>
+          <option value="claude-sonnet-4-6">Sonnet (정확)</option>
+        </select>
+        <label style="font-size:11px;color:var(--muted);cursor:pointer;display:flex;align-items:center;gap:3px;"
+               title="현재 편집 파일을 Claude에게 전달">
+          <input type="checkbox" id="claude-ctx" checked style="margin:0;accent-color:var(--accent);">
+          파일 포함
+        </label>
+      </div>
+
+      <!-- 빠른 프롬프트 -->
+      <div style="flex-shrink:0;padding:5px 8px;border-bottom:1px solid var(--border);display:flex;flex-wrap:wrap;gap:4px;">
+        <button class="qp-btn" onclick="claudeQuick('이 프로그램을 한국어로 설명해줘')">📖 설명</button>
+        <button class="qp-btn" onclick="claudeQuick('이 프로그램의 오류나 문제점을 찾아줘')">🔍 검토</button>
+        <button class="qp-btn" onclick="claudeQuick('이 프로그램을 최적화해줘')">⚡ 최적화</button>
+        <button class="qp-btn" onclick="claudeQuick('장애물 회피 로직을 추가해줘 (dist_mm < 400 에서 정지)')">🚧 장애물 회피 추가</button>
+      </div>
+
+      <!-- 채팅 히스토리 -->
+      <div id="claude-chat" style="flex:1;overflow-y:auto;padding:8px;min-height:0;"></div>
+
+      <!-- 입력 영역 -->
+      <div style="flex-shrink:0;padding:6px 8px;border-top:1px solid var(--border);">
+        <textarea id="claude-input" rows="3" spellcheck="false"
+          style="width:100%;resize:none;background:var(--bg);border:1px solid var(--border);
+                 border-radius:4px;color:var(--text);font-size:12.5px;padding:5px 7px;
+                 font-family:inherit;outline:none;line-height:1.55;"
+          placeholder="질문을 입력하세요…&#10;(Enter 전송 / Shift+Enter 줄바꿈)"></textarea>
+        <div style="display:flex;gap:4px;margin-top:4px;">
+          <button class="tbtn" onclick="claudeClear()" style="padding:3px 8px;font-size:13px;" title="대화 초기화">🗑</button>
+          <button class="abtn green" onclick="claudeSend()" style="flex:1;font-size:13px;padding:4px;">▶ 전송</button>
+        </div>
+      </div>
+
+    </div><!-- /#sp-claude -->
+
+    <!-- ── 디버그 탭 ── -->
+    <div id="sp-debug">
+
+      <!-- 버튼 행 -->
+      <div class="debug-section" style="display:flex;gap:5px;flex-wrap:wrap;">
+        <button id="debug-run-btn" class="abtn green" onclick="debugRun()"
+                style="flex:1;font-size:12px;padding:4px 6px;">🐛 디버그 실행</button>
+        <button id="debug-ai-btn"
+                style="flex:1;font-size:12px;padding:4px 6px;background:#0d1a2e;
+                       border:1px solid var(--accent);border-radius:4px;color:var(--accent);cursor:pointer;"
+                onclick="aiDebug()">🤖 AI 분석</button>
+        <button id="debug-autofix-btn" class="tbtn"
+                style="width:100%;font-size:12px;padding:3px 6px;margin-top:2px;"
+                onclick="aiAutoFix(3)">🔄 AI 자동수정 (최대 3회)</button>
+      </div>
+
+      <!-- 메모 입력 -->
+      <div class="debug-section" style="padding:5px 10px;">
+        <input id="debug-user-note" type="text" placeholder="오류 메모 (AI에게 전달, 선택)…"
+          style="width:100%;background:var(--bg);border:1px solid var(--border);border-radius:4px;
+                 color:var(--text);font-size:11px;padding:3px 7px;outline:none;font-family:inherit;box-sizing:border-box;">
+      </div>
+
+      <!-- 트레이스 헤더 -->
+      <div class="debug-section" style="padding:4px 10px;">
+        <div class="sp-title" style="margin-bottom:0;">
+          트레이스
+          <span id="debug-trace-count" style="font-size:10px;color:var(--muted);text-transform:none;font-weight:400;margin-left:4px;"></span>
+        </div>
+      </div>
+
+      <!-- 트레이스 테이블 -->
+      <div style="flex:1;overflow-y:auto;min-height:0;">
+        <table class="trace-tbl">
+          <thead>
+            <tr>
+              <th style="width:32px;">D:PC</th>
+              <th style="width:72px;">CMD</th>
+              <th style="width:58px;">결과</th>
+              <th style="width:36px;text-align:right;">ms</th>
+              <th>Δ변수</th>
+            </tr>
+          </thead>
+          <tbody id="debug-trace-body">
+            <tr><td colspan="5" style="text-align:center;color:var(--muted);padding:20px;">[🐛 디버그 실행] 클릭</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- AI 분석 결과 -->
+      <div id="debug-ai-result">
+        <div class="dai-section" style="background:var(--panel2);">
+          <div class="sp-title" style="margin-bottom:5px;">🤖 AI 분석</div>
+          <div id="debug-analysis-text" style="font-size:11.5px;color:var(--text);line-height:1.6;"></div>
+        </div>
+        <div class="dai-section">
+          <div class="sp-title" style="margin-bottom:4px;">변경 사항</div>
+          <ul id="debug-changes-list" style="margin:0;padding-left:15px;font-size:11px;color:var(--text);line-height:1.7;"></ul>
+        </div>
+        <div class="dai-section">
+          <div class="sp-title" style="margin-bottom:4px;">수정된 코드</div>
+          <div class="code-block" id="debug-fixed-code"
+               style="font-size:10px;max-height:90px;overflow-y:auto;white-space:pre;"></div>
+          <button id="debug-apply-btn" class="apply-btn" style="display:none;">📋 에디터에 적용</button>
+        </div>
+      </div>
+
+    </div><!-- /#sp-debug -->
+
+  </div><!-- /#status-pane -->
+</div>
+
+<!-- ── LOG POPUP ── -->
+<div id="log-popup">
+  <div id="log-popup-hdr" onmousedown="logDragStart(event)">
+    📋 실행 로그
+    <span id="log-prog-name" style="font-size:11px;color:var(--muted);"></span>
+    <button class="tbtn" onclick="clearLog()" style="font-size:11px;padding:2px 6px;margin-left:auto;">클리어</button>
+    <button onclick="toggleLog()"
+            style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:14px;padding:0 2px;line-height:1;"
+            title="닫기">✕</button>
+  </div>
+  <div id="log-popup-content"></div>
+</div>
+
+<script>
+'use strict';
+
+// ── 설정 ─────────────────────────────────────────────────────────────────────
+const _HOST     = window.location.hostname || 'localhost';
+const HTTP_BASE = `http://${_HOST}:5100`;
+
+const el = id => document.getElementById(id);
+
+// ── 상태 ─────────────────────────────────────────────────────────────────────
+let _currentName   = '';      // 현재 편집 중인 파일 이름
+let _dirty         = false;   // 미저장 변경 여부
+let _lastLogLine   = '';
+let _statusTid     = null;
+let _findMatches   = [];
+let _findIdx       = -1;
+let _validTimer    = null;
+let _sensorTid     = null;
+
+const STATE_COLOR = {
+  idle:    {bg:'#1a1400', color:'var(--muted)',   border:'var(--muted)'},
+  running: {bg:'#132313', color:'var(--green)',   border:'var(--green)'},
+  done:    {bg:'#0d1a2e', color:'var(--accent)',  border:'var(--accent)'},
+  stopped: {bg:'#231313', color:'var(--red)',     border:'var(--red)'},
+  error:   {bg:'#231313', color:'var(--red)',     border:'var(--red)'},
+  paused:  {bg:'#1a1400', color:'var(--yellow)',  border:'var(--yellow)'},
+};
+
+// ── 페이지 로드 ───────────────────────────────────────────────────────────────
+window.addEventListener('DOMContentLoaded', async () => {
+  const ed = el('editor');
+
+  // 탭 키 처리
+  ed.addEventListener('keydown', e => {
+    if (e.key === 'Tab') {
+      e.preventDefault();
+      if (e.shiftKey) {
+        // Shift+Tab: 들여쓰기 제거
+        const s = ed.selectionStart;
+        const t = ed.selectionEnd;
+        const before = ed.value.substring(0, s);
+        const lineStart = before.lastIndexOf('\n') + 1;
+        const line = ed.value.substring(lineStart, t);
+        if (line.startsWith('  ')) {
+          ed.value = ed.value.substring(0, lineStart) + line.substring(2) + ed.value.substring(t);
+          ed.selectionStart = Math.max(lineStart, s - 2);
+          ed.selectionEnd   = Math.max(lineStart, t - 2);
+        }
+      } else {
+        const s = ed.selectionStart, t = ed.selectionEnd;
+        ed.value = ed.value.substring(0, s) + '  ' + ed.value.substring(t);
+        ed.selectionStart = ed.selectionEnd = s + 2;
+      }
+      onEditorChange();
+    }
+  });
+
+  ed.addEventListener('input', onEditorChange);
+  ed.addEventListener('scroll', syncScroll);
+  ed.addEventListener('click', () => updateLineNums(false));
+  ed.addEventListener('keyup', () => updateLineNums(false));
+
+  el('find-input').addEventListener('input', () => { _findMatches=[]; _findIdx=-1; el('find-count').textContent='—'; });
+  el('find-input').addEventListener('keydown', e => {
+    if (e.key === 'Enter') { e.preventDefault(); findStep(!e.shiftKey); }
+    if (e.key === 'Escape') closeFind();
+  });
+
+  // 전역 단축키
+  document.addEventListener('keydown', e => {
+    const ctrl = e.ctrlKey || e.metaKey;
+    if (!ctrl) return;
+    switch(e.key.toLowerCase()) {
+      case 's': e.preventDefault(); progSave(); break;
+      case 'r': e.preventDefault(); progRun();  break;
+      case 'n': e.preventDefault(); progNew();  break;
+      case 'd': e.preventDefault(); progCopy(); break;
+      case 'f': e.preventDefault(); openFind(); break;
+    }
+  });
+
+  await progRefreshList();
+
+  // localStorage 에서 마지막 파일 복원
+  const lastProg = localStorage.getItem('editor_lastProg');
+  if (lastProg) {
+    await progLoadInEditor(lastProg);
+  }
+
+  // Claude 입력창 단축키 (Enter=전송, Shift+Enter=줄바꿈)
+  el('claude-input').addEventListener('keydown', e => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      claudeSend();
+    }
+  });
+
+  // 주기적 폴링 시작
+  if (!_statusTid) _statusTid = setInterval(pollStatus, 600);
+  _sensorTid = setInterval(pollSensors, 1200);
+});
+
+// ── 네비게이션 ────────────────────────────────────────────────────────────────
+function goHMI() {
+  if (_dirty) {
+    if (!confirm('저장하지 않은 변경사항이 있습니다. HMI로 돌아갈까요?')) return;
+  }
+  location.href = 'index.html';
+}
+
+// ── 파일 목록 새로고침 ────────────────────────────────────────────────────────
+async function progRefreshList() {
+  try {
+    const r = await fetch(`${HTTP_BASE}/program/list`);
+    if (!r.ok) return;
+    const d = await r.json();
+    const ul = el('file-list');
+    ul.innerHTML = '';
+    (d.programs || []).forEach(name => {
+      const div = document.createElement('div');
+      div.className = 'file-item' + (name === _currentName ? ' active' : '');
+      div.dataset.name = name;
+      div.innerHTML = `<span style="flex:1;overflow:hidden;text-overflow:ellipsis;" title="${name}">${name}</span>
+                       <button class="fi-del" title="삭제" onclick="event.stopPropagation();progDeleteByName('${name}')">✕</button>`;
+      div.addEventListener('click', () => progLoadInEditor(name));
+      ul.appendChild(div);
+    });
+  } catch(_) {}
+}
+
+// ── 파일 로드 ─────────────────────────────────────────────────────────────────
+async function progLoadInEditor(name) {
+  if (_dirty && _currentName) {
+    if (!confirm(`"${_currentName}" 에 저장하지 않은 변경사항이 있습니다.\n버리고 "${name}" 을(를) 로드할까요?`)) return;
+  }
+  try {
+    const r = await fetch(`${HTTP_BASE}/program/get/${name}`);
+    if (!r.ok) { addLog(`로드 실패: ${name}`, 'err'); return; }
+    const data = await r.json();
+    el('editor').value = JSON.stringify(data, null, 2);
+    _currentName = name;
+    _dirty = false;
+    el('prog-edit-name').textContent  = name;
+    el('prog-dirty-badge').style.display = 'none';
+    localStorage.setItem('editor_lastProg', name);
+    document.querySelectorAll('.file-item').forEach(it =>
+      it.classList.toggle('active', it.dataset.name === name));
+    updateLineNums(true);
+    validateJSON();
+  } catch(e) { addLog(`로드 오류: ${e}`, 'err'); }
+}
+
+// ── 저장 ─────────────────────────────────────────────────────────────────────
+async function progSave() {
+  const raw = el('editor').value.trim();
+  if (!raw) { addLog('에디터가 비어있습니다', 'warn'); return false; }
+  let prog;
+  try { prog = JSON.parse(raw); }
+  catch(e) { addLog(`JSON 파싱 오류: ${e.message}`, 'err'); return false; }
+  if (!prog.program) { addLog('"program" 필드가 없습니다', 'err'); return false; }
+  const name = prog.program;
+  try {
+    const r = await fetch(`${HTTP_BASE}/program/save`, {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify(prog),
+    });
+    const resp = await r.json();
+    if (!resp.ok) { addLog(`저장 실패: ${resp.error}`, 'err'); return false; }
+    _currentName = name;
+    _dirty = false;
+    el('prog-edit-name').textContent = name;
+    el('prog-dirty-badge').style.display = 'none';
+    localStorage.setItem('editor_lastProg', name);
+    addLog(`💾 저장: ${name}`, 'ok');
+    await progRefreshList();
+    return true;
+  } catch(e) { addLog(`저장 오류: ${e}`, 'err'); return false; }
+}
+
+// ── 실행 ─────────────────────────────────────────────────────────────────────
+async function progRun() {
+  if (_dirty) {
+    const saved = await progSave();
+    if (!saved) return;
+  }
+  const name = _currentName;
+  if (!name) { addLog('프로그램을 선택하거나 저장하세요', 'warn'); return; }
+  try {
+    const r = await fetch(`${HTTP_BASE}/program/run/${name}`, {method:'POST'});
+    const d = await r.json();
+    if (!d.ok) { addLog(`실행 실패: ${name}`, 'err'); return; }
+    addLog(`▶ 실행: ${name}`, 'ok');
+    el('log-prog-name').textContent = name;
+    if (!_statusTid) _statusTid = setInterval(pollStatus, 600);
+  } catch(e) { addLog(`실행 오류: ${e}`, 'err'); }
+}
+
+// ── 정지 ─────────────────────────────────────────────────────────────────────
+async function progStop() {
+  try {
+    await fetch(`${HTTP_BASE}/program/stop`, {method:'POST'});
+    addLog('■ 정지', 'warn');
+  } catch(e) { addLog(`오류: ${e}`, 'err'); }
+}
+
+// ── 삭제 ─────────────────────────────────────────────────────────────────────
+async function progDeleteByName(name) {
+  if (!confirm(`"${name}" 을(를) 삭제할까요?\n이 작업은 되돌릴 수 없습니다.`)) return;
+  try {
+    const r = await fetch(`${HTTP_BASE}/program/delete/${name}`, {method:'POST'});
+    const d = await r.json();
+    if (!d.ok) { addLog('삭제 실패', 'err'); return; }
+    addLog(`🗑 삭제: ${name}`, 'warn');
+    if (_currentName === name) {
+      el('editor').value = '';
+      el('prog-edit-name').textContent = '파일 없음';
+      _currentName = ''; _dirty = false;
+      el('prog-dirty-badge').style.display = 'none';
+      localStorage.removeItem('editor_lastProg');
+    }
+    await progRefreshList();
+  } catch(e) { addLog(`오류: ${e}`, 'err'); }
+}
+
+// ── 복사 ─────────────────────────────────────────────────────────────────────
+async function progCopy() {
+  const src = _currentName;
+  if (!src) { addLog('복사할 파일을 선택하세요', 'warn'); return; }
+  const newName = prompt(`"${src}" 의 복사본 이름:`, `${src}_copy`);
+  if (!newName || !newName.trim()) return;
+  const raw = el('editor').value.trim();
+  let prog;
+  try { prog = JSON.parse(raw); }
+  catch(e) { addLog(`JSON 파싱 오류: ${e.message}`, 'err'); return; }
+  prog.program = newName.trim();
+  try {
+    const r = await fetch(`${HTTP_BASE}/program/save`, {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify(prog),
+    });
+    const d = await r.json();
+    if (!d.ok) { addLog(`복사 실패: ${d.error}`, 'err'); return; }
+    addLog(`📋 복사: ${src} → ${newName}`, 'ok');
+    await progRefreshList();
+    await progLoadInEditor(newName.trim());
+  } catch(e) { addLog(`오류: ${e}`, 'err'); }
+}
+
+// ── 이름 바꾸기 ───────────────────────────────────────────────────────────────
+async function progRename() {
+  const src = _currentName;
+  if (!src) { addLog('이름을 바꿀 파일을 선택하세요', 'warn'); return; }
+  const newName = prompt(`"${src}" 의 새 이름:`, src);
+  if (!newName || !newName.trim() || newName.trim() === src) return;
+  const raw = el('editor').value.trim();
+  let prog;
+  try { prog = JSON.parse(raw); }
+  catch(e) { addLog(`JSON 파싱 오류: ${e.message}`, 'err'); return; }
+  prog.program = newName.trim();
+  try {
+    // 새 이름으로 저장
+    const r1 = await fetch(`${HTTP_BASE}/program/save`, {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify(prog),
+    });
+    if (!(await r1.json()).ok) { addLog('이름 변경 실패', 'err'); return; }
+    // 기존 파일 삭제
+    await fetch(`${HTTP_BASE}/program/delete/${src}`, {method:'POST'});
+    addLog(`✏ 이름 변경: ${src} → ${newName}`, 'ok');
+    await progRefreshList();
+    await progLoadInEditor(newName.trim());
+  } catch(e) { addLog(`오류: ${e}`, 'err'); }
+}
+
+// ── 새 파일 ───────────────────────────────────────────────────────────────────
+function progNew() {
+  if (_dirty && _currentName) {
+    if (!confirm('저장하지 않은 변경사항이 있습니다. 버리고 새 파일을 만들까요?')) return;
+  }
+  const tpl = {
+    program:     'new_program',
+    version:     '1.0',
+    description: '새 프로그램',
+    vars:        { speed: 0.2 },
+    commands: [
+      { cmd:'log',  msg:'프로그램 시작' },
+      { cmd:'move', linear:'$speed', angular:0.0, duration:1.0 },
+      { cmd:'stop' },
+      { cmd:'log',  msg:'프로그램 완료' },
+    ],
+  };
+  el('editor').value = JSON.stringify(tpl, null, 2);
+  _currentName = ''; _dirty = true;
+  el('prog-edit-name').textContent = '새 파일 (저장 전)';
+  el('prog-dirty-badge').style.display = '';
+  document.querySelectorAll('.file-item').forEach(it => it.classList.remove('active'));
+  updateLineNums(true);
+  validateJSON();
+  const ed = el('editor');
+  ed.focus();
+  const pos = ed.value.indexOf('new_program');
+  if (pos >= 0) { ed.selectionStart = pos; ed.selectionEnd = pos + 11; }
+}
+
+// ── 가져오기 ──────────────────────────────────────────────────────────────────
+function importFile() {
+  const input = document.createElement('input');
+  input.type = 'file'; input.accept = '.json';
+  input.onchange = async e => {
+    const file = e.target.files[0];
+    if (!file) return;
+    try {
+      const text = await file.text();
+      const prog = JSON.parse(text);
+      if (!prog.program) prog.program = file.name.replace(/\.json$/i, '');
+      el('editor').value = JSON.stringify(prog, null, 2);
+      _currentName = ''; _dirty = true;
+      el('prog-edit-name').textContent = `${prog.program} (가져오기)`;
+      el('prog-dirty-badge').style.display = '';
+      document.querySelectorAll('.file-item').forEach(it => it.classList.remove('active'));
+      updateLineNums(true);
+      validateJSON();
+      addLog(`📥 가져오기: ${file.name}`, 'ok');
+    } catch(e) { addLog(`파싱 오류: ${e.message}`, 'err'); }
+  };
+  input.click();
+}
+
+// ── 내보내기 ──────────────────────────────────────────────────────────────────
+function exportFile() {
+  const raw = el('editor').value.trim();
+  if (!raw) { addLog('내보낼 내용이 없습니다', 'warn'); return; }
+  const blob = new Blob([raw], {type:'application/json'});
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement('a');
+  a.href     = url;
+  a.download = (_currentName || 'program') + '.json';
+  a.click();
+  URL.revokeObjectURL(url);
+  addLog(`📤 내보내기: ${a.download}`, 'ok');
+}
+
+// ── JSON 포맷 ─────────────────────────────────────────────────────────────────
+function formatJSON() {
+  const raw = el('editor').value.trim();
+  if (!raw) return;
+  try {
+    el('editor').value = JSON.stringify(JSON.parse(raw), null, 2);
+    onEditorChange();
+    addLog('⬛ JSON 포맷 완료', 'ok');
+  } catch(e) { addLog(`포맷 오류: ${e.message}`, 'err'); }
+}
+
+// ── 찾기 ─────────────────────────────────────────────────────────────────────
+function openFind() {
+  el('find-bar').classList.add('open');
+  el('find-input').focus(); el('find-input').select();
+}
+function closeFind() {
+  el('find-bar').classList.remove('open');
+  _findMatches = []; _findIdx = -1; el('find-count').textContent = '—';
+  el('editor').focus();
+}
+function findStep(forward) {
+  const query = el('find-input').value;
+  if (!query) return;
+  const text   = el('editor').value;
+  const lower  = text.toLowerCase();
+  const qLower = query.toLowerCase();
+  _findMatches = [];
+  let pos = 0;
+  while (true) {
+    const idx = lower.indexOf(qLower, pos);
+    if (idx < 0) break;
+    _findMatches.push(idx); pos = idx + 1;
+  }
+  if (!_findMatches.length) { el('find-count').textContent = '없음'; return; }
+  if (forward) _findIdx = (_findIdx + 1) % _findMatches.length;
+  else         _findIdx = (_findIdx - 1 + _findMatches.length) % _findMatches.length;
+  const match = _findMatches[_findIdx];
+  const ed = el('editor');
+  ed.focus();
+  ed.selectionStart = match;
+  ed.selectionEnd   = match + query.length;
+  const linesAbove  = text.substring(0, match).split('\n').length - 1;
+  ed.scrollTop      = Math.max(0, linesAbove - 5) * Math.round(ed.scrollHeight / text.split('\n').length);
+  el('find-count').textContent = `${_findIdx + 1} / ${_findMatches.length}`;
+  updateLineNums(false);
+}
+
+// ── 에디터 내부 ───────────────────────────────────────────────────────────────
+function onEditorChange() {
+  if (!_dirty) {
+    _dirty = true;
+    el('prog-dirty-badge').style.display = '';
+  }
+  updateLineNums(false);
+  clearTimeout(_validTimer);
+  _validTimer = setTimeout(validateJSON, 250);
+}
+
+function updateLineNums(reset) {
+  const ed    = el('editor');
+  const lines = ed.value.split('\n').length;
+  const curLine = ed.value.substring(0, ed.selectionStart).split('\n').length;
+  let html = '';
+  for (let i = 1; i <= lines; i++) {
+    if (i === curLine) html += `<span style="color:var(--accent)">${i}</span>`;
+    else               html += i;
+    html += '\n';
+  }
+  el('line-nums').innerHTML = html;
+  el('linecount').textContent = `${lines} 줄`;
+  if (!reset) syncScroll();
+}
+
+function syncScroll() {
+  el('line-nums').scrollTop = el('editor').scrollTop;
+}
+
+function validateJSON() {
+  const raw    = el('editor').value.trim();
+  const badge  = el('valid-badge');
+  const errMsg = el('err-msg');
+  if (!raw) {
+    badge.textContent = '—'; badge.className = 'valid-badge valid-neu'; errMsg.textContent = '';
+    return;
+  }
+  try {
+    JSON.parse(raw);
+    badge.textContent = '✓ JSON 유효'; badge.className = 'valid-badge valid-ok'; errMsg.textContent = '';
+  } catch(e) {
+    badge.textContent = '✗ JSON 오류'; badge.className = 'valid-badge valid-err';
+    errMsg.textContent = e.message;
+  }
+}
+
+// ── 실행 상태 폴링 ────────────────────────────────────────────────────────────
+async function pollStatus() {
+  try {
+    const r = await fetch(`${HTTP_BASE}/program/status`);
+    if (!r.ok) return;
+    applyStatus(await r.json());
+  } catch(_) {}
+}
+
+function applyStatus(d) {
+  const badge = el('prog-state-badge');
+  const style = STATE_COLOR[d.state] || STATE_COLOR.idle;
+  badge.textContent        = (d.state || 'idle').toUpperCase();
+  badge.style.background   = style.bg;
+  badge.style.color        = style.color;
+  badge.style.borderColor  = style.border;
+
+  const pct = d.total > 0 ? Math.round(d.line / d.total * 100) : 0;
+  const fill = el('prog-progress-fill');
+  fill.style.width      = `${pct}%`;
+  fill.style.background = d.state === 'error'   ? 'var(--red)'
+                        : d.state === 'done'    ? 'var(--accent)'
+                        : d.state === 'stopped' ? 'var(--yellow)'
+                        : 'var(--green)';
+
+  el('prog-line-info').textContent = d.total > 0 ? `${d.line} / ${d.total} 줄  (${pct}%)` : '—';
+  el('prog-cmd-lbl').textContent   = d.cmd ? `→ ${d.cmd}` : '';
+  el('prog-time-lbl').textContent  = d.elapsed > 0 ? `${d.elapsed} s` : '';
+
+  // 변수 표시
+  const vars = d.vars || {};
+  const keys = Object.keys(vars);
+  if (keys.length > 0) {
+    el('var-prog-name').textContent = d.program || '';
+    el('var-table').innerHTML = keys.map(k => {
+      const v = vars[k];
+      const disp = typeof v === 'number' ? (Number.isInteger(v) ? v : v.toFixed(4)) : String(v);
+      return `<div class="kv-row"><span class="kv-k">$${k}</span><span class="kv-v">${disp}</span></div>`;
+    }).join('');
+  } else if (['done','idle','stopped'].includes(d.state)) {
+    el('var-table').innerHTML = '<div class="kv-empty">(실행 시 표시)</div>';
+  }
+
+  // 로그 추가 (중복 방지)
+  const logEl = el('log-popup-content');
+  (d.log || []).forEach(line => {
+    if (_lastLogLine === line) return;
+    _lastLogLine = line;
+    const div = document.createElement('div');
+    div.textContent = line;
+    div.style.color = line.includes('❌') || line.includes('ABORT') ? 'var(--red)'
+                    : line.includes('✅')   ? 'var(--green)'
+                    : line.includes('⚠')   ? 'var(--yellow)'
+                    : line.includes('▶')   ? 'var(--accent)'
+                    : line.includes('[LOG]') ? '#e6edf3'
+                    : 'var(--muted)';
+    logEl.appendChild(div);
+  });
+  logEl.scrollTop = logEl.scrollHeight;
+
+  // 종료 → 폴링 느리게
+  if (['done','stopped','error','idle'].includes(d.state)) {
+    if (_statusTid) { clearInterval(_statusTid); _statusTid = setInterval(pollStatus, 3000); }
+  } else {
+    if (_statusTid) { clearInterval(_statusTid); _statusTid = setInterval(pollStatus, 600); }
+  }
+}
+
+// ── 센서 폴링 ─────────────────────────────────────────────────────────────────
+const SENSOR_DEFS = [
+  { key:'dist_mm',        label:'거리',         unit:'mm',    fmt: v => v < 0 ? '—' : v,
+    color: v => v > 0 && v < 300 ? 'var(--red)' : v > 0 && v < 600 ? 'var(--yellow)' : 'var(--green)' },
+  { key:'accel_mag',      label:'가속도',        unit:'m/s²',  fmt: v => (+v).toFixed(2) },
+  { key:'all_ready',      label:'드라이브 Ready', unit:'',
+    fmt: v => v ? 'YES' : 'NO', color: v => v ? 'var(--green)' : 'var(--red)' },
+  { key:'obstacle_action',label:'장애물',         unit:'',
+    color: v => v==='FULL_STOP' ? 'var(--red)' : v==='WAIT' ? 'var(--orange)' : v==='SLOW' ? 'var(--yellow)' : 'var(--green)' },
+  { key:'cia402_left',    label:'CiA402 L',      unit:'', fmt: v => v || '—' },
+  { key:'cia402_right',   label:'CiA402 R',      unit:'', fmt: v => v || '—' },
+  { key:'vel_left_hw',    label:'Vel Left',       unit:'cnt/s' },
+  { key:'vel_right_hw',   label:'Vel Right',      unit:'cnt/s' },
+];
+
+async function pollSensors() {
+  try {
+    const r = await fetch(`${HTTP_BASE}/sensor/data`);
+    if (!r.ok) return;
+    renderSensors(await r.json());
+  } catch(_) {}
+}
+
+function renderSensors(data) {
+  el('sensor-update-ts').textContent = new Date().toLocaleTimeString();
+  el('sensor-table').innerHTML = SENSOR_DEFS.map(def => {
+    const raw  = data[def.key];
+    if (raw === undefined) return '';
+    const disp = def.fmt ? def.fmt(raw) : String(raw);
+    const clr  = def.color ? def.color(raw) : 'var(--text)';
+    return `<div class="kv-row">
+      <span class="kv-k">${def.label}</span>
+      <span class="kv-v" style="color:${clr}">${disp} ${def.unit}</span>
+    </div>`;
+  }).join('');
+}
+
+// ── 로그 ─────────────────────────────────────────────────────────────────────
+function addLog(msg, type) {
+  const popup = el('log-popup');
+  if (!popup.classList.contains('open')) popup.classList.add('open');
+  const logEl = el('log-popup-content');
+  const div   = document.createElement('div');
+  const ts    = new Date().toLocaleTimeString();
+  div.textContent = `${ts}  ${msg}`;
+  div.style.color = type === 'err'  ? 'var(--red)'
+                  : type === 'warn' ? 'var(--yellow)'
+                  : type === 'ok'   ? 'var(--green)'
+                  : 'var(--muted)';
+  logEl.appendChild(div);
+  logEl.scrollTop = logEl.scrollHeight;
+}
+
+function clearLog() {
+  el('log-popup-content').innerHTML = '';
+  _lastLogLine = '';
+}
+
+function toggleLog() {
+  el('log-popup').classList.toggle('open');
+}
+
+let _logDrag = null;
+function logDragStart(e) {
+  if (e.target.tagName === 'BUTTON') return;
+  const popup = el('log-popup');
+  const rect  = popup.getBoundingClientRect();
+  _logDrag = { ox: e.clientX - rect.left, oy: e.clientY - rect.top };
+  const move = ev => {
+    popup.style.left   = Math.max(0, ev.clientX - _logDrag.ox) + 'px';
+    popup.style.top    = Math.max(0, ev.clientY - _logDrag.oy) + 'px';
+    popup.style.bottom = 'auto';
+    popup.style.right  = 'auto';
+  };
+  const up = () => {
+    document.removeEventListener('mousemove', move);
+    document.removeEventListener('mouseup',  up);
+    _logDrag = null;
+  };
+  document.addEventListener('mousemove', move);
+  document.addEventListener('mouseup',  up);
+}
+
+// ── Claude AI 어시스턴트 ──────────────────────────────────────────────────────
+let _chatHistory = [];
+
+function switchTab(tab) {
+  const isExec   = tab === 'exec';
+  const isDebug  = tab === 'debug';
+  el('sp-exec').style.display   = isExec               ? 'flex' : 'none';
+  el('sp-claude').style.display = (!isExec && !isDebug) ? 'flex' : 'none';
+  el('sp-debug').style.display  = isDebug              ? 'flex' : 'none';
+  el('tab-exec').classList.toggle('active',   isExec);
+  el('tab-claude').classList.toggle('active', !isExec && !isDebug);
+  el('tab-debug').classList.toggle('active',  isDebug);
+  if (!isExec && !isDebug) claudeCheckStatus();
+}
+
+async function claudeCheckStatus() {
+  try {
+    const r = await fetch(`${HTTP_BASE}/claude/status`);
+    if (!r.ok) return;
+    const d = await r.json();
+    el('claude-key-setup').style.display = d.available ? 'none' : '';
+  } catch(_) {}
+}
+
+async function claudeSaveKey() {
+  const key = el('claude-key-input').value.trim();
+  if (!key) { addLog('API 키를 입력하세요', 'warn'); return; }
+  try {
+    const r = await fetch(`${HTTP_BASE}/claude/config`, {
+      method:  'POST',
+      headers: {'Content-Type': 'application/json'},
+      body:    JSON.stringify({api_key: key}),
+    });
+    const d = await r.json();
+    if (d.ok) {
+      el('claude-key-setup').style.display = 'none';
+      el('claude-key-input').value = '';
+      addLog('🔑 Claude API 키 저장됨', 'ok');
+    } else {
+      addLog(`키 저장 실패: ${d.error}`, 'err');
+    }
+  } catch(e) { addLog(`오류: ${e}`, 'err'); }
+}
+
+function claudeQuick(prompt) {
+  el('claude-input').value = prompt;
+  claudeSend();
+}
+
+function _addChatBubble(role, html) {
+  const chat = el('claude-chat');
+  const div  = document.createElement('div');
+  div.className = 'chat-msg ' + (role === 'user' ? 'chat-user' : 'chat-asst');
+  div.innerHTML  = html;
+  chat.appendChild(div);
+  chat.scrollTop = chat.scrollHeight;
+  return div;
+}
+
+function _renderChat(div, text) {
+  div.innerHTML = _md(text);
+  div.querySelectorAll('.apply-btn').forEach(btn => {
+    btn.onclick = () => {
+      const code = btn.dataset.code;
+      try {
+        el('editor').value = JSON.stringify(JSON.parse(code), null, 2);
+        onEditorChange();
+        addLog('🤖 Claude → 에디터 적용', 'ok');
+        switchTab('exec');
+      } catch(e) { addLog(`적용 오류: ${e}`, 'err'); }
+    };
+  });
+  el('claude-chat').scrollTop = el('claude-chat').scrollHeight;
+}
+
+function _md(text) {
+  // ```json ... ``` → code block + Apply button
+  const parts = [];
+  const codeRe = /```(?:json)?\n?([\s\S]*?)```/g;
+  let last = 0, m;
+  while ((m = codeRe.exec(text)) !== null) {
+    if (m.index > last) parts.push({t: 'text', s: text.slice(last, m.index)});
+    parts.push({t: 'code', s: m[1].trim()});
+    last = m.index + m[0].length;
+  }
+  if (last < text.length) parts.push({t: 'text', s: text.slice(last)});
+
+  return parts.map(p => {
+    if (p.t === 'code') {
+      let applyBtn = '';
+      try {
+        JSON.parse(p.s);
+        applyBtn = `<button class="apply-btn" data-code="${_escA(p.s)}">📋 에디터에 적용</button>`;
+      } catch(_) {}
+      return `<div class="code-block">${_escH(p.s)}</div>${applyBtn}`;
+    }
+    return _escH(p.s)
+      .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+      .replace(/`([^`\n]+)`/g,  '<code>$1</code>')
+      .replace(/\n/g, '<br>');
+  }).join('');
+}
+
+function _escH(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+function _escA(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/"/g,'&quot;');
+}
+
+async function claudeSend() {
+  const prompt = el('claude-input').value.trim();
+  if (!prompt) return;
+
+  const context = el('claude-ctx').checked ? el('editor').value.trim() : '';
+  _addChatBubble('user', _escH(prompt));
+  el('claude-input').value = '';
+
+  const aDiv = _addChatBubble('assistant', '<span style="color:var(--muted)">⏳ 생성 중…</span>');
+
+  try {
+    const resp = await fetch(`${HTTP_BASE}/claude/chat`, {
+      method:  'POST',
+      headers: {'Content-Type': 'application/json'},
+      body:    JSON.stringify({
+        prompt,
+        context,
+        history: _chatHistory.slice(-8),
+        model:   el('claude-model-sel').value,
+      }),
+    });
+
+    if (!resp.ok) {
+      _renderChat(aDiv, `❌ HTTP ${resp.status}`); return;
+    }
+
+    const reader  = resp.body.getReader();
+    const decoder = new TextDecoder();
+    let fullText = '';
+    let buf      = '';
+
+    while (true) {
+      const {done, value} = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, {stream: true});
+      const lines = buf.split('\n');
+      buf = lines.pop();
+
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue;
+        try {
+          const d = JSON.parse(line.slice(6));
+          if (d.type === 'text')  { fullText += d.text; _renderChat(aDiv, fullText); }
+          if (d.type === 'error') { _renderChat(aDiv, `❌ ${d.msg}`); fullText = ''; }
+        } catch(_) {}
+      }
+    }
+
+    if (fullText) {
+      _chatHistory.push({role: 'user',      content: prompt});
+      _chatHistory.push({role: 'assistant', content: fullText});
+      if (_chatHistory.length > 20) _chatHistory = _chatHistory.slice(-20);
+    }
+
+  } catch(e) {
+    _renderChat(aDiv, `❌ 오류: ${e.message}`);
+  }
+}
+
+function claudeClear() {
+  _chatHistory = [];
+  el('claude-chat').innerHTML = '';
+}
+
+// ── 디버그 / AI 자동수정 ──────────────────────────────────────────────────────
+const _TRACE_RESULT_COLOR = {
+  ok:          'var(--green)',
+  timeout:     'var(--yellow)',
+  abort:       'var(--red)',
+  error:       'var(--red)',
+  unknown_cmd: 'var(--red)',
+  break:       'var(--muted)',
+  continue:    'var(--muted)',
+  return:      'var(--muted)',
+  cancelled:   'var(--muted)',
+};
+
+async function _waitProgramDone(timeoutSec = 180) {
+  const deadline = Date.now() + timeoutSec * 1000;
+  while (Date.now() < deadline) {
+    await new Promise(r => setTimeout(r, 600));
+    try {
+      const r = await fetch(`${HTTP_BASE}/program/status`);
+      const d = await r.json();
+      if (['done','stopped','error','idle'].includes(d.state)) return d;
+    } catch(_) {}
+  }
+  return null;
+}
+
+async function debugRun() {
+  if (_dirty) {
+    const saved = await progSave();
+    if (!saved) return;
+  }
+  const name = _currentName;
+  if (!name) { addLog('프로그램을 선택하거나 저장하세요', 'warn'); return; }
+
+  switchTab('debug');
+  el('debug-trace-body').innerHTML =
+    '<tr><td colspan="5" style="text-align:center;color:var(--muted);padding:16px;">⏳ 실행 중…</td></tr>';
+  el('debug-trace-count').textContent = '';
+  el('debug-run-btn').disabled = true;
+  el('debug-run-btn').textContent = '⏳ 실행 중…';
+
+  try {
+    const r = await fetch(`${HTTP_BASE}/program/debug_run/${name}`, {method:'POST'});
+    const d = await r.json();
+    if (!d.ok) { addLog(`디버그 실행 실패: ${d.error || name}`, 'err'); return; }
+    addLog(`🐛 디버그 실행: ${name}`, 'ok');
+
+    await _waitProgramDone();
+    await _loadTrace();
+  } catch(e) {
+    addLog(`디버그 오류: ${e}`, 'err');
+  } finally {
+    el('debug-run-btn').disabled = false;
+    el('debug-run-btn').textContent = '🐛 디버그 실행';
+  }
+}
+
+async function _loadTrace() {
+  try {
+    const r = await fetch(`${HTTP_BASE}/program/trace`);
+    const d = await r.json();
+    const trace = d.trace || [];
+    _renderTrace(trace);
+    const errCount = trace.filter(t => !['ok','break','continue','return','cancelled'].includes(t.result)).length;
+    el('debug-trace-count').textContent =
+      `${trace.length}개${errCount ? ' · ❌ ' + errCount + '개 오류' : ''}`;
+    addLog(`🐛 트레이스: ${trace.length}개 항목${errCount ? ', ' + errCount + '개 오류' : ''}`, errCount ? 'err' : 'ok');
+  } catch(e) {
+    addLog(`트레이스 로드 실패: ${e}`, 'err');
+  }
+}
+
+function _renderTrace(trace) {
+  if (!trace.length) {
+    el('debug-trace-body').innerHTML =
+      '<tr><td colspan="5" style="text-align:center;color:var(--muted);padding:16px;">트레이스 없음</td></tr>';
+    return;
+  }
+  el('debug-trace-body').innerHTML = trace.map(t => {
+    const isErr  = !['ok','break','continue','return','cancelled'].includes(t.result);
+    const isWarn = (t.result === 'timeout');
+    const clr    = _TRACE_RESULT_COLOR[t.result]
+                 || (t.result.startsWith('goto:') ? 'var(--accent)' : 'var(--muted)');
+    const delta  = t.vars_delta
+      ? Object.entries(t.vars_delta)
+            .map(([k,{before,after}]) => `${k}:${before}→${after}`)
+            .join(' ')
+      : '';
+    const rowClass = isErr && !isWarn ? 'trace-row-err' : isWarn ? 'trace-row-warn' : '';
+    const errHint  = t.error_msg
+      ? `<br><span style="color:var(--red);font-size:9.5px;" title="${_escA(t.error_msg)}">${_escH(t.error_msg.substring(0,50))}${t.error_msg.length>50?'…':''}</span>`
+      : '';
+    return `<tr class="${rowClass}">
+      <td style="color:var(--muted);white-space:nowrap;">${t.depth}:${t.pc}</td>
+      <td class="td-cmd" title="${_escA(t.cmd)}">${_escH(t.cmd)}</td>
+      <td style="color:${clr};white-space:nowrap;">${_escH(t.result)}${errHint}</td>
+      <td style="color:var(--muted);text-align:right;">${t.duration_ms}</td>
+      <td class="td-delta" title="${_escA(delta)}">${_escH(delta.substring(0,40))}${delta.length>40?'…':''}</td>
+    </tr>`;
+  }).join('');
+}
+
+async function aiDebug() {
+  const name = _currentName;
+  if (!name) { addLog('프로그램을 선택하세요', 'warn'); return; }
+
+  const aiBtn = el('debug-ai-btn');
+  aiBtn.disabled = true;
+  aiBtn.textContent = '⏳ 분석 중…';
+  el('debug-ai-result').style.display = 'none';
+
+  try {
+    const note = el('debug-user-note').value.trim();
+    const r = await fetch(`${HTTP_BASE}/claude/debug`, {
+      method:  'POST',
+      headers: {'Content-Type':'application/json'},
+      body:    JSON.stringify({program_name: name, user_note: note || undefined}),
+    });
+    const d = await r.json();
+    if (!d.ok) { addLog(`AI 분석 실패: ${d.error}`, 'err'); return; }
+    _renderDebugResult(d);
+    addLog('🤖 AI 분석 완료', 'ok');
+  } catch(e) {
+    addLog(`AI 분석 오류: ${e}`, 'err');
+  } finally {
+    aiBtn.disabled = false;
+    aiBtn.textContent = '🤖 AI 분석';
+  }
+}
+
+function _renderDebugResult(d) {
+  el('debug-analysis-text').innerHTML =
+    _escH(d.analysis || '(분석 없음)').replace(/\n/g,'<br>');
+
+  const changes = Array.isArray(d.changes) ? d.changes : [];
+  el('debug-changes-list').innerHTML = changes.length
+    ? changes.map(c => `<li>${_escH(c)}</li>`).join('')
+    : '<li style="color:var(--muted);">(변경사항 없음)</li>';
+
+  const applyBtn = el('debug-apply-btn');
+  if (d.fixed) {
+    const fixedJson = JSON.stringify(d.fixed, null, 2);
+    el('debug-fixed-code').textContent = fixedJson;
+    applyBtn.style.display = '';
+    applyBtn.onclick = () => _applyFixed(fixedJson);
+  } else {
+    el('debug-fixed-code').textContent = '(수정된 코드 없음)';
+    applyBtn.style.display = 'none';
+  }
+
+  el('debug-ai-result').style.display = '';
+  el('debug-ai-result').scrollTop = 0;
+}
+
+function _applyFixed(json) {
+  try {
+    el('editor').value = JSON.stringify(JSON.parse(json), null, 2);
+    onEditorChange();
+    addLog('🤖 AI 수정 → 에디터 적용', 'ok');
+    switchTab('exec');
+  } catch(e) { addLog(`적용 오류: ${e}`, 'err'); }
+}
+
+async function aiAutoFix(maxIter = 3) {
+  const name = _currentName;
+  if (!name) { addLog('프로그램을 선택하세요', 'warn'); return; }
+  if (!confirm(`"${name}"에 AI 자동수정을 최대 ${maxIter}회 반복합니다.\n계속할까요?`)) return;
+
+  const btn = el('debug-autofix-btn');
+  btn.disabled = true;
+  addLog(`🔄 AI 자동수정 시작 (최대 ${maxIter}회)`, 'ok');
+
+  try {
+    for (let i = 1; i <= maxIter; i++) {
+      addLog(`🐛 [${i}/${maxIter}] 디버그 실행 중…`, 'ok');
+
+      const runR = await fetch(`${HTTP_BASE}/program/debug_run/${name}`, {method:'POST'});
+      if (!(await runR.json()).ok) { addLog('디버그 실행 실패', 'err'); break; }
+
+      const endState = await _waitProgramDone();
+      await _loadTrace();
+
+      if (endState && endState.state === 'done') {
+        addLog(`✅ [${i}/${maxIter}] 프로그램 정상 완료 — 자동수정 불필요`, 'ok');
+        break;
+      }
+
+      addLog(`🤖 [${i}/${maxIter}] AI 분석 중…`, 'ok');
+      const dbgR = await fetch(`${HTTP_BASE}/claude/debug`, {
+        method:  'POST',
+        headers: {'Content-Type':'application/json'},
+        body:    JSON.stringify({program_name: name}),
+      });
+      const dbg = await dbgR.json();
+
+      if (!dbg.ok) { addLog(`AI 분석 실패: ${dbg.error}`, 'err'); break; }
+      _renderDebugResult(dbg);
+
+      if (!dbg.fixed) {
+        addLog(`🤖 [${i}/${maxIter}] 수정안 없음 — 중단`, 'ok');
+        break;
+      }
+
+      const saveR = await fetch(`${HTTP_BASE}/program/save`, {
+        method:  'POST',
+        headers: {'Content-Type':'application/json'},
+        body:    JSON.stringify(dbg.fixed),
+      });
+      const saved = await saveR.json();
+      if (!saved.ok) { addLog(`저장 실패: ${saved.error}`, 'err'); break; }
+
+      const getR = await fetch(`${HTTP_BASE}/program/get/${name}`);
+      if (getR.ok) {
+        el('editor').value = JSON.stringify(await getR.json(), null, 2);
+        _dirty = false;
+        el('prog-dirty-badge').style.display = 'none';
+        updateLineNums(true);
+        validateJSON();
+      }
+
+      addLog(`✅ [${i}/${maxIter}] AI 수정 적용 — 재실행`, 'ok');
+      if (i === maxIter) addLog(`🔄 자동수정 ${maxIter}회 완료`, 'ok');
+    }
+  } catch(e) {
+    addLog(`자동수정 오류: ${e}`, 'err');
+  } finally {
+    btn.disabled = false;
+  }
+}
+</script>
+</body>
+</html>

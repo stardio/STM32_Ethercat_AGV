@@ -30,6 +30,7 @@
 #include "uart_protocol.h"
 #include "axis_config.h"     /* g_axis_param[], g_shadow[]   */
 #include "soem_port.h"       /* SOEM_Set*(), SOEM_Get*()     */
+#include "io_handler.h"      /* IO_DO_Set(), IO_PWM_Set() 등 */
 #include "stm32h7xx_hal.h"   /* HAL_GetTick()                */
 
 #include <stddef.h>
@@ -342,6 +343,23 @@ static void dispatch_packet(const uint8_t *frame, uint16_t frame_len)
         }
         break;
 
+    /* ── I/O 확장 출력 설정 ─────────────────────────────────────────────── */
+    case PROTO_PKT_IO_SET:
+        if (payload_len >= sizeof(ProtoPktIoSet_t)) {
+            ProtoPktIoSet_t cmd;
+            memcpy(&cmd, payload, sizeof(cmd));
+            if (cmd.do_mask != 0U) {
+                IO_DO_Set(cmd.do_mask, cmd.do_val);
+            }
+            if (cmd.pwm_ch < IO_PWM_COUNT) {
+                IO_PWM_Set(cmd.pwm_ch, cmd.pwm_duty);
+            }
+            dispatch_ack(seq, PROTO_RESULT_OK);
+        } else {
+            dispatch_ack(seq, PROTO_RESULT_BAD_PARAM);
+        }
+        break;
+
     default:
         dispatch_ack(seq, PROTO_RESULT_BAD_PKT);
         break;
@@ -422,7 +440,7 @@ void UartProto_SendStatus(void)
         SOEM_GetStatusPkt((AxisId_t)ax, &pkt.axis[ax]);
     }
 
-    pkt.interp_state = (uint8_t)Interp_GetState();
+    pkt.interp_state = 0U;  /* AGV: no joint interpolator */
     pkt.sys_flags    = 0U;
     if (SOEM_AllAxesReady())       pkt.sys_flags |= 0x01U;
     if (SOEM_AllTargetsReached())  pkt.sys_flags |= 0x02U;
@@ -493,4 +511,14 @@ void UartProto_SendAgvStatus(void)
     pkt.flags        = (uint8_t)((SOEM_GetRunEnable(AXIS_J1) ? 0x01U : 0U) |
                                   (SOEM_GetRunEnable(AXIS_J2) ? 0x02U : 0U));
     proto_send_frame(PROTO_PKT_AGV_STATUS, &pkt, sizeof(pkt));
+}
+
+void UartProto_SendIoStatus(void)
+{
+    ProtoPktIoStatus_t pkt;
+    pkt.di_val    = IO_DI_Get();
+    pkt.do_val    = IO_DO_Get();
+    for (uint8_t i = 0U; i < IO_AI_COUNT; i++)  { pkt.ai_val[i]   = IO_AI_Get(i);  }
+    for (uint8_t i = 0U; i < IO_PWM_COUNT; i++) { pkt.pwm_duty[i] = IO_PWM_Get(i); }
+    proto_send_frame(PROTO_PKT_IO_STATUS, &pkt, sizeof(pkt));
 }

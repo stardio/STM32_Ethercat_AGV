@@ -1,18 +1,13 @@
 /**
  * @file    axis_types.h
- * @brief   6-axis articulated robot — shared type definitions
+ * @brief   AGV differential drive — shared type definitions
  *
- * All EtherCAT, motion, and UI layers reference these types.
  * Axis index convention:
- *   AXIS_J1 = 0  → EtherCAT slave 1  (base rotation)
- *   AXIS_J2 = 1  → EtherCAT slave 2  (shoulder)
- *   AXIS_J3 = 2  → EtherCAT slave 3  (elbow)
- *   AXIS_J4 = 3  → EtherCAT slave 4  (wrist roll)
- *   AXIS_J5 = 4  → EtherCAT slave 5  (wrist pitch)
- *   AXIS_J6 = 5  → EtherCAT slave 6  (wrist yaw)
+ *   AXIS_J1 = 0  → EtherCAT slave 1  (left wheel)
+ *   AXIS_J2 = 1  → EtherCAT slave 2  (right wheel)
  *
- * User unit: degree (°).
- * pos_centi field carries degree × 100 (centi-degree) for UART transport.
+ * User unit: mm (wheel linear displacement).
+ * pos_centi: mm × 100 for UART transport.
  */
 #ifndef AXIS_TYPES_H
 #define AXIS_TYPES_H
@@ -24,16 +19,12 @@ extern "C" {
 #endif
 
 /* ── Axis count ──────────────────────────────────────────────────────────── */
-#define AXIS_COUNT  6U
+#define AXIS_COUNT  2U
 
 typedef enum {
-    AXIS_J1  = 0,
-    AXIS_J2  = 1,
-    AXIS_J3  = 2,
-    AXIS_J4  = 3,
-    AXIS_J5  = 4,
-    AXIS_J6  = 5,
-    AXIS_ALL = 0xFFU,   /* broadcast / "all axes" sentinel */
+    AXIS_J1  = 0,   /* left wheel  */
+    AXIS_J2  = 1,   /* right wheel */
+    AXIS_ALL = 0xFFU,
 } AxisId_t;
 
 /* ── CiA 402 drive state machine stages ─────────────────────────────────── */

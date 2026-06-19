@@ -1,6 +1,6 @@
 /**
  * @file    uart_protocol.h
- * @brief   6-axis articulated robot — binary UART protocol over SLIP framing
+ * @brief   AGV differential drive — binary UART protocol over SLIP framing
  *
  * Transport
  * ─────────
@@ -44,9 +44,9 @@
  * Packet sizes (payload only)
  * ───────────────────────────
  *   AxisStatusPkt_t           = 12 bytes  (per axis)
- *   ProtoPktStatus_t          = 74 bytes  (6 × 12 + 2)
+ *   ProtoPktStatus_t          = 26 bytes  (2 × 12 + 2)
  *   ProtoAxisParam_t          = 44 bytes  (per axis)
- *   ProtoPktParamReport_t     = 264 bytes (6 × 44)
+ *   ProtoPktParamReport_t     = 88 bytes  (2 × 44)
  *   ProtoPktFaultReset_t      =  1 byte   (axis)
  *   ProtoPktAgvVelocity_t     =  8 bytes
  *   ProtoPktAgvOdometry_t     = 20 bytes
@@ -63,7 +63,6 @@
 
 #include <stdint.h>
 #include "axis_types.h"
-#include "interpolator.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -96,13 +95,17 @@ extern "C" {
 #define PROTO_PKT_AGV_ODOMETRY        0x31U   /* STM32 → Bridge: wheel encoder snapshot */
 #define PROTO_PKT_AGV_STATUS          0x32U   /* STM32 → Bridge: AGV drive health       */
 
+/* I/O 확장 패킷 (Phase D) */
+#define PROTO_PKT_IO_SET              0x33U   /* Bridge → STM32: DO/PWM 출력 설정        */
+#define PROTO_PKT_IO_STATUS           0x34U   /* STM32 → Bridge: DI/AI/DO/PWM 상태, 200ms */
+
 /* AGV differential drive geometry (metres — adjust after physical measurement) */
 #define AGV_WHEEL_BASE_M              0.60f   /* distance between wheel centres [m]     */
 #define AGV_WHEEL_RADIUS_M            0.15f   /* wheel radius [m]                       */
 
 /* ── Result / error codes (in ACK.result) ────────────────────────────────── */
 #define PROTO_RESULT_OK          0x00U
-#define PROTO_RESULT_BUSY        0x01U   /* interpolator busy                */
+#define PROTO_RESULT_BUSY        0x01U   /* drive busy / command rejected     */
 #define PROTO_RESULT_BAD_PARAM   0x02U   /* invalid parameter ID or value    */
 #define PROTO_RESULT_NOT_READY   0x03U   /* drives not in OP_ENABLED         */
 #define PROTO_RESULT_FLASH_ERR   0x04U   /* flash write failed               */
@@ -131,11 +134,11 @@ extern "C" {
 
 /* STATUS (0x01) — STM32 → Bridge, 10 ms period */
 typedef struct __attribute__((packed)) {
-    AxisStatusPkt_t axis[AXIS_COUNT];   /* 12 × 6 = 72 bytes */
-    uint8_t         interp_state;       /* InterpState_t      */
+    AxisStatusPkt_t axis[AXIS_COUNT];   /* 12 × 2 = 24 bytes */
+    uint8_t         interp_state;       /* reserved (0)       */
     uint8_t         sys_flags;          /* bit0=all_ready, bit1=all_tgt_reached,
-                                           bits[6:4]=active_axes (0-6)       */
-} ProtoPktStatus_t;                     /* 74 bytes */
+                                           bits[2:1]=active_axes (0-2)       */
+} ProtoPktStatus_t;                     /* 26 bytes */
 
 /* Per-axis wire-format parameter (no natural padding) — used in PARAM_REPORT */
 typedef struct __attribute__((packed)) {
@@ -156,8 +159,8 @@ typedef struct __attribute__((packed)) {
 
 /* PARAM_REPORT (0x02) — STM32 → Bridge */
 typedef struct __attribute__((packed)) {
-    ProtoAxisParam_t axis[AXIS_COUNT];  /* 44 × 6 = 264 bytes */
-} ProtoPktParamReport_t;               /* 264 bytes */
+    ProtoAxisParam_t axis[AXIS_COUNT];  /* 44 × 2 = 88 bytes */
+} ProtoPktParamReport_t;               /* 88 bytes */
 
 /* ACK (0x03) — STM32 → Bridge */
 typedef struct __attribute__((packed)) {
@@ -173,7 +176,7 @@ typedef struct __attribute__((packed)) {
 
 /* SET_PARAM (0x15) — Bridge → STM32 */
 typedef struct __attribute__((packed)) {
-    uint8_t axis;       /* AxisId_t (0..5)         */
+    uint8_t axis;       /* AxisId_t (0..1)         */
     uint8_t param_id;   /* PROTO_PARAM_* constant  */
     uint8_t _pad[2];    /* alignment               */
     int32_t value;      /* new value               */
@@ -213,6 +216,22 @@ typedef struct __attribute__((packed)) {
     uint8_t flags;         /* bit0=run_enable_left, bit1=run_enable_right   */
 } ProtoPktAgvStatus_t;                 /* 4 bytes */
 
+/* IO_SET (0x33) — Bridge → STM32                                              */
+typedef struct __attribute__((packed)) {
+    uint8_t  do_mask;    /* 변경할 DO 비트 마스크 (1=이 비트를 val로 덮어씀)   */
+    uint8_t  do_val;     /* DO 출력값 (mask 적용 비트만 유효)                   */
+    uint8_t  pwm_ch;     /* PWM 채널 0–3, 0xFF = PWM 변경 없음                 */
+    uint16_t pwm_duty;   /* PWM duty 0–10000 (0.00–100.00 %)                   */
+} ProtoPktIoSet_t;                     /* 5 bytes */
+
+/* IO_STATUS (0x34) — STM32 → Bridge, 200 ms period                           */
+typedef struct __attribute__((packed)) {
+    uint8_t  di_val;        /* DI 입력 상태 비트맵 (bit[n]=1 → DIn 활성)     */
+    uint8_t  do_val;        /* DO 출력 현재 상태 비트맵                       */
+    uint16_t ai_val[4];     /* ADC 원시값 0–4095 (AI0–AI3)                   */
+    uint16_t pwm_duty[4];   /* PWM duty 0–10000 (PWM0–PWM3)                  */
+} ProtoPktIoStatus_t;                  /* 18 bytes */
+
 /* ── TX callback type ────────────────────────────────────────────────────── */
 typedef void (*ProtoTxFn_t)(const uint8_t *data, uint16_t len);
 
@@ -237,7 +256,7 @@ void UartProto_FeedRxByte(uint8_t b);
 void UartProto_PollRx(void);
 
 /**
- * @brief  Transmit a STATUS packet with the current 6-axis shadow data.
+ * @brief  Transmit a STATUS packet with the current wheel-axis shadow data.
  *         Call from DefaultTask every 10 ms.
  */
 void UartProto_SendStatus(void);
@@ -264,6 +283,12 @@ void UartProto_SendAgvOdometry(void);
  *         Call from DefaultTask every 10 ms alongside SendStatus.
  */
 void UartProto_SendAgvStatus(void);
+
+/**
+ * @brief  Transmit an IO_STATUS packet with current DI/AI/DO/PWM state.
+ *         Call from DefaultTask every 200 ms.
+ */
+void UartProto_SendIoStatus(void);
 
 #ifdef __cplusplus
 }

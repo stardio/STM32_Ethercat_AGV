@@ -1,0 +1,99 @@
+# ekf.yaml — robot_localization EKF 센서융합 설정
+#
+# 패키지: robot_localization (ros-humble-robot-localization)
+# 노드명: ekf_filter_node
+#
+# 입력:
+#   /odom          nav_msgs/Odometry  — 바퀴 엔코더 적분 (stm32_bridge_node)
+#   /camera/imu    sensor_msgs/Imu    — RealSense D435i IMU (자이로+가속도)
+#
+# 출력:
+#   /odometry/filtered  nav_msgs/Odometry  — 융합 위치 추정
+#
+# publish_tf: false  →  TF odom→base_link 는 stm32_bridge_node 가 계속 발행
+#
+# 상태 벡터 인덱스 (15개, 행 순서):
+#   0:x   1:y   2:z
+#   3:roll  4:pitch  5:yaw
+#   6:vx   7:vy   8:vz
+#   9:vroll  10:vpitch  11:vyaw
+#   12:ax  13:ay  14:az
+
+ekf_filter_node:
+  ros__parameters:
+
+    frequency:       50.0   # Hz — EKF 예측 주기
+    sensor_timeout:   0.1   # s  — 센서 없으면 예측만 수행
+    two_d_mode:      true   # z / roll / pitch 무시 (평면 이동)
+    publish_tf:      false  # TF 는 stm32_bridge_node 담당
+    print_diagnostics: true
+
+    map_frame:       map
+    odom_frame:      odom
+    base_link_frame: base_link
+    world_frame:     odom   # odom 기준 위치 추정 (map 기준 아님)
+
+    # ── 바퀴 오도메트리 ─────────────────────────────────────────────────
+    # stm32_bridge_node 가 발행하는 /odom (encoder integration)
+    # - 위치 x, y, yaw 를 직접 사용 (differential=false)
+    # - 속도 vx, vyaw 도 사용
+    odom0: /odom
+    odom0_config: [true,  true,  false,    # x,     y,     z
+                   false, false, true,     # roll,  pitch, yaw
+                   true,  false, false,    # vx,    vy,    vz
+                   false, false, true,     # vroll, vpitch,vyaw
+                   false, false, false]    # ax,    ay,    az
+    odom0_differential: false
+    odom0_relative:     false
+    odom0_queue_size:   10
+
+    # ── GPS ENU 좌표 (navsat_transform 출력, gps.launch.py 별도 실행 필요) ─
+    # gps.launch.py 미실행 시 sensor_timeout 후 무시됨 — 에러 아님
+    odom1: /odometry/gps
+    odom1_config: [true,  true,  false,
+                   false, false, false,
+                   false, false, false,
+                   false, false, false,
+                   false, false, false]
+    odom1_differential: false
+    odom1_relative:     false
+    odom1_queue_size:   10
+    odom1_nodelay:      false
+
+    # ── RealSense D435i IMU ─────────────────────────────────────────────
+    # /camera/imu = 자이로 z (vyaw 보정) + 가속도 x (전진 가속도 보정)
+    # - yaw 절대값은 사용 안 함 (카메라 장착 방향 보정 없음)
+    # - imu0_relative=true: 시작 시점 기준 상대 측정치로 처리
+    imu0: /camera/imu
+    imu0_config: [false, false, false,    # x,     y,     z
+                  false, false, false,    # roll,  pitch, yaw  (사용 안 함)
+                  false, false, false,    # vx,    vy,    vz
+                  false, false, true,     # vroll, vpitch,vyaw  ← 자이로 z
+                  true,  false, false]    # ax,    ay,    az   ← 전진 가속도
+    imu0_differential: false
+    imu0_relative:     true
+    imu0_remove_gravitational_acceleration: true
+    imu0_queue_size:   50
+
+    # ── 프로세스 노이즈 공분산 Q (15×15 대각, 행 우선) ─────────────────
+    # 값이 클수록 해당 상태 예측을 더 불확실하게 여김 → 측정치 더 신뢰
+    # x/y: 0.05 — 바퀴 슬립 고려
+    # yaw: 0.06 — 평탄하지 않은 과수원 지면 고려
+    # vx:  0.025 — 엔코더 분해능 기준
+    # vyaw:0.02  — 자이로 노이즈 기준
+    process_noise_covariance:
+      [ 0.05,  0.0,   0.0,   0.0,   0.0,   0.0,   0.0,    0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,
+        0.0,   0.05,  0.0,   0.0,   0.0,   0.0,   0.0,    0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,
+        0.0,   0.0,   0.06,  0.0,   0.0,   0.0,   0.0,    0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,
+        0.0,   0.0,   0.0,   0.03,  0.0,   0.0,   0.0,    0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,
+        0.0,   0.0,   0.0,   0.0,   0.03,  0.0,   0.0,    0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,
+        0.0,   0.0,   0.0,   0.0,   0.0,   0.06,  0.0,    0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,
+        0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.025,  0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,
+        0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,    0.025, 0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,
+        0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,    0.0,   0.04,  0.0,   0.0,   0.0,   0.0,   0.0,   0.0,
+        0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,    0.0,   0.0,   0.01,  0.0,   0.0,   0.0,   0.0,   0.0,
+        0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,    0.0,   0.0,   0.0,   0.01,  0.0,   0.0,   0.0,   0.0,
+        0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,    0.0,   0.0,   0.0,   0.0,   0.02,  0.0,   0.0,   0.0,
+        0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,    0.0,   0.0,   0.0,   0.0,   0.0,   0.01,  0.0,   0.0,
+        0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,    0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.01,  0.0,
+        0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,    0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.015 ]

@@ -1278,9 +1278,16 @@ body {
         <button class="mini-btn yellow" onclick="clearDraftRoute()">초안 지우기</button>
         <button class="mini-btn red" onclick="clearGpsTrack()">GPS Track 지우기</button>
       </div>
+      <div style="display:flex;align-items:center;gap:12px;padding:5px 2px;font-size:13px;">
+        <span style="color:var(--muted);">Goal 상태:</span>
+        <span id="nav-goal-state" style="font-weight:700;color:#8b949e;">IDLE</span>
+        <span style="color:var(--muted);">거리:</span>
+        <span id="nav-goal-dist" style="font-family:monospace;">—</span>
+        <button class="mini-btn red" onclick="navCancel()" style="margin-left:auto;">✕ Goal 취소</button>
+      </div>
       <div class="map-help">
         스크롤: 확대/축소 (마우스 위치 기준) &nbsp;|&nbsp; 드래그: 이동 &nbsp;|&nbsp; Auto-fit: 초기화<br>
-        클릭: 단일 Goal 전송 &nbsp;|&nbsp; `웨이포인트 추가` 모드 또는 Shift+클릭: 경로 포인트 추가
+        클릭: 단일 Goal 전송 &nbsp;|&nbsp; <b>단일 Goal 모드</b>: bridge.py P제어 (Nav2 불필요)
       </div>
       <div id="draft-route-list" class="route-list">route draft: empty</div>
     </div>
@@ -1604,6 +1611,8 @@ const agvUiState = {
   autonomyLogTail: [],
   draftRoute: [],
   goalMode: 'goal',
+  navGoalStatus: { state: 'IDLE', distance: 0, active: false, goal_x: 0, goal_y: 0 },
+  navOdom: { x: 0, y: 0, theta: 0 },
   lastGoal: null,
   mapViewport: { cX: 0, cY: 0, scale: 50, w: 960, h: 480 },
   mapZoom: 1.0,
@@ -2009,6 +2018,9 @@ function agvUpdateStatus(msg) {
     el('agv-vel-left').textContent  = msg.vel_left_hw;
     el('agv-vel-right').textContent = msg.vel_right_hw;
     usUpdateLivePos(msg.pos_left_hw, msg.pos_right_hw);
+    if (msg.odom_x !== undefined) {
+      agvUiState.navOdom = { x: msg.odom_x, y: msg.odom_y, theta: msg.odom_theta };
+    }
   }
 }
 
@@ -2255,6 +2267,7 @@ function onMsg(m) {
     case 'gps_odometry':     onGpsOdometry(m); break;
     case 'camera_imu':       onCameraImu(m); break;
     case 'odom_reset_ack':   logMsg('오덤 리셋 완료', 'lok'); break;
+    case 'nav_goal_status':  onNavGoalStatus(m); break;
     case 'connected':
       setBadge(true, m.port, m.baud);
       logMsg(`Connected: ${m.port} @ ${m.baud}`, 'lok');
@@ -2345,7 +2358,7 @@ function resetOdom() {
 }
 
 function navCancel() {
-  send({ cmd: 'ros_publish', topic: '/nav/cancel', data: {} });
+  send({ cmd: 'nav_goal_cancel' });
 }
 
 function onRowFollowStatus(m) {
@@ -2378,6 +2391,32 @@ function onRouteStatus(m) {
   agvUiState.routeDone = Number(m.done || 0);
   agvUiState.routeTotal = Number(m.total || 0);
   renderNavStatus();
+}
+
+function onNavGoalStatus(m) {
+  agvUiState.navGoalStatus = {
+    state:    m.state    || 'IDLE',
+    distance: Number(m.distance ?? 0),
+    active:   m.state !== 'IDLE',
+    goal_x:   Number(m.goal_x ?? 0),
+    goal_y:   Number(m.goal_y ?? 0),
+  };
+  if (m.state === 'ARRIVED') {
+    if (agvUiState.lastGoal) agvUiState.lastGoal.active = false;
+    logMsg(`Goal 도달 (x=${m.goal_x?.toFixed?.(2)} y=${m.goal_y?.toFixed?.(2)})`, 'lok');
+  }
+  if (m.state === 'IDLE') {
+    if (agvUiState.lastGoal) agvUiState.lastGoal.active = false;
+  }
+  const stateEl = el('nav-goal-state');
+  const distEl  = el('nav-goal-dist');
+  if (stateEl) {
+    const colors = { IDLE:'#8b949e', ROTATING:'#f0a30a', DRIVING:'#3fb950', ARRIVED:'#58a6ff' };
+    stateEl.textContent = m.state || 'IDLE';
+    stateEl.style.color = colors[m.state] || '#8b949e';
+  }
+  if (distEl) distEl.textContent = m.state === 'IDLE' ? '—' : `${Number(m.distance ?? 0).toFixed(2)} m`;
+  drawGpsTrackCanvas();
 }
 
 function onNavMapPath(m) {
@@ -2547,12 +2586,9 @@ function stopRoute() {
 }
 
 function sendGoalPose(x, y) {
-  const curX = agvUiState.navLocX ?? agvUiState.gpsEnuX ?? 0;
-  const curY = agvUiState.navLocY ?? agvUiState.gpsEnuY ?? 0;
-  const theta = Math.atan2(y - curY, x - curX);
-  agvUiState.lastGoal = { x, y, theta };
-  send({ cmd: 'ros_publish', topic: '/goal_pose', data: { x, y, theta_rad: theta } });
-  logMsg(`Goal 전송: x=${x.toFixed(2)} y=${y.toFixed(2)} θ=${(theta * 180 / Math.PI).toFixed(1)}°`, 'lok');
+  agvUiState.lastGoal = { x, y, active: true };
+  send({ cmd: 'nav_goal_set', x, y });
+  logMsg(`Goal 전송: x=${x.toFixed(2)} y=${y.toFixed(2)}`, 'lok');
   drawGpsTrackCanvas();
 }
 
@@ -2567,8 +2603,12 @@ function addDraftWaypoint(x, y) {
 }
 
 function runDraftRoute() {
+  if (agvUiState.goalMode !== 'route') {
+    logMsg('웨이포인트 추가 모드로 전환 후 사용하세요. (단일 Goal 모드는 맵 클릭으로 바로 실행)', 'lwarn');
+    return;
+  }
   if (agvUiState.draftRoute.length === 0) {
-    logMsg('실행할 웨이포인트가 없습니다.', 'lwarn');
+    logMsg('실행할 웨이포인트가 없습니다. 맵을 클릭해 포인트를 추가하세요.', 'lwarn');
     return;
   }
   send({ cmd: 'start_route', waypoints: agvUiState.draftRoute.map(p => [p.x, p.y, p.theta]) });
@@ -2803,11 +2843,47 @@ function drawGpsTrackCanvas() {
     ctx.fillText('IMU heading only — 위치 없음', w / 2 - 80, h / 2 + 38);
   }
 
-  // Goal marker
-  if (agvUiState.lastGoal) {
-    const [gx, gy] = [sx(agvUiState.lastGoal.x), sy(agvUiState.lastGoal.y)];
-    ctx.beginPath(); ctx.arc(gx, gy, 6, 0, Math.PI * 2);
-    ctx.strokeStyle = '#ff7b72'; ctx.lineWidth = 2; ctx.stroke();
+  // Goal marker + AGV→Goal dashed line
+  const goal = agvUiState.lastGoal;
+  if (goal && goal.active !== false) {
+    const [gx, gy] = [sx(goal.x), sy(goal.y)];
+    const ns = agvUiState.navGoalStatus;
+    const stateColor = { ROTATING:'#f0a30a', DRIVING:'#3fb950', ARRIVED:'#58a6ff' }[ns?.state] || '#ff7b72';
+
+    // dashed line: AGV → Goal
+    const agvX = agvUiState.navOdom.x !== 0 || agvUiState.navOdom.y !== 0
+      ? agvUiState.navOdom.x : (agvUiState.navLocX ?? agvUiState.gpsEnuX ?? null);
+    const agvY = agvUiState.navOdom.x !== 0 || agvUiState.navOdom.y !== 0
+      ? agvUiState.navOdom.y : (agvUiState.navLocY ?? agvUiState.gpsEnuY ?? null);
+    if (agvX !== null && agvY !== null) {
+      ctx.save();
+      ctx.setLineDash([8, 5]);
+      ctx.strokeStyle = `${stateColor}99`;
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(sx(agvX), sy(agvY));
+      ctx.lineTo(gx, gy);
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    // outer ring
+    ctx.beginPath(); ctx.arc(gx, gy, 12, 0, Math.PI * 2);
+    ctx.strokeStyle = stateColor; ctx.lineWidth = 2; ctx.stroke();
+    // inner dot
+    ctx.beginPath(); ctx.arc(gx, gy, 4, 0, Math.PI * 2);
+    ctx.fillStyle = stateColor; ctx.fill();
+    // crosshair
+    ctx.strokeStyle = stateColor; ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(gx - 18, gy); ctx.lineTo(gx + 18, gy);
+    ctx.moveTo(gx, gy - 18); ctx.lineTo(gx, gy + 18);
+    ctx.stroke();
+    // label
+    ctx.fillStyle = stateColor; ctx.font = 'bold 11px Courier New'; ctx.textAlign = 'left';
+    const distTxt = ns?.distance > 0 ? ` ${ns.distance.toFixed(1)}m` : '';
+    ctx.fillText(`GOAL${distTxt}`, gx + 16, gy - 6);
+    ctx.textAlign = 'left';
   }
 
   // HUD: zoom ×N (top-left), grid step (top-right)

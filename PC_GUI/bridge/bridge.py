@@ -226,6 +226,19 @@ _cam_imu:   dict = {"ax": 0.0, "ay": 0.0, "az": 0.0,
                     "ts": 0.0,           # 마지막 IMU 타임스탬프
                     "ts_gyro": 0.0}      # 적분용 이전 gyro 타임스탬프
 
+# ── Go-To-Goal controller (경로 B — Nav2 없이 encoder 오도메트리 직접 제어) ────
+_loop: Optional[asyncio.AbstractEventLoop] = None   # set in _run()
+
+_odom_state: dict = {
+    'x': 0.0, 'y': 0.0, 'theta': 0.0,
+    'pos_left_prev':  None,   # m
+    'pos_right_prev': None,   # m
+    'unit_scale': 4.0,        # counts/mm — robot_config.h 기본값
+    'wheel_base': 0.60,       # m
+}
+_goal_state: dict = {'active': False, 'state': 'IDLE', 'x': 0.0, 'y': 0.0}
+_goal_task:  Optional[asyncio.Task] = None
+
 
 def _camera_loop() -> None:
     """백그라운드 스레드: D435i 컬러 스트림 → JPEG → _cam_frame 갱신."""
@@ -358,6 +371,149 @@ def _camera_loop() -> None:
                 pass
 
         time.sleep(5.0)
+
+
+# ── Odometry integration ─────────────────────────────────────────────────────
+
+def _integrate_odometry(msg: dict) -> None:
+    """AGV_ODOMETRY HW count → (x, y, θ) 누적 적분."""
+    scale = _odom_state['unit_scale']   # counts/mm
+    wbase = _odom_state['wheel_base']   # m
+    pl_m = msg['pos_left_hw']  / scale / 1000.0
+    pr_m = msg['pos_right_hw'] / scale / 1000.0
+    if _odom_state['pos_left_prev'] is None:
+        _odom_state['pos_left_prev']  = pl_m
+        _odom_state['pos_right_prev'] = pr_m
+        return
+    dl = pl_m - _odom_state['pos_left_prev']
+    dr = pr_m - _odom_state['pos_right_prev']
+    _odom_state['pos_left_prev']  = pl_m
+    _odom_state['pos_right_prev'] = pr_m
+    dtheta = (dr - dl) / wbase
+    dc     = (dl + dr) / 2.0
+    _odom_state['theta'] += dtheta
+    _odom_state['x'] += dc * math.cos(_odom_state['theta'])
+    _odom_state['y'] += dc * math.sin(_odom_state['theta'])
+
+
+async def _send_agv_velocity(linear: float, angular: float) -> None:
+    """시리얼 연결 시 AGV_VELOCITY 패킷 송신 (drain 포함)."""
+    if _serial_writer is None:
+        log.warning("GoToGoal: serial disconnected — velocity cmd dropped (%.3f, %.3f)", linear, angular)
+        return
+    try:
+        _serial_writer.write(slip_encode(pkt.build_agv_velocity(linear, angular)))
+        await _serial_writer.drain()
+    except Exception as exc:
+        log.warning("GoToGoal: send failed: %s", exc)
+
+
+# ── Go-To-Goal P controller ───────────────────────────────────────────────────
+
+_GOAL_TOL    = 0.25    # m  — 도달 판정 반경
+_HEAD_TOL    = 0.20    # rad — 이 이하면 주행 시작
+_MAX_LINEAR  = 0.40    # m/s
+_MAX_ANGULAR = 0.80    # rad/s
+_KP_LINEAR   = 0.80
+_KP_ANGULAR  = 1.50
+
+
+async def _goto_goal_loop() -> None:
+    global _goal_state
+    try:
+        while _goal_state['active']:
+            await asyncio.sleep(0.05)   # 20 Hz
+            o  = _odom_state
+            dx = _goal_state['x'] - o['x']
+            dy = _goal_state['y'] - o['y']
+            dist = math.hypot(dx, dy)
+
+            if dist < _GOAL_TOL:
+                await _send_agv_velocity(0.0, 0.0)
+                _goal_state['state']  = 'ARRIVED'
+                _goal_state['active'] = False
+                await _broadcast({'type': 'nav_goal_status', 'state': 'ARRIVED',
+                                  'distance': 0.0, 'goal_x': _goal_state['x'],
+                                  'goal_y': _goal_state['y'],
+                                  'x': round(o['x'], 3), 'y': round(o['y'], 3),
+                                  'theta': round(o['theta'], 3)})
+                log.info("GoToGoal ARRIVED at (%.2f, %.2f)", _goal_state['x'], _goal_state['y'])
+                break
+
+            target_h = math.atan2(dy, dx)
+            he = math.atan2(math.sin(target_h - o['theta']),
+                            math.cos(target_h - o['theta']))
+
+            if abs(he) > _HEAD_TOL:
+                linear  = 0.0
+                angular = max(-_MAX_ANGULAR, min(_MAX_ANGULAR, _KP_ANGULAR * he))
+                _goal_state['state'] = 'ROTATING'
+            else:
+                linear  = min(_MAX_LINEAR, _KP_LINEAR * dist)
+                angular = max(-_MAX_ANGULAR, min(_MAX_ANGULAR, _KP_ANGULAR * he))
+                _goal_state['state'] = 'DRIVING'
+
+            log.debug("GoToGoal cmd: state=%s lin=%.3f ang=%.3f dist=%.2f",
+                      _goal_state['state'], linear, angular, dist)
+            await _send_agv_velocity(linear, angular)
+            await _broadcast({'type': 'nav_goal_status',
+                              'state': _goal_state['state'],
+                              'distance': round(dist, 3),
+                              'goal_x': _goal_state['x'], 'goal_y': _goal_state['y'],
+                              'x': round(o['x'], 3), 'y': round(o['y'], 3),
+                              'theta': round(o['theta'], 3)})
+    except asyncio.CancelledError:
+        pass
+    finally:
+        if _serial_writer is not None:
+            _serial_writer.write(slip_encode(pkt.build_agv_velocity(0.0, 0.0)))
+
+
+async def _set_goal(x: float, y: float) -> None:
+    global _goal_state, _goal_task
+    if _goal_task and not _goal_task.done():
+        _goal_task.cancel()
+        try: await _goal_task
+        except asyncio.CancelledError: pass
+    _goal_state.update({'active': True, 'state': 'ROTATING', 'x': x, 'y': y})
+    # 드라이브 활성화 여부 경고
+    if _serial_writer is None:
+        log.warning("GoToGoal SET: serial not connected — velocity commands will be dropped!")
+        await _broadcast({'type': 'log', 'msg':
+            '[GoToGoal] 경고: 시리얼 미연결. Connect 후 Run Enable 활성화 필요.'})
+    elif _last_status is not None:
+        re_l = _last_status.get('run_enable_left',  False)
+        re_r = _last_status.get('run_enable_right', False)
+        if not (re_l and re_r):
+            log.warning("GoToGoal SET: drives not run-enabled (L=%s R=%s)", re_l, re_r)
+            await _broadcast({'type': 'log', 'msg':
+                '[GoToGoal] 경고: 드라이브 Run Enable 비활성. HMI에서 드라이브 활성화 먼저!'})
+
+    _goal_task = asyncio.ensure_future(_goto_goal_loop())
+    await _broadcast({'type': 'nav_goal_status', 'state': 'ROTATING',
+                      'distance': math.hypot(x - _odom_state['x'], y - _odom_state['y']),
+                      'goal_x': x, 'goal_y': y,
+                      'x': round(_odom_state['x'], 3), 'y': round(_odom_state['y'], 3),
+                      'theta': round(_odom_state['theta'], 3)})
+    log.info("GoToGoal SET: x=%.2f y=%.2f dist=%.2f",
+             x, y, math.hypot(x - _odom_state['x'], y - _odom_state['y']))
+
+
+async def _cancel_goal() -> None:
+    global _goal_task
+    _goal_state['active'] = False
+    if _goal_task and not _goal_task.done():
+        _goal_task.cancel()
+        try: await _goal_task
+        except asyncio.CancelledError: pass
+    await _send_agv_velocity(0.0, 0.0)
+    _goal_state['state'] = 'IDLE'
+    await _broadcast({'type': 'nav_goal_status', 'state': 'IDLE',
+                      'distance': 0.0, 'goal_x': 0.0, 'goal_y': 0.0,
+                      'x': round(_odom_state['x'], 3),
+                      'y': round(_odom_state['y'], 3),
+                      'theta': round(_odom_state['theta'], 3)})
+    log.info("GoToGoal CANCELLED")
 
 
 def _append_autonomy_log(line: str) -> None:
@@ -511,7 +667,12 @@ def _dispatch_rx(raw: bytes) -> Optional[dict]:
         if odo is None:
             log.warning("AGV_ODOMETRY parse failed len=%d", len(payload))
             return None
-        return odo.to_dict()
+        msg = odo.to_dict()
+        _integrate_odometry(msg)
+        msg['odom_x']     = round(_odom_state['x'],     4)
+        msg['odom_y']     = round(_odom_state['y'],     4)
+        msg['odom_theta'] = round(_odom_state['theta'], 4)
+        return msg
 
     if pkt_type == pkt.PKT_AGV_STATUS:
         st = pkt.parse_agv_status(payload)
@@ -625,9 +786,30 @@ async def _ws_handler(ws: WebSocketServerProtocol) -> None:
                     await _switch_port(port)
                 continue
 
+            # Go-To-Goal direct controller commands
+            if data.get("cmd") == "nav_goal_set":
+                await _set_goal(float(data.get('x', 0.0)), float(data.get('y', 0.0)))
+                continue
+            if data.get("cmd") == "nav_goal_cancel":
+                await _cancel_goal()
+                continue
+            if data.get("cmd") == "reset_odom":
+                _odom_state.update({'x': 0.0, 'y': 0.0, 'theta': 0.0,
+                                    'pos_left_prev': None, 'pos_right_prev': None})
+                await _broadcast({'type': 'odom_reset_ack'})
+                log.info("Odometry reset")
+                continue
+            if data.get("cmd") == "nav_set_params":
+                if 'unit_scale' in data:
+                    _odom_state['unit_scale'] = float(data['unit_scale'])
+                if 'wheel_base' in data:
+                    _odom_state['wheel_base'] = float(data['wheel_base'])
+                log.info("Nav params updated: scale=%.2f wb=%.3f",
+                         _odom_state['unit_scale'], _odom_state['wheel_base'])
+                continue
+
             if data.get("type") or data.get("cmd") in {
-                "ros_publish", "request_map_path", "reset_odom",
-                "start_route", "stop_route",
+                "ros_publish", "request_map_path", "start_route", "stop_route",
             }:
                 await _broadcast(data)
                 continue
@@ -751,6 +933,17 @@ class _HttpHandler(http.server.SimpleHTTPRequestHandler):
         if path == '/camera/stream':
             self._handle_mjpeg_stream()
             return
+        if path == '/nav/status':
+            self._send_json({
+                'state':   _goal_state['state'],
+                'active':  _goal_state['active'],
+                'goal_x':  _goal_state['x'],
+                'goal_y':  _goal_state['y'],
+                'x':       _odom_state['x'],
+                'y':       _odom_state['y'],
+                'theta':   _odom_state['theta'],
+            })
+            return
         super().do_GET()
 
     def do_POST(self):
@@ -763,6 +956,21 @@ class _HttpHandler(http.server.SimpleHTTPRequestHandler):
             return
         if self.path == '/autonomy/stop':
             self._send_json(_stop_autonomy())
+            return
+        if self.path == '/nav/goal':
+            try:
+                x = float(payload.get('x', 0.0))
+                y = float(payload.get('y', 0.0))
+                if _loop:
+                    asyncio.run_coroutine_threadsafe(_set_goal(x, y), _loop)
+                self._send_json({'ok': True, 'x': x, 'y': y})
+            except (TypeError, ValueError) as e:
+                self._send_json({'ok': False, 'msg': str(e)}, 400)
+            return
+        if self.path == '/nav/cancel':
+            if _loop:
+                asyncio.run_coroutine_threadsafe(_cancel_goal(), _loop)
+            self._send_json({'ok': True})
             return
         self._send_json({'ok': False, 'msg': 'not found'}, 404)
 
@@ -860,8 +1068,9 @@ def _start_http_server(port: int) -> None:
 # ── Entry point ───────────────────────────────────────────────────────────────
 
 async def _run(args: argparse.Namespace) -> None:
-    global _current_port, _baud_rate, _reconnect_delay_g, _serial_task
+    global _current_port, _baud_rate, _reconnect_delay_g, _serial_task, _loop
 
+    _loop = asyncio.get_event_loop()
     _current_port     = args.port
     _baud_rate        = args.baud
     _reconnect_delay_g = args.reconnect

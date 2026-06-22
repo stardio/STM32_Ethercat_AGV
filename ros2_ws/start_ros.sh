@@ -2,7 +2,8 @@
 # AGV 열추종 스택 시작 스크립트 (row_follow.launch.py)
 set -e
 
-WS=/home/bs/Ethercat_N753-6AX_AGV/ros2_ws
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+WS="$SCRIPT_DIR"
 
 source /opt/ros/jazzy/setup.bash
 

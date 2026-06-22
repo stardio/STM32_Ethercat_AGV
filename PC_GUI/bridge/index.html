@@ -3,6 +3,9 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate, max-age=0">
+<meta http-equiv="Pragma" content="no-cache">
+<meta http-equiv="Expires" content="0">
 <title>6-Axis Robot HMI</title>
 <style>
 :root {
@@ -101,8 +104,54 @@ body {
 .view-tab:hover:not(.active) { border-color: var(--accent); }
 
 /* ── VIEW CONTAINERS ────────────────────────────────────────────────── */
-#view-agv    { display: none; flex-direction: column; flex: 1; min-height: 0; padding: 12px; gap: 10px; overflow-y: auto; }
-#view-agv.active { display: flex; }
+/* 4-col grid: status | controls | joystick | camera  (row2: mission spans 1-3) */
+#view-agv {
+  display: none;
+  flex: 1; min-height: 0; overflow: hidden;
+  padding: 8px; gap: 8px;
+  grid-template-columns: 200px 1fr 190px 280px;
+  grid-template-rows: 1fr auto;
+  grid-template-areas:
+    "col1 col2 col3 cam"
+    "mis  mis  mis  cam";
+}
+#view-agv.active { display: grid; }
+
+/* ── GPS 배지 */
+.gps-badge { display:inline-block; padding:1px 8px; border-radius:10px; font-size:12px; font-weight:700; }
+.gps-nofix { background:#231313; color:var(--red);    border:1px solid var(--red); }
+.gps-fix   { background:#132313; color:var(--green);  border:1px solid var(--green); }
+.gps-sbas  { background:#0d1f38; color:var(--accent); border:1px solid var(--accent); }
+
+/* ── Row Follow 배지 */
+.rf-badge     { display:inline-block; padding:1px 8px; border-radius:10px; font-size:12px; font-weight:700; }
+.rf-disabled  { background:#1c2128; color:var(--muted);  border:1px solid var(--border); }
+.rf-following { background:#132313; color:var(--green);  border:1px solid var(--green); }
+.rf-obstacle  { background:#231313; color:var(--red);    border:1px solid var(--red); }
+.rf-rowend    { background:#0d1f38; color:var(--accent); border:1px solid var(--accent); }
+
+/* ── Mission Scheduler */
+.ms-badge   { display:inline-block; padding:1px 8px; border-radius:10px; font-size:12px; font-weight:700; }
+.ms-idle    { background:#1c2128; color:var(--muted);  border:1px solid var(--border); }
+.ms-running { background:#0d1f38; color:var(--accent); border:1px solid var(--accent); }
+.ms-run-btn { padding:3px 8px; border-radius:4px; border:1px solid var(--border);
+              background:var(--panel2); color:var(--text); font-size:11px; cursor:pointer; white-space:nowrap; }
+.ms-run-btn:hover    { border-color:var(--accent); color:var(--accent); }
+.ms-run-btn.ms-active{ border-color:var(--green); color:var(--green); background:#0a1f0a; }
+.sched-row  { display:flex; align-items:center; gap:5px; padding:2px 0;
+              border-bottom:1px solid var(--border); font-size:11px; }
+.sched-row:last-child { border-bottom:none; }
+.sched-time { font-family:'Courier New',monospace; color:var(--accent); width:36px; flex-shrink:0; }
+.sched-today{ color:var(--green); font-size:10px; flex-shrink:0; }
+.sched-off  { color:var(--muted); font-size:10px; flex-shrink:0; }
+
+/* ── 공통 컴팩트 */
+.ph-sm { font-size:11px; font-weight:700; color:var(--muted); text-transform:uppercase;
+         letter-spacing:.05em; padding-bottom:3px; margin-bottom:4px;
+         border-bottom:1px solid var(--border); }
+.kv2 { display:grid; grid-template-columns:auto 1fr; gap:2px 8px; font-size:11px; }
+.kv2 .k { color:var(--muted); white-space:nowrap; }
+.kv2 .v { font-family:'Courier New',monospace; overflow:hidden; text-overflow:ellipsis; }
 
 /* ── MAIN GRID ─────────────────────────────────────────────────────── */
 #main {
@@ -656,13 +705,216 @@ body {
 .lerr  { color: var(--red); }
 .lwarn { color: var(--yellow); }
 .lstm  { color: var(--accent); }
+
+/* ── AGV AUTONOMY PANELS ───────────────────────────────────────────── */
+.agv-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 10px;
+  width: 100%;
+}
+.agv-grid.two-wide {
+  grid-template-columns: minmax(360px, 1.2fr) minmax(320px, 0.8fr);
+}
+.stack-col {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+.info-grid {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 6px 10px;
+  margin-top: 8px;
+  font-size: 13px;
+  align-items: center;
+}
+.info-grid span:nth-child(odd) { color: var(--muted); }
+.metric-list {
+  display: grid;
+  gap: 7px;
+  margin-top: 10px;
+}
+.metric-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 13px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--border);
+}
+.metric-row:last-child { border-bottom: none; padding-bottom: 0; }
+.metric-row span:first-child { color: var(--muted); }
+.metric-value {
+  font-family: 'Courier New', monospace;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text);
+}
+.state-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 96px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--panel2);
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: .03em;
+}
+.tone-green  { background: #132313; color: var(--green);  border-color: var(--green); }
+.tone-yellow { background: #1f1908; color: var(--yellow); border-color: var(--yellow); }
+.tone-red    { background: #231313; color: var(--red);    border-color: var(--red); }
+.tone-blue   { background: #0d1f38; color: var(--accent); border-color: var(--accent); }
+.tone-gray   { background: #1c2128; color: var(--muted);  border-color: var(--border); }
+.inline-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 10px;
+}
+.mini-btn {
+  padding: 5px 10px;
+  border-radius: 5px;
+  border: 1px solid var(--border);
+  background: var(--panel2);
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.mini-btn:hover { border-color: var(--accent); }
+.mini-btn.green { border-color: var(--green); color: var(--green); }
+.mini-btn.red { border-color: var(--red); color: var(--red); }
+.mini-btn.blue { border-color: var(--accent); color: var(--accent); }
+.mini-btn.yellow { border-color: var(--yellow); color: var(--yellow); }
+.mini-btn:disabled { opacity: .45; cursor: not-allowed; }
+.slider-block {
+  margin-top: 10px;
+  font-size: 13px;
+  color: var(--muted);
+}
+.slider-block input[type="range"] {
+  width: 100%;
+  margin-top: 4px;
+}
+.panel-note {
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.6;
+}
+.list-box {
+  margin-top: 8px;
+  max-height: 160px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+}
+.list-item {
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+}
+.list-item:last-child { border-bottom: none; }
+.list-item strong { color: var(--text); }
+.list-item small { color: var(--muted); }
+#gps-track-canvas {
+  width: 100%;
+  aspect-ratio: 2 / 1;
+  display: block;
+  background:
+    radial-gradient(circle at top left, rgba(88,166,255,0.10), transparent 40%),
+    linear-gradient(180deg, #10161e 0%, #0d1117 100%);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.canvas-legend {
+  display: flex;
+  gap: 14px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.legend-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.legend-line {
+  width: 16px;
+  height: 0;
+  border-top: 2px solid currentColor;
+}
+.map-help {
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.7;
+}
+.route-list {
+  margin-top: 8px;
+  max-height: 120px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  padding: 6px 8px;
+  font-size: 12px;
+  font-family: 'Courier New', monospace;
+  color: var(--text);
+}
+.route-line {
+  padding: 3px 0;
+  border-bottom: 1px solid #1a2027;
+}
+.route-line:last-child { border-bottom: none; }
+.tool-overlay {
+  display: none; position: fixed; inset: 0;
+  background: rgba(0,0,0,.72); z-index: 120;
+  align-items: center; justify-content: center;
+}
+.tool-overlay.open { display: flex; }
+.tool-modal {
+  background: var(--panel); border: 1px solid var(--border);
+  border-radius: 8px; width: min(1120px, 96vw); max-height: 90vh;
+  display: flex; flex-direction: column; overflow: hidden;
+}
+.tool-header {
+  display: flex; align-items: center; gap: 10px;
+  padding: 12px 16px; border-bottom: 1px solid var(--border); flex-shrink: 0;
+}
+.tool-header h2 {
+  font-size: 18px; font-weight: 700; color: var(--accent); flex: 1;
+}
+.tool-body {
+  flex: 1; overflow: auto; padding: 14px 16px;
+}
+.tool-close {
+  padding: 5px 12px; border-radius: 5px; border: 1px solid var(--border);
+  background: var(--panel2); color: var(--text); cursor: pointer;
+}
+.tool-close:hover { border-color: var(--accent); }
+.compact-tools {
+  display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px;
+}
+@media (max-width: 1100px) {
+  .agv-grid.two-wide { grid-template-columns: 1fr; }
+}
 </style>
 </head>
 <body>
 
 <!-- TOP BAR -->
 <div id="topbar">
-  <h1>⚙ <span>6-AXIS ARTICULATED</span> &nbsp;·&nbsp; HMI</h1>
+  <h1>🚗 <span>STM32 ETHERCAT AGV</span> &nbsp;·&nbsp; HMI</h1>
   <div style="display:flex;gap:4px;margin-left:10px;">
     <button class="view-tab active"  id="tab-agv"    onclick="switchView('agv')" style="border-color:#3fb950;color:#3fb950;">🚗 AGV</button>
   </div>
@@ -672,7 +924,8 @@ body {
   </select>
   <button class="tbtn" onclick="refreshPorts()" title="포트 목록 새로고침" style="padding:4px 8px;">⟳</button>
   <button class="tbtn" onclick="toggleConn()">Connect</button>
-  <button class="tbtn" onclick="openDH()"     style="border-color:#c678dd;color:#c678dd;">⬡ DH 파라미터</button>
+  <button class="tbtn" onclick="openScalePopup()" style="border-color:#d29922;color:#d29922;">스케일 마법사</button>
+  <button class="tbtn" onclick="openMapPopup()" style="border-color:#d29922;color:#d29922;">맵/경로</button>
   <button class="tbtn" onclick="openParams()" style="border-color:#58a6ff;color:#58a6ff;">⚙ 파라미터</button>
   <span id="conn-badge" class="offline">● OFFLINE</span>
 </div>
@@ -680,185 +933,359 @@ body {
 <!-- ══ AGV VIEW ═══════════════════════════════════════════════════════════ -->
 <div id="view-agv">
 
-  <!-- Status row -->
-  <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
-    <div class="panel" style="min-width:240px;padding:10px 14px;">
-      <div class="ph">AGV Drive Status</div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px 12px;margin-top:6px;font-size:13px;">
-        <span style="color:var(--muted)">Left (J1)</span>
-        <span id="agv-cia-left" style="color:var(--yellow)">—</span>
-        <span style="color:var(--muted)">Right (J2)</span>
-        <span id="agv-cia-right" style="color:var(--yellow)">—</span>
-        <span style="color:var(--muted)">All Ready</span>
-        <span id="agv-ready" style="color:var(--red)">NO</span>
-        <span style="color:var(--muted)">Run Enable</span>
-        <span id="agv-run-enable">L:— R:—</span>
+  <!-- col1: Drive Status + Odometry + Row Follow + Safety Layer -->
+  <div style="grid-area:col1;display:flex;flex-direction:column;gap:6px;min-height:0;overflow-y:auto;">
+
+    <div class="panel" style="padding:7px 10px;flex-shrink:0;">
+      <div class="ph" style="font-size:11px;margin-bottom:4px;padding-bottom:4px;">Drive Status (CiA402)</div>
+      <div style="display:grid;grid-template-columns:auto 1fr;gap:2px 8px;font-size:12px;">
+        <span style="color:var(--muted);">L(J1)</span><span id="agv-cia-left" style="color:var(--yellow);font-size:11px;font-family:monospace;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">—</span>
+        <span style="color:var(--muted);">R(J2)</span><span id="agv-cia-right" style="color:var(--yellow);font-size:11px;font-family:monospace;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">—</span>
+        <span style="color:var(--muted);">Ready</span><span id="agv-ready" style="color:var(--red);font-weight:700;">NO</span>
+        <span style="color:var(--muted);">Enable</span><span id="agv-run-enable" style="font-size:11px;">L:— R:—</span>
+      </div>
+      <div style="display:grid;grid-template-columns:auto 1fr;gap:2px 8px;font-size:11px;margin-top:5px;border-top:1px solid var(--border);padding-top:5px;">
+        <span style="color:var(--muted);">Pos L</span><span id="agv-pos-left" style="font-family:monospace;">0</span>
+        <span style="color:var(--muted);">Pos R</span><span id="agv-pos-right" style="font-family:monospace;">0</span>
+        <span style="color:var(--muted);">Vel L</span><span id="agv-vel-left" style="font-family:monospace;">0</span>
+        <span style="color:var(--muted);">Vel R</span><span id="agv-vel-right" style="font-family:monospace;">0</span>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:3px;margin-top:6px;">
+        <button id="agv-btn-run-enable" class="mini-btn green" onclick="agvRunEnable(true)" style="width:100%;padding:4px;">▶ Run Enable</button>
+        <div style="display:flex;gap:4px;">
+          <button class="mini-btn" onclick="agvRunEnable(false)" style="flex:1;padding:4px;border-color:var(--muted);color:var(--muted);font-size:11px;">■ Disable</button>
+          <button class="mini-btn red" onclick="agvStop()" style="flex:1;padding:4px;font-weight:700;font-size:11px;">⊗ E-STOP</button>
+        </div>
       </div>
     </div>
-    <div class="panel" style="min-width:240px;padding:10px 14px;">
-      <div class="ph">Wheel Odometry</div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px 12px;margin-top:6px;font-size:13px;">
-        <span style="color:var(--muted)">Pos Left</span>
-        <span id="agv-pos-left">0</span>
-        <span style="color:var(--muted)">Pos Right</span>
-        <span id="agv-pos-right">0</span>
-        <span style="color:var(--muted)">Vel Left</span>
-        <span id="agv-vel-left">0</span>
-        <span style="color:var(--muted)">Vel Right</span>
-        <span id="agv-vel-right">0</span>
+
+    <div class="panel" style="padding:7px 10px;flex-shrink:0;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:5px;">
+        <span class="ph" style="font-size:11px;margin-bottom:0;padding-bottom:0;border-bottom:none;">Row Follow</span>
+        <span id="rf-state" class="state-pill tone-gray" style="font-size:10px;min-width:60px;padding:1px 5px;">DISABLED</span>
+      </div>
+      <div style="display:grid;grid-template-columns:auto 1fr;gap:2px 8px;font-size:11px;">
+        <span style="color:var(--muted);">Front</span><span id="rf-front" style="font-family:monospace;">— m</span>
+        <span style="color:var(--muted);">Error</span><span id="rf-error" style="font-family:monospace;">— m</span>
+        <span style="color:var(--muted);">Steer</span><span id="rf-steer" style="font-family:monospace;">— r/s</span>
+      </div>
+      <div style="font-size:11px;color:var(--muted);margin-top:5px;">
+        속도 <b id="rf-speed-label" style="color:var(--text);">0.30 m/s</b>
+        <input type="range" id="rf-speed" min="0.05" max="0.60" step="0.05" value="0.30"
+               style="width:100%;margin-top:2px;"
+               oninput="el('rf-speed-label').textContent=parseFloat(this.value).toFixed(2)+' m/s'">
+      </div>
+      <div style="display:flex;gap:3px;margin-top:5px;">
+        <button class="mini-btn green" onclick="rowFollowEnable(true)" style="flex:1;padding:3px;font-size:11px;">ON</button>
+        <button class="mini-btn red" onclick="rowFollowEnable(false)" style="flex:1;padding:3px;font-size:11px;">OFF</button>
+        <button class="mini-btn blue" onclick="rowFollowApplySpeed()" style="flex:1;padding:3px;font-size:11px;">속도</button>
       </div>
     </div>
-    <div style="display:flex;gap:8px;align-items:center;margin-left:auto;">
-      <button id="agv-btn-run-enable" class="tbtn" onclick="agvRunEnable(true)"  style="border-color:var(--green);color:var(--green);padding:6px 16px;">▶ Run Enable</button>
-      <button class="tbtn" onclick="agvRunEnable(false)" style="border-color:var(--red);color:var(--red);padding:6px 16px;">■ Disable</button>
-      <button class="tbtn" onclick="agvStop()"           style="border-color:var(--red);color:var(--red);font-weight:bold;padding:6px 16px;">⊗ E-STOP</button>
+
+    <div class="panel" style="padding:7px 10px;flex-shrink:0;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:5px;">
+        <span class="ph" style="font-size:11px;margin-bottom:0;padding-bottom:0;border-bottom:none;">Safety Layer</span>
+        <span id="safety-action" class="state-pill tone-green" style="font-size:10px;min-width:60px;padding:1px 5px;">CLEAR</span>
+      </div>
+      <div style="display:grid;grid-template-columns:auto 1fr;gap:2px 8px;font-size:11px;">
+        <span style="color:var(--muted);">API</span><span id="safety-api" style="color:var(--red);">OFFLINE</span>
+        <span style="color:var(--muted);">영향</span><span id="safety-impact">정상 주행</span>
+        <span style="color:var(--muted);">RF</span><span id="safety-row-state">DISABLED</span>
+      </div>
     </div>
-  </div>
 
-  <!-- Velocity sliders + joystick -->
-  <div style="display:flex;gap:10px;flex-wrap:wrap;">
+  </div><!-- /col1 -->
 
-    <!-- Sliders -->
-    <div class="panel" style="min-width:280px;padding:10px 14px;flex:1;">
-      <div class="ph">속도 설정</div>
-      <div style="display:grid;gap:10px;margin-top:8px;">
-        <label style="font-size:13px;color:var(--muted)">
-          Max Linear &nbsp;<b id="agv-lbl-lin">0.3 m/s</b>
+  <!-- col2: Speed Sliders + GPS + Nav + Auto Stack -->
+  <div style="grid-area:col2;display:flex;flex-direction:column;gap:6px;min-height:0;overflow-y:auto;">
+
+    <div class="panel" style="padding:7px 12px;flex-shrink:0;">
+      <div class="ph" style="font-size:11px;margin-bottom:4px;padding-bottom:4px;">속도 설정</div>
+      <div style="display:grid;gap:5px;">
+        <label style="font-size:11px;color:var(--muted);">Max Linear <b id="agv-lbl-lin" style="color:var(--text);">0.3 m/s</b>
           <input type="range" id="agv-max-linear" min="0.05" max="1.5" step="0.05" value="0.3"
-                 style="width:100%;margin-top:4px;"
+                 style="width:100%;margin-top:1px;"
                  oninput="el('agv-lbl-lin').textContent=parseFloat(this.value).toFixed(2)+' m/s'">
         </label>
-        <label style="font-size:13px;color:var(--muted)">
-          Max Angular &nbsp;<b id="agv-lbl-ang">0.5 rad/s</b>
+        <label style="font-size:11px;color:var(--muted);">Max Angular <b id="agv-lbl-ang" style="color:var(--text);">0.5 rad/s</b>
           <input type="range" id="agv-max-angular" min="0.1" max="3.0" step="0.1" value="0.5"
-                 style="width:100%;margin-top:4px;"
+                 style="width:100%;margin-top:1px;"
                  oninput="el('agv-lbl-ang').textContent=parseFloat(this.value).toFixed(2)+' rad/s'">
         </label>
-        <label style="font-size:13px;color:var(--muted)">
-          Send Rate &nbsp;<b id="agv-lbl-rate">50 ms</b>
+        <label style="font-size:11px;color:var(--muted);">Send Rate <b id="agv-lbl-rate" style="color:var(--text);">50 ms</b>
           <input type="range" id="agv-send-rate" min="20" max="500" step="10" value="50"
-                 style="width:100%;margin-top:4px;"
+                 style="width:100%;margin-top:1px;"
                  oninput="el('agv-lbl-rate').textContent=this.value+' ms'">
         </label>
       </div>
     </div>
 
-    <!-- Virtual joystick -->
-    <div class="panel" style="padding:10px 14px;display:flex;flex-direction:column;align-items:center;gap:8px;">
-      <div class="ph" style="align-self:flex-start;">Virtual Joystick</div>
-      <canvas id="agv-joystick" width="200" height="200"
-              style="border:2px solid var(--border);border-radius:50%;cursor:crosshair;touch-action:none;">
+    <div class="panel" style="padding:7px 12px;flex-shrink:0;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
+        <span class="ph" style="font-size:11px;margin-bottom:0;padding-bottom:0;border-bottom:none;">GPS 상태</span>
+        <span id="gps-fix-state" class="state-pill tone-gray" style="font-size:10px;min-width:60px;padding:1px 5px;">NO DATA</span>
+      </div>
+      <div style="display:grid;grid-template-columns:auto 1fr auto 1fr;gap:2px 8px;font-size:11px;align-items:center;">
+        <span style="color:var(--muted);">위도</span><span id="gps-lat" style="font-family:monospace;">—</span>
+        <span style="color:var(--muted);">경도</span><span id="gps-lon" style="font-family:monospace;">—</span>
+        <span style="color:var(--muted);">ENU X</span><span id="gps-enu-x" style="font-family:monospace;">— m</span>
+        <span style="color:var(--muted);">ENU Y</span><span id="gps-enu-y" style="font-family:monospace;">— m</span>
+        <span style="color:var(--muted);">정확도</span><span id="gps-sigma" style="font-family:monospace;">— m</span>
+        <span style="color:var(--muted);">Track</span><span id="gps-track-count" style="font-family:monospace;">0</span>
+      </div>
+      <button class="mini-btn blue" onclick="openMapPopup()" style="margin-top:5px;font-size:11px;padding:3px 8px;">GPS 지도 열기</button>
+    </div>
+
+    <div class="panel" style="padding:7px 12px;flex-shrink:0;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
+        <span class="ph" style="font-size:11px;margin-bottom:0;padding-bottom:0;border-bottom:none;">자율주행 상태</span>
+        <span id="nav-loc-state" class="state-pill tone-gray" style="font-size:10px;min-width:60px;padding:1px 5px;">LOST</span>
+      </div>
+      <div style="display:grid;grid-template-columns:auto 1fr auto 1fr;gap:2px 8px;font-size:11px;align-items:center;">
+        <span style="color:var(--muted);">경로</span><span id="nav-route-state" style="font-family:monospace;">IDLE</span>
+        <span style="color:var(--muted);">Age</span><span id="nav-loc-age" style="font-family:monospace;">— s</span>
+        <span style="color:var(--muted);">X/Y</span><span id="nav-map-xy" style="font-family:monospace;font-size:10px;">—/—</span>
+        <span style="color:var(--muted);">Hdg</span><span id="nav-map-theta" style="font-family:monospace;">— °</span>
+      </div>
+      <div style="display:flex;gap:3px;margin-top:5px;flex-wrap:wrap;">
+        <button class="mini-btn blue" onclick="requestMapPath()" style="font-size:11px;padding:3px 6px;">경로 갱신</button>
+        <button class="mini-btn yellow" onclick="resetOdom()" style="font-size:11px;padding:3px 6px;">오덤 리셋</button>
+        <button class="mini-btn yellow" onclick="navCancel()" style="font-size:11px;padding:3px 6px;">Goal 취소</button>
+      </div>
+    </div>
+
+    <div class="panel" style="padding:7px 12px;flex-shrink:0;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
+        <span class="ph" style="font-size:11px;margin-bottom:0;padding-bottom:0;border-bottom:none;">자율주행 스택</span>
+        <span id="auto-stack-state" class="state-pill tone-gray" style="font-size:10px;min-width:60px;padding:1px 5px;">IDLE</span>
+      </div>
+      <div style="display:grid;grid-template-columns:auto 1fr auto 1fr;gap:2px 8px;font-size:11px;align-items:center;">
+        <span style="color:var(--muted);">모드</span><span id="auto-stack-mode">—</span>
+        <span style="color:var(--muted);">Up</span><span id="auto-uptime">0 s</span>
+        <span style="color:var(--muted);">DB</span><span id="auto-db-path" style="font-size:10px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-family:monospace;" colspan="3">~/.ros/rtabmap.db</span>
+        <span style="color:var(--muted);">Exit</span><span id="auto-exit">—</span>
+      </div>
+      <input id="auto-db-input" type="text" value="~/.ros/rtabmap.db"
+             style="width:100%;margin-top:5px;padding:3px 6px;background:var(--bg);border:1px solid var(--border);border-radius:4px;color:var(--text);font-size:11px;">
+      <div style="display:flex;gap:3px;margin-top:4px;">
+        <button class="mini-btn green" onclick="autonomyStartSlam()" style="flex:1;font-size:11px;padding:3px;">SLAM</button>
+        <button class="mini-btn blue" onclick="autonomyStartNav()" style="flex:1;font-size:11px;padding:3px;">Nav</button>
+        <button class="mini-btn red" onclick="autonomyStop()" style="flex:1;font-size:11px;padding:3px;">중지</button>
+        <button class="mini-btn blue" onclick="openScalePopup()" style="flex:1;font-size:11px;padding:3px;">스케일</button>
+      </div>
+    </div>
+
+  </div><!-- /col2 -->
+
+  <!-- col3: Joystick + Keyboard Hints -->
+  <div style="grid-area:col3;display:flex;flex-direction:column;gap:6px;min-height:0;overflow-y:auto;">
+
+    <div class="panel" style="padding:7px 10px;display:flex;flex-direction:column;align-items:center;gap:5px;flex-shrink:0;">
+      <div class="ph" style="font-size:11px;align-self:flex-start;margin-bottom:0;padding-bottom:0;border-bottom:none;">Virtual Joystick</div>
+      <canvas id="agv-joystick" width="158" height="158"
+              style="border:2px solid var(--border);border-radius:50%;cursor:crosshair;touch-action:none;width:158px;height:158px;margin-top:3px;">
       </canvas>
-      <div style="font-size:12px;color:var(--muted);text-align:center;">
-        V: <b id="agv-disp-lin">0.00</b> m/s &nbsp;|&nbsp;
-        ω: <b id="agv-disp-ang">0.00</b> rad/s
+      <div style="font-size:11px;color:var(--muted);text-align:center;">
+        V: <b id="agv-disp-lin">0.00</b> m/s &nbsp;|&nbsp; ω: <b id="agv-disp-ang">0.00</b> rad/s
       </div>
-      <div style="display:flex;gap:6px;">
-        <button class="tbtn" id="agv-jog-fwd"  style="padding:4px 10px;">▲</button>
-        <button class="tbtn" id="agv-jog-stop" style="padding:4px 10px;border-color:var(--red);color:var(--red);">■</button>
-        <button class="tbtn" id="agv-jog-bwd"  style="padding:4px 10px;">▼</button>
-      </div>
-      <div style="display:flex;gap:6px;">
-        <button class="tbtn" id="agv-jog-left"  style="padding:4px 10px;">◀</button>
-        <div style="width:36px;"></div>
-        <button class="tbtn" id="agv-jog-right" style="padding:4px 10px;">▶</button>
+      <div style="display:flex;flex-direction:column;gap:3px;align-items:center;width:100%;">
+        <button class="tbtn" id="agv-jog-fwd" style="padding:2px 40px;">▲</button>
+        <div style="display:flex;gap:4px;">
+          <button class="tbtn" id="agv-jog-left" style="padding:2px 12px;">◀</button>
+          <button class="tbtn" id="agv-jog-stop" style="padding:2px 8px;border-color:var(--red);color:var(--red);">■</button>
+          <button class="tbtn" id="agv-jog-right" style="padding:2px 12px;">▶</button>
+        </div>
+        <button class="tbtn" id="agv-jog-bwd" style="padding:2px 40px;">▼</button>
       </div>
     </div>
 
-    <!-- Keyboard hint -->
-    <div class="panel" style="padding:10px 14px;min-width:200px;">
-      <div class="ph">키보드 단축키</div>
-      <div style="font-size:12px;color:var(--muted);margin-top:8px;line-height:1.9;">
-        <b style="color:var(--text)">W / ↑</b> 전진<br>
-        <b style="color:var(--text)">S / ↓</b> 후진<br>
-        <b style="color:var(--text)">A / ←</b> 좌회전<br>
-        <b style="color:var(--text)">D / →</b> 우회전<br>
-        <b style="color:var(--text)">Space</b> 정지<br>
-        <b style="color:var(--text)">Q</b> 속도 감소 &nbsp;
-        <b style="color:var(--text)">E</b> 속도 증가<br>
-        <small style="color:var(--muted)">(AGV 탭 포커스 시 활성)</small>
+    <div class="panel" style="padding:7px 10px;flex-shrink:0;">
+      <div class="ph" style="font-size:11px;margin-bottom:4px;padding-bottom:4px;">키보드 단축키</div>
+      <div style="font-size:11px;color:var(--muted);line-height:1.9;">
+        <b style="color:var(--text);">W/↑</b> 전진 &nbsp; <b style="color:var(--text);">S/↓</b> 후진<br>
+        <b style="color:var(--text);">A/←</b> 좌회전 &nbsp; <b style="color:var(--text);">D/→</b> 우회전<br>
+        <b style="color:var(--text);">Space</b> 정지 &nbsp; <b style="color:var(--text);">Q/E</b> 속도±
       </div>
     </div>
 
-  </div><!-- /flex row -->
+  </div><!-- /col3 -->
 
-  <!-- unit_scale Measurement Wizard -->
-  <div class="panel" style="margin:10px 0 0 0;padding:14px 18px;width:100%;box-sizing:border-box;">
-    <div class="ph" style="margin-bottom:10px;">unit_scale 측정 마법사</div>
-    <div style="display:flex;flex-wrap:wrap;gap:16px;align-items:flex-start;">
+  <!-- cam: D435i Camera (spans both rows) -->
+  <div style="grid-area:cam;display:flex;flex-direction:column;gap:6px;min-height:0;">
 
-      <!-- Step 1: Live encoder -->
-      <div style="min-width:200px;">
-        <div style="font-size:12px;color:var(--muted);margin-bottom:6px;">현재 엔코더 위치 (HW counts)</div>
-        <div style="display:grid;grid-template-columns:auto 1fr;gap:4px 10px;font-size:13px;align-items:center;">
-          <span style="color:var(--muted);">J1 (좌):</span>
-          <b id="us-pos-left"  style="color:var(--accent);">—</b>
-          <span style="color:var(--muted);">J2 (우):</span>
-          <b id="us-pos-right" style="color:var(--accent);">—</b>
-        </div>
+    <div class="panel" style="padding:7px 10px;flex:1;display:flex;flex-direction:column;gap:5px;min-height:0;">
+      <div style="display:flex;justify-content:space-between;align-items:center;">
+        <span class="ph" style="font-size:11px;margin-bottom:0;padding-bottom:0;border-bottom:none;">D435i Camera</span>
+        <span id="cam-status-badge" class="state-pill tone-gray" style="font-size:10px;min-width:60px;padding:1px 5px;">INIT</span>
       </div>
-
-      <!-- Step 2: Capture start -->
-      <div style="display:flex;flex-direction:column;gap:8px;min-width:160px;">
-        <button class="tbtn" id="us-btn-start" onclick="usMeasStart()" style="padding:6px 14px;">① 측정 시작 (현재 위치 기록)</button>
-        <div style="font-size:12px;color:var(--muted);">
-          시작 J1: <b id="us-start-left">—</b><br>
-          시작 J2: <b id="us-start-right">—</b>
-        </div>
+      <img id="cam-img" alt="Camera Stream"
+           style="width:100%;border-radius:4px;border:1px solid var(--border);background:#000d1a;min-height:140px;max-height:200px;object-fit:contain;">
+      <div style="display:grid;grid-template-columns:auto 1fr;gap:2px 8px;font-size:11px;">
+        <span style="color:var(--muted);">모델</span><span id="cam-model" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">—</span>
+        <span style="color:var(--muted);">S/N</span><span id="cam-serial">—</span>
+        <span style="color:var(--muted);">해상도</span><span id="cam-res">—</span>
+        <span style="color:var(--muted);">오류</span><span id="cam-error" style="color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">—</span>
       </div>
-
-      <!-- Step 3: Drive & distance input -->
-      <div style="display:flex;flex-direction:column;gap:8px;min-width:180px;">
-        <div style="font-size:12px;color:var(--muted);">② 로봇을 직선으로 이동시킨 후 이동 거리 입력</div>
-        <div style="display:flex;align-items:center;gap:6px;">
-          <input id="us-distance" type="number" min="1" step="1" value="500"
-                 style="width:80px;padding:4px 6px;background:var(--bg2);color:var(--text);
-                        border:1px solid var(--border);border-radius:4px;font-size:13px;">
-          <span style="font-size:13px;color:var(--muted);">mm</span>
-        </div>
+      <div style="display:flex;gap:4px;margin-top:auto;">
+        <button class="mini-btn blue" onclick="camStartStream()" style="flex:1;font-size:11px;padding:3px;">스트림 재시작</button>
+        <button class="mini-btn blue" onclick="camPollStatus()" style="flex:1;font-size:11px;padding:3px;">상태 갱신</button>
       </div>
+    </div>
 
-      <!-- Step 4: Capture end & calculate -->
-      <div style="display:flex;flex-direction:column;gap:8px;min-width:160px;">
-        <button class="tbtn" id="us-btn-end" onclick="usMeasEnd()" style="padding:6px 14px;" disabled>③ 측정 완료 (종료 위치 기록)</button>
-        <div style="font-size:12px;color:var(--muted);">
-          종료 J1: <b id="us-end-left">—</b><br>
-          종료 J2: <b id="us-end-right">—</b>
-        </div>
+    <div class="panel" style="padding:7px 10px;flex-shrink:0;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
+        <span class="ph" style="font-size:11px;margin-bottom:0;padding-bottom:0;border-bottom:none;">D435i IMU</span>
+        <span id="imu-fresh-badge" class="state-pill tone-gray" style="font-size:10px;min-width:55px;padding:1px 5px;">NO DATA</span>
       </div>
-
-      <!-- Step 5: Result & apply -->
-      <div style="display:flex;flex-direction:column;gap:8px;min-width:200px;">
-        <div style="font-size:12px;color:var(--muted);">산출된 unit_scale (counts/mm)</div>
-        <div style="display:grid;grid-template-columns:auto 1fr;gap:4px 10px;font-size:13px;align-items:center;">
-          <span style="color:var(--muted);">J1 (좌):</span>
-          <b id="us-result-left"  style="color:var(--green);">—</b>
-          <span style="color:var(--muted);">J2 (우):</span>
-          <b id="us-result-right" style="color:var(--green);">—</b>
-        </div>
-        <div id="us-msg" style="font-size:12px;min-height:16px;"></div>
-        <div style="display:flex;gap:6px;flex-wrap:wrap;">
-          <button class="tbtn" id="us-btn-read" onclick="usReadFromFlash()"
-                  style="padding:5px 12px;border-color:var(--muted);color:var(--muted);">
-            현재값 읽어오기
-          </button>
-          <button class="tbtn" id="us-btn-apply" onclick="usApply()" disabled
-                  style="padding:5px 12px;border-color:var(--green);color:var(--green);">
-            양쪽 적용
-          </button>
-          <button class="tbtn" id="us-btn-save" onclick="usSaveFlash()" disabled
-                  style="padding:5px 12px;border-color:var(--accent);color:var(--accent);">
-            플래시 저장
-          </button>
-          <button class="tbtn" onclick="usMeasReset()"
-                  style="padding:5px 12px;">초기화</button>
-        </div>
+      <div style="text-align:center;padding:4px 0 6px;">
+        <span id="imu-yaw-deg" style="font-size:26px;font-weight:700;font-family:monospace;color:var(--accent);">—°</span>
+        <span style="font-size:11px;color:var(--muted);margin-left:5px;">Yaw (적분)</span>
       </div>
+      <div style="display:grid;grid-template-columns:auto 1fr auto 1fr;gap:2px 6px;font-size:11px;align-items:center;">
+        <span style="color:var(--muted);">ωx</span><span id="imu-wx" style="font-family:monospace;">—</span>
+        <span style="color:var(--muted);">ωy</span><span id="imu-wy" style="font-family:monospace;">—</span>
+        <span style="color:var(--muted);">ωz</span><span id="imu-wz" style="font-family:monospace;">—</span>
+        <span style="color:var(--muted);">ax</span><span id="imu-ax" style="font-family:monospace;">—</span>
+        <span style="color:var(--muted);">ay</span><span id="imu-ay" style="font-family:monospace;">—</span>
+        <span style="color:var(--muted);">az</span><span id="imu-az" style="font-family:monospace;">—</span>
+      </div>
+      <button class="mini-btn yellow" onclick="resetCameraImuHeading()" style="width:100%;margin-top:5px;font-size:11px;padding:3px;">↺ Yaw 영점 리셋</button>
+    </div>
 
-    </div><!-- /flex wrap -->
-  </div><!-- /unit_scale wizard -->
+  </div><!-- /cam -->
+
+  <!-- mis: Mission Scheduler (spans col1+col2+col3) -->
+  <div style="grid-area:mis;display:flex;gap:6px;min-height:0;">
+
+    <div class="panel" style="padding:7px 12px;flex:1;min-width:0;">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
+        <span class="ph" style="font-size:11px;margin-bottom:0;padding-bottom:0;border-bottom:none;">Mission Scheduler</span>
+        <span id="mission-api-state" class="state-pill tone-gray" style="font-size:10px;min-width:55px;padding:1px 5px;">OFFLINE</span>
+      </div>
+      <div style="display:flex;gap:14px;flex-wrap:wrap;margin-top:5px;font-size:11px;">
+        <div><span style="color:var(--muted);">미션: </span><span id="mission-current" style="font-family:monospace;">—</span></div>
+        <div><span style="color:var(--muted);">타입: </span><span id="mission-type">—</span></div>
+        <div><span style="color:var(--muted);">경과: </span><span id="mission-elapsed">0 s</span></div>
+        <div><span style="color:var(--muted);">RF: </span><span id="mission-rf">DISABLED</span></div>
+        <div><span style="color:var(--muted);">장애물: </span><span id="mission-obstacle">CLEAR</span></div>
+      </div>
+      <div style="display:flex;gap:5px;margin-top:6px;align-items:center;">
+        <select id="mission-select" style="flex:1;min-width:0;padding:3px 5px;background:var(--bg);border:1px solid var(--border);border-radius:4px;color:var(--text);font-size:11px;">
+          <option value="">-- 미션 선택 --</option>
+        </select>
+        <button class="mini-btn green" onclick="missionRunSelected()" style="font-size:11px;padding:3px 8px;">▶ 실행</button>
+        <button class="mini-btn red" onclick="missionStop()" style="font-size:11px;padding:3px 8px;">■ 중단</button>
+        <button class="mini-btn blue" onclick="missionRefreshAll()" style="font-size:11px;padding:3px 8px;">⟳</button>
+      </div>
+    </div>
+
+    <div class="panel" style="padding:7px 12px;width:210px;flex-shrink:0;">
+      <div class="ph" style="font-size:11px;margin-bottom:4px;padding-bottom:4px;">다음 스케줄</div>
+      <div id="mission-next" style="font-size:11px;overflow-y:auto;max-height:90px;">
+        <div style="color:var(--muted);">대기 중...</div>
+      </div>
+    </div>
+
+  </div><!-- /mis -->
 
 </div><!-- /view-agv -->
+
+<div id="scale-overlay" class="tool-overlay" onclick="toolPopupOverlayClick(event, 'scale-overlay')">
+  <div class="tool-modal">
+    <div class="tool-header">
+      <h2>unit_scale 측정 마법사</h2>
+      <button class="tool-close" onclick="closeToolPopup('scale-overlay')">닫기</button>
+    </div>
+    <div class="tool-body">
+      <div style="display:flex;flex-wrap:wrap;gap:16px;align-items:flex-start;">
+        <div style="min-width:200px;">
+          <div style="font-size:12px;color:var(--muted);margin-bottom:6px;">현재 엔코더 위치 (HW counts)</div>
+          <div style="display:grid;grid-template-columns:auto 1fr;gap:4px 10px;font-size:13px;align-items:center;">
+            <span style="color:var(--muted);">J1 (좌):</span>
+            <b id="us-pos-left"  style="color:var(--accent);">—</b>
+            <span style="color:var(--muted);">J2 (우):</span>
+            <b id="us-pos-right" style="color:var(--accent);">—</b>
+          </div>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:8px;min-width:160px;">
+          <button class="tbtn" id="us-btn-start" onclick="usMeasStart()" style="padding:6px 14px;">① 측정 시작 (현재 위치 기록)</button>
+          <div style="font-size:12px;color:var(--muted);">
+            시작 J1: <b id="us-start-left">—</b><br>
+            시작 J2: <b id="us-start-right">—</b>
+          </div>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:8px;min-width:180px;">
+          <div style="font-size:12px;color:var(--muted);">② 로봇을 직선으로 이동시킨 후 이동 거리 입력</div>
+          <div style="display:flex;align-items:center;gap:6px;">
+            <input id="us-distance" type="number" min="1" step="1" value="500"
+                   style="width:80px;padding:4px 6px;background:var(--bg2);color:var(--text);border:1px solid var(--border);border-radius:4px;font-size:13px;">
+            <span style="font-size:13px;color:var(--muted);">mm</span>
+          </div>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:8px;min-width:160px;">
+          <button class="tbtn" id="us-btn-end" onclick="usMeasEnd()" style="padding:6px 14px;" disabled>③ 측정 완료 (종료 위치 기록)</button>
+          <div style="font-size:12px;color:var(--muted);">
+            종료 J1: <b id="us-end-left">—</b><br>
+            종료 J2: <b id="us-end-right">—</b>
+          </div>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:8px;min-width:220px;">
+          <div style="font-size:12px;color:var(--muted);">산출된 unit_scale (counts/mm)</div>
+          <div style="display:grid;grid-template-columns:auto 1fr;gap:4px 10px;font-size:13px;align-items:center;">
+            <span style="color:var(--muted);">J1 (좌):</span>
+            <b id="us-result-left"  style="color:var(--green);">—</b>
+            <span style="color:var(--muted);">J2 (우):</span>
+            <b id="us-result-right" style="color:var(--green);">—</b>
+          </div>
+          <div id="us-msg" style="font-size:12px;min-height:16px;"></div>
+          <div style="display:flex;gap:6px;flex-wrap:wrap;">
+            <button class="tbtn" id="us-btn-read" onclick="usReadFromFlash()" style="padding:5px 12px;border-color:var(--muted);color:var(--muted);">현재값 읽어오기</button>
+            <button class="tbtn" id="us-btn-apply" onclick="usApply()" disabled style="padding:5px 12px;border-color:var(--green);color:var(--green);">양쪽 적용</button>
+            <button class="tbtn" id="us-btn-save" onclick="usSaveFlash()" disabled style="padding:5px 12px;border-color:var(--accent);color:var(--accent);">플래시 저장</button>
+            <button class="tbtn" onclick="usMeasReset()" style="padding:5px 12px;">초기화</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="map-overlay" class="tool-overlay" onclick="toolPopupOverlayClick(event, 'map-overlay')">
+  <div class="tool-modal">
+    <div class="tool-header">
+      <h2>GPS 2D 경로 지도</h2>
+      <button class="tool-close" onclick="closeToolPopup('map-overlay')">닫기</button>
+    </div>
+    <div class="tool-body">
+      <canvas id="gps-track-canvas" width="960" height="480"></canvas>
+      <div class="canvas-legend">
+        <span class="legend-chip" style="color:var(--accent);"><span class="legend-line"></span> GPS ENU Track</span>
+        <span class="legend-chip" style="color:var(--yellow);"><span class="legend-line" style="border-top-style:dashed;"></span> Nav2 Map Path</span>
+        <span class="legend-chip" style="color:var(--green);">▲ AGV Pose</span>
+      </div>
+      <div id="map-agv-status" class="map-help" style="margin-top:6px;">AGV pose: waiting for localization or GPS movement</div>
+      <div class="inline-actions">
+        <button class="mini-btn" onclick="mapZoomIn()" style="font-size:14px;padding:2px 10px;">＋</button>
+        <button class="mini-btn" onclick="mapZoomOut()" style="font-size:14px;padding:2px 10px;">－</button>
+        <button class="mini-btn blue" onclick="mapAutoFit()">Auto-fit</button>
+        <button class="mini-btn green" onclick="setGoalMode('goal')">단일 Goal</button>
+        <button class="mini-btn yellow" onclick="setGoalMode('route')">웨이포인트 추가</button>
+        <button class="mini-btn blue" onclick="runDraftRoute()">경로 실행</button>
+        <button class="mini-btn red" onclick="stopRoute()">경로 취소</button>
+        <button class="mini-btn blue" onclick="resetCameraImuHeading()">IMU heading 리셋</button>
+        <button class="mini-btn blue" onclick="requestMapPath()">Nav2 Path 요청</button>
+        <button class="mini-btn yellow" onclick="navCancel()">현재 Goal 취소</button>
+        <button class="mini-btn yellow" onclick="clearDraftRoute()">초안 지우기</button>
+        <button class="mini-btn red" onclick="clearGpsTrack()">GPS Track 지우기</button>
+      </div>
+      <div class="map-help">
+        스크롤: 확대/축소 (마우스 위치 기준) &nbsp;|&nbsp; 드래그: 이동 &nbsp;|&nbsp; Auto-fit: 초기화<br>
+        클릭: 단일 Goal 전송 &nbsp;|&nbsp; `웨이포인트 추가` 모드 또는 Shift+클릭: 경로 포인트 추가
+      </div>
+      <div id="draft-route-list" class="route-list">route draft: empty</div>
+    </div>
+  </div>
+</div>
 
 <!-- LOG (shared) -->
 <div id="logrow">
@@ -873,10 +1300,6 @@ body {
     <div id="pm-axis-tabs">
       <button class="pm-tab active" id="pmt-0" onclick="pmTab(0)">J1</button>
       <button class="pm-tab"        id="pmt-1" onclick="pmTab(1)">J2</button>
-      <button class="pm-tab"        id="pmt-2" onclick="pmTab(2)">J3</button>
-      <button class="pm-tab"        id="pmt-3" onclick="pmTab(3)">J4</button>
-      <button class="pm-tab"        id="pmt-4" onclick="pmTab(4)">J5</button>
-      <button class="pm-tab"        id="pmt-5" onclick="pmTab(5)">J6</button>
     </div>
     <button class="pm-fbtn read" onclick="send({cmd:'param_read_req'})" style="margin-left:8px;">⟳ 읽기</button>
     <button class="pm-fbtn" onclick="closeParams()" style="margin-left:4px;">✕</button>
@@ -989,8 +1412,8 @@ body {
 </div><!-- /param-modal -->
 </div><!-- /param-overlay -->
 
-<!-- ══ DH PARAMETER MODAL ═══════════════════════════════════════════ -->
-<div id="dh-overlay" onclick="dhOverlayClick(event)">
+<!-- DH PARAMETER MODAL removed (6-axis robot feature, not used by AGV) -->
+<div id="dh-overlay">
 <div id="dh-modal">
 
   <div id="dh-header">
@@ -1121,13 +1544,13 @@ body {
 'use strict';
 
 // ── Config ───────────────────────────────────────────────────────────────────
-const AXIS_COUNT    = 6;
-const AXIS_NAMES    = ['J1', 'J2', 'J3', 'J4', 'J5', 'J6'];
-const AXIS_COLORS   = ['#58a6ff', '#3fb950', '#f0a30a', '#e06c75', '#c678dd', '#56b6c2'];
+const AXIS_COUNT    = 2;
+const AXIS_NAMES    = ['J1', 'J2'];
+const AXIS_COLORS   = ['#58a6ff', '#3fb950'];
 
 // ── State ─────────────────────────────────────────────────────────────────────
 let ws        = null;
-let curPos    = [0, 0, 0, 0, 0, 0];
+let curPos    = [0, 0];
 let allEnable = false;
 
 // Parameter modal state
@@ -1142,6 +1565,266 @@ const PARAM = {
   RAMP_VEL: 0x20,
 };
 
+const agvUiState = {
+  rowFollowState: 'DISABLED',
+  frontM: null,
+  errorM: null,
+  angularRps: null,
+  obstacleAction: 'CLEAR',
+  navLocState: 'LOST',
+  navLocAgeS: null,
+  navLocX: null,
+  navLocY: null,
+  navLocTheta: null,
+  routeState: 'IDLE',
+  routeDone: 0,
+  routeTotal: 0,
+  gpsStatus: null,
+  gpsLat: null,
+  gpsLon: null,
+  gpsSigmaM: null,
+  gpsEnuX: null,
+  gpsEnuY: null,
+  gpsTrack: [],
+  cameraImuTheta: null,
+  cameraYawRate: 0,
+  cameraYawUpdatedAt: 0,
+  cameraYawZeroOffset: 0,
+  imuWx: null, imuWy: null, imuWz: null,
+  imuAx: null, imuAy: null, imuAz: null,
+  navPath: [],
+  missionApiOnline: false,
+  missionStatus: null,
+  missionSchedule: [],
+  autonomyRunning: false,
+  autonomyMode: 'IDLE',
+  autonomyDbPath: '~/.ros/rtabmap.db',
+  autonomyUptimeSec: 0,
+  autonomyExitCode: null,
+  autonomyLogTail: [],
+  draftRoute: [],
+  goalMode: 'goal',
+  lastGoal: null,
+  mapViewport: { cX: 0, cY: 0, scale: 50, w: 960, h: 480 },
+  mapZoom: 1.0,
+  mapPanX: 0.0,
+  mapPanY: 0.0,
+  gpsHeadingTheta: null,
+  gpsHeadingSpeedMps: 0,
+  displayPoseX: null,
+  displayPoseY: null,
+  displayPoseTheta: null,
+  poseHeadingSource: 'WAITING',
+  mapAnimLastTs: 0,
+};
+
+let _mapAnimationRaf = null;
+
+function normAngle(rad) {
+  let angle = rad;
+  while (angle > Math.PI) angle -= Math.PI * 2;
+  while (angle < -Math.PI) angle += Math.PI * 2;
+  return angle;
+}
+
+function lerp(a, b, t) {
+  return a + ((b - a) * t);
+}
+
+function resolveAgvPoseTarget() {
+  const x = agvUiState.navLocX !== null ? agvUiState.navLocX : agvUiState.gpsEnuX;
+  const y = agvUiState.navLocY !== null ? agvUiState.navLocY : agvUiState.gpsEnuY;
+  let theta = null;
+  let source = 'WAITING';
+  const imuFresh = agvUiState.cameraYawUpdatedAt > 0 && (Date.now() - agvUiState.cameraYawUpdatedAt) < 1500;
+  if (imuFresh && agvUiState.cameraImuTheta !== null && agvUiState.cameraImuTheta !== undefined) {
+    theta = normAngle(agvUiState.cameraImuTheta - agvUiState.cameraYawZeroOffset);
+    source = 'CAMERA_IMU';
+  } else if (agvUiState.navLocTheta !== null && agvUiState.navLocTheta !== undefined) {
+    theta = agvUiState.navLocTheta;
+    source = 'LOCALIZATION';
+  } else if (agvUiState.gpsHeadingTheta !== null && agvUiState.gpsHeadingTheta !== undefined) {
+    theta = agvUiState.gpsHeadingTheta;
+    source = 'GPS_TRACK';
+  }
+  return { x, y, theta, source };
+}
+
+function renderMapAgvStatus() {
+  const status = el('map-agv-status');
+  if (!status) return;
+  const target = resolveAgvPoseTarget();
+  if (target.x === null || target.y === null) {
+    status.textContent = 'AGV pose: waiting for localization or GPS movement';
+    return;
+  }
+  const thetaDeg = target.theta === null || target.theta === undefined
+    ? '—'
+    : `${(target.theta * 180 / Math.PI).toFixed(1)}°`;
+  const sourceText = target.source === 'CAMERA_IMU'
+    ? `D435i IMU yaw, ${(agvUiState.cameraYawRate * 180 / Math.PI).toFixed(1)}°/s`
+    : target.source === 'LOCALIZATION'
+    ? (agvUiState.navLocState === 'ODOM_ONLY' ? 'STM32 wheel odom' : 'RTAB-Map yaw')
+    : target.source === 'GPS_TRACK'
+      ? 'GPS 이동 방향'
+      : '방향 대기';
+  status.textContent = `AGV pose: x=${target.x.toFixed(2)} m, y=${target.y.toFixed(2)} m, heading=${thetaDeg} (${sourceText})`;
+}
+
+function animateMapPose(ts) {
+  const target = resolveAgvPoseTarget();
+  const dt = agvUiState.mapAnimLastTs > 0 ? Math.min((ts - agvUiState.mapAnimLastTs) / 1000, 0.2) : 0.016;
+  agvUiState.mapAnimLastTs = ts;
+  let changed = false;
+
+  if (target.x !== null && target.y !== null) {
+    if (agvUiState.displayPoseX === null || agvUiState.displayPoseY === null) {
+      agvUiState.displayPoseX = target.x;
+      agvUiState.displayPoseY = target.y;
+      changed = true;
+    } else {
+      const posAlpha = Math.min(dt * 5.0, 1.0);
+      const nextX = lerp(agvUiState.displayPoseX, target.x, posAlpha);
+      const nextY = lerp(agvUiState.displayPoseY, target.y, posAlpha);
+      if (Math.abs(nextX - agvUiState.displayPoseX) > 0.0005 || Math.abs(nextY - agvUiState.displayPoseY) > 0.0005) {
+        agvUiState.displayPoseX = nextX;
+        agvUiState.displayPoseY = nextY;
+        changed = true;
+      }
+    }
+  }
+
+  if (target.theta !== null && target.theta !== undefined) {
+    if (agvUiState.displayPoseTheta === null || agvUiState.displayPoseTheta === undefined) {
+      agvUiState.displayPoseTheta = target.theta;
+      changed = true;
+    } else {
+      const delta = normAngle(target.theta - agvUiState.displayPoseTheta);
+      const turnAlpha = Math.min(dt * 6.0, 1.0);
+      const nextTheta = normAngle(agvUiState.displayPoseTheta + (delta * turnAlpha));
+      if (Math.abs(normAngle(nextTheta - agvUiState.displayPoseTheta)) > 0.0005) {
+        agvUiState.displayPoseTheta = nextTheta;
+        changed = true;
+      }
+    }
+  }
+
+  if (target.source !== agvUiState.poseHeadingSource) {
+    agvUiState.poseHeadingSource = target.source;
+    changed = true;
+  }
+
+  // IMU 방향만 있을 때도 매 프레임 캔버스 갱신 (방향 애니메이션 적용)
+  const imuDriving = target.source === 'CAMERA_IMU' && target.theta !== null;
+  if (changed || imuDriving) {
+    renderMapAgvStatus();
+    drawGpsTrackCanvas();
+  }
+  _mapAnimationRaf = requestAnimationFrame(animateMapPose);
+}
+
+function startMapAnimationLoop() {
+  if (_mapAnimationRaf !== null) return;
+  _mapAnimationRaf = requestAnimationFrame(animateMapPose);
+}
+
+function drawAgvMarker(ctx, x, y, theta) {
+  const heading = theta === null || theta === undefined ? 0 : theta;
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.rotate(-heading);
+  // Front = +X direction. All coordinates in canvas pixels.
+
+  // Drop shadow
+  ctx.fillStyle = 'rgba(0,0,0,0.30)';
+  ctx.beginPath();
+  ctx.ellipse(2, 4, 33, 20, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Wheels (drawn under body so edges peek out)
+  const WHL = '#141a20', RIM = '#2c3440';
+  [
+    [15, -15], [15, 15], [-13, -15], [-13, 15]
+  ].forEach(([wx, wy]) => {
+    ctx.fillStyle = WHL;
+    ctx.beginPath(); ctx.roundRect(wx - 7, wy - 3.5, 14, 7, 2); ctx.fill();
+    ctx.fillStyle = RIM;
+    ctx.beginPath(); ctx.roundRect(wx - 4.5, wy - 2, 9, 4, 1); ctx.fill();
+  });
+
+  // Car body
+  const bg = ctx.createLinearGradient(-22, -14, 28, 14);
+  bg.addColorStop(0,   '#185a24');
+  bg.addColorStop(0.45,'#2ea043');
+  bg.addColorStop(1,   '#62d47a');
+  ctx.fillStyle = bg;
+  ctx.strokeStyle = '#a8f3b6';
+  ctx.lineWidth = 1.3;
+  ctx.beginPath();
+  ctx.moveTo(31,   0);     // nose
+  ctx.lineTo(27, -11);     // front-right
+  ctx.lineTo(13, -13.5);   // front shoulder R
+  ctx.lineTo(-17, -13.5);  // rear shoulder R
+  ctx.lineTo(-24,  -8.5);  // rear corner R
+  ctx.lineTo(-24,   8.5);  // rear corner L
+  ctx.lineTo(-17,  13.5);  // rear shoulder L
+  ctx.lineTo(13,   13.5);  // front shoulder L
+  ctx.lineTo(27,   11);    // front-left
+  ctx.closePath();
+  ctx.fill(); ctx.stroke();
+
+  // Hood sheen (front half brighter)
+  ctx.fillStyle = 'rgba(255,255,255,0.08)';
+  ctx.beginPath();
+  ctx.moveTo(31,0); ctx.lineTo(27,-11); ctx.lineTo(9,-12.5);
+  ctx.lineTo(9,12.5); ctx.lineTo(27,11); ctx.closePath();
+  ctx.fill();
+
+  // Front windshield (blue-tinted glass)
+  ctx.fillStyle   = 'rgba(140,215,255,0.62)';
+  ctx.strokeStyle = 'rgba(180,230,255,0.4)';
+  ctx.lineWidth = 0.8;
+  ctx.beginPath();
+  ctx.moveTo(19.5, -12); ctx.lineTo(9, -12.5);
+  ctx.lineTo(9,  12.5);  ctx.lineTo(19.5, 12);
+  ctx.closePath(); ctx.fill(); ctx.stroke();
+
+  // Cabin top gloss
+  ctx.fillStyle = 'rgba(255,255,255,0.07)';
+  ctx.beginPath(); ctx.roundRect(-15, -12, 23, 24, 3); ctx.fill();
+
+  // Rear windshield
+  ctx.fillStyle   = 'rgba(100,170,230,0.45)';
+  ctx.strokeStyle = 'rgba(120,185,240,0.25)';
+  ctx.lineWidth = 0.8;
+  ctx.beginPath();
+  ctx.moveTo(-14, -12); ctx.lineTo(-20,  -8);
+  ctx.lineTo(-20,   8); ctx.lineTo(-14,  12);
+  ctx.closePath(); ctx.fill(); ctx.stroke();
+
+  // Headlights (front, glow)
+  ctx.shadowColor = 'rgba(255,255,180,0.95)'; ctx.shadowBlur = 9;
+  ctx.fillStyle = '#fffbd0';
+  ctx.fillRect(24, -13.5, 5, 4);
+  ctx.fillRect(24,   9.5, 5, 4);
+  ctx.shadowBlur = 0;
+
+  // Taillights (rear, red glow)
+  ctx.shadowColor = 'rgba(255,40,40,0.85)'; ctx.shadowBlur = 7;
+  ctx.fillStyle = '#ff3232';
+  ctx.fillRect(-25.5, -12.5, 4, 4.5);
+  ctx.fillRect(-25.5,   8,   4, 4.5);
+  ctx.shadowBlur = 0;
+
+  // Direction beam (headlight cone, very subtle)
+  ctx.strokeStyle = 'rgba(255,252,180,0.18)';
+  ctx.lineWidth = 20; ctx.lineCap = 'round';
+  ctx.beginPath(); ctx.moveTo(31,0); ctx.lineTo(58,0); ctx.stroke();
+  ctx.lineCap = 'butt';
+
+  ctx.restore();
+}
+
 
 // ── View switching ────────────────────────────────────────────────────────────
 let currentView = 'agv';
@@ -1152,6 +1835,14 @@ function switchView(name) {
   if (name === 'agv') agvStartSendLoop(); else agvStopSendLoop();
   setTimeout(c3dResize, 30);
 }
+
+function openScalePopup() { el('scale-overlay').classList.add('open'); }
+function openMapPopup() {
+  el('map-overlay').classList.add('open');
+  setTimeout(drawGpsTrackCanvas, 30);
+}
+function closeToolPopup(id) { el(id).classList.remove('open'); }
+function toolPopupOverlayClick(e, id) { if (e.target === el(id)) closeToolPopup(id); }
 
 // ── AGV control ───────────────────────────────────────────────────────────────
 
@@ -1465,6 +2156,11 @@ function usShowCurrentScale() {
 const _HOST     = window.location.hostname || 'localhost';
 const WS_URL    = `ws://${_HOST}:8765`;
 const HTTP_BASE = `http://${_HOST}:5100`;
+const SCHEDULER_BASE = `http://${_HOST}:8080`;
+const AUTONOMY_BASE = HTTP_BASE;
+const LAST_PORT_KEY = 'agv_last_port';
+let _manualDisconnect = false;
+let _reconnectTimer = null;
 
 async function refreshPorts() {
   const sel = el('port-select');
@@ -1484,8 +2180,10 @@ async function refreshPorts() {
         opt.value = p; opt.textContent = p;
         sel.appendChild(opt);
       });
-      const target = prev || data.current || data.ports[0];
+      const saved = localStorage.getItem(LAST_PORT_KEY) || '';
+      const target = prev || data.current || saved || data.ports[0];
       if (target) sel.value = target;
+      if (sel.value) localStorage.setItem(LAST_PORT_KEY, sel.value);
     }
   } catch(e) {
     sel.innerHTML = '<option value="">-- 포트 없음 --</option>';
@@ -1496,21 +2194,42 @@ async function refreshPorts() {
 
 // ── WebSocket ────────────────────────────────────────────────────────────────
 function toggleConn() {
-  if (ws && ws.readyState === WebSocket.OPEN) ws.close();
-  else connect();
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    _manualDisconnect = true;
+    ws.close();
+  } else connect();
 }
-function connect() {
-  const port = el('port-select').value;
+function connect(preferredPort = '') {
+  const port = preferredPort || el('port-select').value;
   if (!port) { logMsg('COM 포트를 선택하세요', 'lwarn'); return; }
+  if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) return;
+  _manualDisconnect = false;
+  localStorage.setItem(LAST_PORT_KEY, port);
+  el('port-select').value = port;
   logMsg(`Connecting … (${port})`, 'linfo');
   ws = new WebSocket(WS_URL);
   ws.onopen = () => {
+    if (_reconnectTimer) {
+      clearTimeout(_reconnectTimer);
+      _reconnectTimer = null;
+    }
     send({ cmd: 'set_port', port });
     setTimeout(() => send({ cmd: 'param_read_req' }), 500);
+    setTimeout(() => send({ cmd: 'request_map_path' }), 700);
   };
   ws.onmessage = e => onMsg(JSON.parse(e.data));
   ws.onerror   = () => logMsg('WebSocket error', 'lerr');
-  ws.onclose   = () => { setBadge(false); logMsg('Disconnected', 'lwarn'); };
+  ws.onclose   = () => {
+    setBadge(false);
+    ws = null;
+    logMsg('Disconnected', 'lwarn');
+    if (!_manualDisconnect) {
+      const retryPort = el('port-select').value || localStorage.getItem(LAST_PORT_KEY) || '';
+      if (retryPort) {
+        _reconnectTimer = setTimeout(() => connect(retryPort), 1200);
+      }
+    }
+  };
 }
 function send(obj) {
   if (!ws || ws.readyState !== WebSocket.OPEN) { logMsg('Not connected', 'lerr'); return; }
@@ -1527,16 +2246,762 @@ function onMsg(m) {
     case 'point_report':  onPointReport(m);  break;
     case 'agv_odometry':
     case 'agv_status':    agvUpdateStatus(m); break;
+    case 'row_follow_status': onRowFollowStatus(m); break;
+    case 'obstacle_action':   onObstacleAction(m); break;
+    case 'nav_status':       onNavStatus(m); break;
+    case 'nav_map_path':     onNavMapPath(m); break;
+    case 'route_status':     onRouteStatus(m); break;
+    case 'gps_fix':          onGpsFix(m); break;
+    case 'gps_odometry':     onGpsOdometry(m); break;
+    case 'camera_imu':       onCameraImu(m); break;
+    case 'odom_reset_ack':   logMsg('오덤 리셋 완료', 'lok'); break;
     case 'connected':
       setBadge(true, m.port, m.baud);
       logMsg(`Connected: ${m.port} @ ${m.baud}`, 'lok');
       send({cmd:'param_read_req'});
+      send({cmd:'request_map_path'});
       break;
     case 'disconnected':
       setBadge(false);
       logMsg('Serial disconnected', 'lwarn');
       break;
   }
+}
+
+function fmtNum(value, digits = 2, suffix = '') {
+  if (value === null || value === undefined || Number.isNaN(Number(value))) return '—' + suffix;
+  return Number(value).toFixed(digits) + suffix;
+}
+
+function setToneBadge(id, text, tone) {
+  const node = el(id);
+  if (!node) return;
+  node.textContent = text;
+  node.className = `state-pill ${tone || 'tone-gray'}`;
+}
+
+function rowFollowTone(state) {
+  if (state === 'FOLLOWING') return 'tone-green';
+  if (state === 'ROW_END') return 'tone-blue';
+  if (state === 'OBSTACLE') return 'tone-yellow';
+  if (state === 'DISABLED') return 'tone-gray';
+  return 'tone-red';
+}
+
+function obstacleTone(action) {
+  if (action === 'CLEAR') return 'tone-green';
+  if (action === 'SLOW' || action === 'WAIT') return 'tone-yellow';
+  if (action === 'FULL_STOP') return 'tone-red';
+  return 'tone-gray';
+}
+
+function navTone(state) {
+  if (state === 'TRACKING') return 'tone-green';
+  if (state === 'ODOM_ONLY') return 'tone-blue';
+  if (state === 'UNCERTAIN') return 'tone-yellow';
+  if (state === 'LOST') return 'tone-red';
+  return 'tone-gray';
+}
+
+function routeTone(state) {
+  if (state === 'NAVIGATING') return 'tone-blue';
+  if (state === 'DONE') return 'tone-green';
+  if (state === 'FAILED') return 'tone-red';
+  if (state === 'CANCELLED') return 'tone-yellow';
+  return 'tone-gray';
+}
+
+function gpsTone(status) {
+  if (status === null || status === undefined) return 'tone-gray';
+  if (status < 0) return 'tone-red';
+  return 'tone-green';
+}
+
+function gpsStatusLabel(status) {
+  if (status === 2) return 'GBAS FIX';
+  if (status === 1) return 'SBAS FIX';
+  if (status === 0) return 'FIX';
+  if (status === -1) return 'NO FIX';
+  return 'NO DATA';
+}
+
+function rowFollowEnable(enable) {
+  send({ cmd: 'ros_publish', topic: '/row_follow/enable', data: { data: enable } });
+  logMsg(`row_follow ${enable ? '활성화' : '비활성화'} 요청`, 'linfo');
+}
+
+function rowFollowApplySpeed() {
+  const speed = parseFloat(el('rf-speed').value);
+  send({ cmd: 'ros_publish', topic: '/row_follow/speed', data: { data: speed } });
+  logMsg(`row_follow 속도 적용: ${speed.toFixed(2)} m/s`, 'linfo');
+}
+
+function requestMapPath() {
+  send({ cmd: 'request_map_path' });
+}
+
+function resetOdom() {
+  send({ cmd: 'reset_odom' });
+}
+
+function navCancel() {
+  send({ cmd: 'ros_publish', topic: '/nav/cancel', data: {} });
+}
+
+function onRowFollowStatus(m) {
+  agvUiState.rowFollowState = m.row_follow_state || 'UNKNOWN';
+  agvUiState.frontM = Number(m.front_m);
+  agvUiState.errorM = Number(m.error_m);
+  agvUiState.angularRps = Number(m.angular_rps);
+  renderRowFollow();
+}
+
+function onNavStatus(m) {
+  if (m.loc_state) agvUiState.navLocState = m.loc_state;
+  if (m.loc_age_s !== undefined) agvUiState.navLocAgeS = Number(m.loc_age_s);
+  if (m.loc_x !== undefined) agvUiState.navLocX = Number(m.loc_x);
+  if (m.loc_y !== undefined) agvUiState.navLocY = Number(m.loc_y);
+  if (m.loc_theta !== undefined) agvUiState.navLocTheta = Number(m.loc_theta);
+  renderNavStatus();
+  renderMapAgvStatus();
+  drawGpsTrackCanvas();
+}
+
+function onObstacleAction(m) {
+  agvUiState.obstacleAction = m.action || 'CLEAR';
+  renderSafetyPanel();
+  renderMissionPanel();
+}
+
+function onRouteStatus(m) {
+  agvUiState.routeState = m.state || 'IDLE';
+  agvUiState.routeDone = Number(m.done || 0);
+  agvUiState.routeTotal = Number(m.total || 0);
+  renderNavStatus();
+}
+
+function onNavMapPath(m) {
+  agvUiState.navPath = Array.isArray(m.poses) ? m.poses.map(p => ({ x: Number(p[0]), y: Number(p[1]) })) : [];
+  drawGpsTrackCanvas();
+}
+
+function onGpsFix(m) {
+  agvUiState.gpsStatus = Number(m.status);
+  agvUiState.gpsLat = Number(m.lat);
+  agvUiState.gpsLon = Number(m.lon);
+  agvUiState.gpsSigmaM = Number(m.sigma_m);
+  renderGpsPanel();
+}
+
+function onGpsOdometry(m) {
+  const x = Number(m.x);
+  const y = Number(m.y);
+  agvUiState.gpsEnuX = x;
+  agvUiState.gpsEnuY = y;
+  const track = agvUiState.gpsTrack;
+  const last = track[track.length - 1];
+  if (last) {
+    const dx = x - last.x;
+    const dy = y - last.y;
+    const dist = Math.hypot(dx, dy);
+    if (dist > 0.03) {
+      agvUiState.gpsHeadingTheta = Math.atan2(dy, dx);
+      agvUiState.gpsHeadingSpeedMps = dist;
+    }
+  }
+  if (!last || Math.hypot(last.x - x, last.y - y) > 0.03) {
+    track.push({ x, y });
+    if (track.length > 2000) track.shift();
+  }
+  renderGpsPanel();
+  renderMapAgvStatus();
+  drawGpsTrackCanvas();
+}
+
+function onCameraImu(m) {
+  if (m.yaw_rel !== undefined) agvUiState.cameraImuTheta = Number(m.yaw_rel);
+  if (m.yaw_rate !== undefined) agvUiState.cameraYawRate = Number(m.yaw_rate);
+  if (m.wx !== undefined) agvUiState.imuWx = Number(m.wx);
+  if (m.wy !== undefined) agvUiState.imuWy = Number(m.wy);
+  if (m.wz !== undefined) agvUiState.imuWz = Number(m.wz);
+  if (m.ax !== undefined) agvUiState.imuAx = Number(m.ax);
+  if (m.ay !== undefined) agvUiState.imuAy = Number(m.ay);
+  if (m.az !== undefined) agvUiState.imuAz = Number(m.az);
+  agvUiState.cameraYawUpdatedAt = Date.now();
+  renderMapAgvStatus();
+  drawGpsTrackCanvas();
+  renderImuPanel();
+}
+
+function renderImuPanel() {
+  const fresh = agvUiState.cameraYawUpdatedAt > 0 && (Date.now() - agvUiState.cameraYawUpdatedAt) < 2000;
+  const badge = el('imu-fresh-badge');
+  if (badge) {
+    badge.textContent = fresh ? 'LIVE' : 'NO DATA';
+    badge.className = `state-pill ${fresh ? 'tone-green' : 'tone-gray'}`;
+  }
+  const yawRaw = agvUiState.cameraImuTheta;
+  const yawDeg = yawRaw !== null
+    ? ((yawRaw - agvUiState.cameraYawZeroOffset) * 180 / Math.PI).toFixed(1) + '°'
+    : '—°';
+  const yn = el('imu-yaw-deg'); if (yn) yn.textContent = yawDeg;
+  const f = (v, d, u) => v !== null && v !== undefined ? Number(v).toFixed(d) + ' ' + u : '—';
+  const t = (id, v, d, u) => { const e = el(id); if (e) e.textContent = f(v, d, u); };
+  t('imu-wx', agvUiState.imuWx, 3, 'r/s');
+  t('imu-wy', agvUiState.imuWy, 3, 'r/s');
+  t('imu-wz', agvUiState.imuWz, 3, 'r/s');
+  t('imu-ax', agvUiState.imuAx, 2, 'm/s²');
+  t('imu-ay', agvUiState.imuAy, 2, 'm/s²');
+  t('imu-az', agvUiState.imuAz, 2, 'm/s²');
+}
+
+function resetCameraImuHeading() {
+  if (agvUiState.cameraImuTheta === null || agvUiState.cameraImuTheta === undefined) {
+    logMsg('리셋할 D435i IMU yaw 데이터가 아직 없습니다.', 'lwarn');
+    return;
+  }
+  agvUiState.cameraYawZeroOffset = agvUiState.cameraImuTheta;
+  agvUiState.displayPoseTheta = 0;
+  renderMapAgvStatus();
+  drawGpsTrackCanvas();
+  logMsg('D435i IMU heading 기준을 현재 방향으로 리셋했습니다.', 'lok');
+}
+
+function renderRowFollow() {
+  setToneBadge('rf-state', agvUiState.rowFollowState, rowFollowTone(agvUiState.rowFollowState));
+  el('rf-front').textContent = fmtNum(agvUiState.frontM, 2, ' m');
+  el('rf-error').textContent = fmtNum(agvUiState.errorM, 3, ' m');
+  el('rf-steer').textContent = fmtNum(agvUiState.angularRps, 3, ' rad/s');
+  el('safety-row-state').textContent = agvUiState.rowFollowState;
+}
+
+function renderSafetyPanel() {
+  const action = agvUiState.obstacleAction || 'CLEAR';
+  setToneBadge('safety-action', action, obstacleTone(action));
+  el('safety-api').textContent = agvUiState.missionApiOnline ? 'ONLINE' : 'OFFLINE';
+  el('safety-api').style.color = agvUiState.missionApiOnline ? 'var(--green)' : 'var(--red)';
+  el('safety-impact').textContent = action === 'FULL_STOP'
+    ? '즉시 정지'
+    : action === 'WAIT'
+      ? '대기 유지'
+      : action === 'SLOW'
+        ? '감속 회피'
+        : '정상 주행';
+}
+
+function renderNavStatus() {
+  setToneBadge('nav-loc-state', agvUiState.navLocState, navTone(agvUiState.navLocState));
+  const routeText = agvUiState.routeTotal > 0 && agvUiState.routeState === 'NAVIGATING'
+    ? `${agvUiState.routeState} (${agvUiState.routeDone}/${agvUiState.routeTotal})`
+    : agvUiState.routeState;
+  el('nav-route-state').textContent = routeText;
+  el('nav-route-state').style.color = routeTone(agvUiState.routeState) === 'tone-green'
+    ? 'var(--green)'
+    : routeTone(agvUiState.routeState) === 'tone-red'
+      ? 'var(--red)'
+      : routeTone(agvUiState.routeState) === 'tone-yellow'
+        ? 'var(--yellow)'
+        : routeTone(agvUiState.routeState) === 'tone-blue'
+          ? 'var(--accent)'
+          : 'var(--muted)';
+  el('nav-map-xy').textContent = `${fmtNum(agvUiState.navLocX, 2, '')} / ${fmtNum(agvUiState.navLocY, 2, '')} m`;
+  const thetaDeg = agvUiState.navLocTheta === null || agvUiState.navLocTheta === undefined
+    ? null
+    : agvUiState.navLocTheta * 180 / Math.PI;
+  el('nav-map-theta').textContent = fmtNum(thetaDeg, 1, ' °');
+  el('nav-loc-age').textContent = fmtNum(agvUiState.navLocAgeS, 1, ' s');
+}
+
+function renderGpsPanel() {
+  setToneBadge('gps-fix-state', gpsStatusLabel(agvUiState.gpsStatus), gpsTone(agvUiState.gpsStatus));
+  el('gps-lat').textContent = agvUiState.gpsLat === null ? '—' : agvUiState.gpsLat.toFixed(7);
+  el('gps-lon').textContent = agvUiState.gpsLon === null ? '—' : agvUiState.gpsLon.toFixed(7);
+  el('gps-enu-x').textContent = fmtNum(agvUiState.gpsEnuX, 2, ' m');
+  el('gps-enu-y').textContent = fmtNum(agvUiState.gpsEnuY, 2, ' m');
+  el('gps-sigma').textContent = agvUiState.gpsSigmaM >= 0 ? fmtNum(agvUiState.gpsSigmaM, 2, ' m') : '—';
+  el('gps-track-count').textContent = String(agvUiState.gpsTrack.length);
+}
+
+function clearGpsTrack() {
+  agvUiState.gpsTrack = [];
+  agvUiState.gpsHeadingTheta = null;
+  agvUiState.gpsHeadingSpeedMps = 0;
+  drawGpsTrackCanvas();
+  renderGpsPanel();
+  renderMapAgvStatus();
+}
+
+function setGoalMode(mode) {
+  agvUiState.goalMode = mode;
+  logMsg(`맵 클릭 모드: ${mode === 'route' ? '웨이포인트 추가' : '단일 Goal'}`, 'linfo');
+}
+
+function clearDraftRoute() {
+  agvUiState.draftRoute = [];
+  renderDraftRoute();
+  drawGpsTrackCanvas();
+}
+
+function stopRoute() {
+  send({ cmd: 'stop_route' });
+}
+
+function sendGoalPose(x, y) {
+  const curX = agvUiState.navLocX ?? agvUiState.gpsEnuX ?? 0;
+  const curY = agvUiState.navLocY ?? agvUiState.gpsEnuY ?? 0;
+  const theta = Math.atan2(y - curY, x - curX);
+  agvUiState.lastGoal = { x, y, theta };
+  send({ cmd: 'ros_publish', topic: '/goal_pose', data: { x, y, theta_rad: theta } });
+  logMsg(`Goal 전송: x=${x.toFixed(2)} y=${y.toFixed(2)} θ=${(theta * 180 / Math.PI).toFixed(1)}°`, 'lok');
+  drawGpsTrackCanvas();
+}
+
+function addDraftWaypoint(x, y) {
+  const prev = agvUiState.draftRoute[agvUiState.draftRoute.length - 1];
+  const baseX = prev ? prev.x : (agvUiState.navLocX ?? agvUiState.gpsEnuX ?? x);
+  const baseY = prev ? prev.y : (agvUiState.navLocY ?? agvUiState.gpsEnuY ?? y);
+  const theta = Math.atan2(y - baseY, x - baseX);
+  agvUiState.draftRoute.push({ x, y, theta });
+  renderDraftRoute();
+  drawGpsTrackCanvas();
+}
+
+function runDraftRoute() {
+  if (agvUiState.draftRoute.length === 0) {
+    logMsg('실행할 웨이포인트가 없습니다.', 'lwarn');
+    return;
+  }
+  send({ cmd: 'start_route', waypoints: agvUiState.draftRoute.map(p => [p.x, p.y, p.theta]) });
+  logMsg(`경로 실행: ${agvUiState.draftRoute.length}개 웨이포인트`, 'lok');
+}
+
+function renderDraftRoute() {
+  const box = el('draft-route-list');
+  if (!box) return;
+  if (agvUiState.draftRoute.length === 0) {
+    box.textContent = 'route draft: empty';
+    return;
+  }
+  box.innerHTML = agvUiState.draftRoute.map((p, idx) =>
+    `<div class="route-line">${String(idx + 1).padStart(2, '0')}: x=${p.x.toFixed(2)} y=${p.y.toFixed(2)} θ=${(p.theta * 180 / Math.PI).toFixed(1)}°</div>`
+  ).join('');
+}
+
+function mapToWorld(canvasX, canvasY) {
+  const view = agvUiState.mapViewport;
+  return {
+    x: (canvasX - view.w / 2) / view.scale + view.cX,
+    y: (view.h / 2 - canvasY) / view.scale + view.cY
+  };
+}
+
+function initMapInteractions() {
+  const canvas = el('gps-track-canvas');
+  if (!canvas) return;
+  canvas.style.cursor = 'crosshair';
+
+  let _dragging = false, _dragMoved = false;
+  let _dragStartClientX = 0, _dragStartClientY = 0;
+  let _dragStartPanX = 0, _dragStartPanY = 0;
+
+  function canvasPos(e) {
+    const rect = canvas.getBoundingClientRect();
+    return {
+      px: (e.clientX - rect.left) * (canvas.width  / rect.width),
+      py: (e.clientY - rect.top)  * (canvas.height / rect.height),
+      rx: canvas.width  / rect.width,
+      ry: canvas.height / rect.height
+    };
+  }
+
+  canvas.addEventListener('click', e => {
+    if (_dragMoved) return;
+    const { px, py } = canvasPos(e);
+    const world = mapToWorld(px, py);
+    if (agvUiState.goalMode === 'route' || e.shiftKey) addDraftWaypoint(world.x, world.y);
+    else sendGoalPose(world.x, world.y);
+  });
+
+  canvas.addEventListener('wheel', e => {
+    e.preventDefault();
+    const view = agvUiState.mapViewport;
+    if (!view || !view.scale) return;
+    const { px, py } = canvasPos(e);
+    const oldScale = view.scale;
+    const factor   = e.deltaY < 0 ? 1.25 : 1 / 1.25;
+    agvUiState.mapZoom = Math.max(0.05, Math.min(200, agvUiState.mapZoom * factor));
+    const newScale = oldScale * factor;
+    // Keep world point under cursor stationary
+    const d = 1 / oldScale - 1 / newScale;
+    agvUiState.mapPanX += (px - canvas.width  / 2) * d;
+    agvUiState.mapPanY += (canvas.height / 2 - py) * d;
+    drawGpsTrackCanvas();
+  }, { passive: false });
+
+  canvas.addEventListener('mousedown', e => {
+    if (e.button !== 0) return;
+    _dragging = true; _dragMoved = false;
+    _dragStartClientX = e.clientX; _dragStartClientY = e.clientY;
+    _dragStartPanX = agvUiState.mapPanX; _dragStartPanY = agvUiState.mapPanY;
+    canvas.style.cursor = 'grabbing';
+  });
+
+  canvas.addEventListener('mousemove', e => {
+    if (!_dragging) return;
+    const dx = e.clientX - _dragStartClientX;
+    const dy = e.clientY - _dragStartClientY;
+    if (Math.abs(dx) > 3 || Math.abs(dy) > 3) _dragMoved = true;
+    if (!_dragMoved) return;
+    const view = agvUiState.mapViewport;
+    if (!view || !view.scale) return;
+    const { rx, ry } = canvasPos(e);
+    agvUiState.mapPanX = _dragStartPanX - (dx * rx) / view.scale;
+    agvUiState.mapPanY = _dragStartPanY + (dy * ry) / view.scale;
+    drawGpsTrackCanvas();
+  });
+
+  canvas.addEventListener('mouseup',    () => { _dragging = false; canvas.style.cursor = 'crosshair'; });
+  canvas.addEventListener('mouseleave', () => { _dragging = false; canvas.style.cursor = 'crosshair'; });
+}
+
+function drawGpsTrackCanvas() {
+  const canvas = el('gps-track-canvas');
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return;
+  const w = canvas.width, h = canvas.height;
+  ctx.clearRect(0, 0, w, h);
+  ctx.fillStyle = '#0d1117';
+  ctx.fillRect(0, 0, w, h);
+
+  // Collect all data points for auto-fit bounds
+  const pts = [];
+  agvUiState.gpsTrack.forEach(p => pts.push(p));
+  agvUiState.navPath.forEach(p => pts.push(p));
+  if (agvUiState.navLocX !== null && agvUiState.navLocY !== null)
+    pts.push({ x: agvUiState.navLocX, y: agvUiState.navLocY });
+
+  let minX = -5, maxX = 5, minY = -5, maxY = 5;
+  if (pts.length > 0) {
+    minX = Math.min(...pts.map(p => p.x));
+    maxX = Math.max(...pts.map(p => p.x));
+    minY = Math.min(...pts.map(p => p.y));
+    maxY = Math.max(...pts.map(p => p.y));
+    if (minX === maxX) { minX -= 1; maxX += 1; }
+    if (minY === maxY) { minY -= 1; maxY += 1; }
+  }
+  const padX = Math.max((maxX - minX) * 0.15, 1.0);
+  const padY = Math.max((maxY - minY) * 0.15, 1.0);
+  minX -= padX; maxX += padX; minY -= padY; maxY += padY;
+
+  const PAD = 24;
+  // Equal-aspect base scale: same pixels/meter for both axes
+  const baseScale = Math.min((w - 2 * PAD) / (maxX - minX), (h - 2 * PAD) / (maxY - minY));
+  // Apply user zoom + pan
+  const scale = baseScale * agvUiState.mapZoom;
+  const cX = (minX + maxX) / 2 + agvUiState.mapPanX;
+  const cY = (minY + maxY) / 2 + agvUiState.mapPanY;
+
+  // World → canvas:  sx(x) = (x-cX)*scale + w/2,  sy(y) = -(y-cY)*scale + h/2
+  const sx = x =>  (x - cX) * scale + w / 2;
+  const sy = y => -(y - cY) * scale + h / 2;
+
+  // Store viewport for click→world inversion
+  agvUiState.mapViewport = { cX, cY, scale, w, h };
+
+  // Visible world bounds (for metric grid)
+  const vL = cX - (w / 2) / scale, vR = cX + (w / 2) / scale;
+  const vB = cY - (h / 2) / scale, vT = cY + (h / 2) / scale;
+
+  // Pick a nice grid step so ~6-14 lines fit
+  const GRID_STEPS = [0.5, 1, 2, 5, 10, 20, 50, 100, 200, 500, 1000];
+  const visRange   = Math.max(vR - vL, vT - vB);
+  const gridStep   = GRID_STEPS.find(s => visRange / s < 14) || GRID_STEPS[GRID_STEPS.length - 1];
+
+  ctx.font = '10px Courier New'; ctx.textAlign = 'left';
+
+  const startGX = Math.ceil(vL / gridStep) * gridStep;
+  for (let gx = startGX; gx <= vR + gridStep * 0.01; gx += gridStep) {
+    const px = sx(gx);
+    if (px < 0 || px > w) continue;
+    const isOrigin = Math.abs(gx) < gridStep * 0.01;
+    ctx.strokeStyle = isOrigin ? '#2a3545' : '#1c2330';
+    ctx.lineWidth   = isOrigin ? 1.5 : 1;
+    ctx.beginPath(); ctx.moveTo(px, 0); ctx.lineTo(px, h); ctx.stroke();
+    ctx.fillStyle = '#3d4857';
+    const lbl = isOrigin ? '0' : (Math.abs(gx) < 10 ? gx.toFixed(1) : String(Math.round(gx)));
+    ctx.fillText(lbl + 'm', px + 2, h - 4);
+  }
+
+  const startGY = Math.ceil(vB / gridStep) * gridStep;
+  for (let gy = startGY; gy <= vT + gridStep * 0.01; gy += gridStep) {
+    const py = sy(gy);
+    if (py < 0 || py > h) continue;
+    const isOrigin = Math.abs(gy) < gridStep * 0.01;
+    ctx.strokeStyle = isOrigin ? '#2a3545' : '#1c2330';
+    ctx.lineWidth   = isOrigin ? 1.5 : 1;
+    ctx.beginPath(); ctx.moveTo(0, py); ctx.lineTo(w, py); ctx.stroke();
+    ctx.fillStyle = '#3d4857';
+    const lbl = isOrigin ? '0' : (Math.abs(gy) < 10 ? gy.toFixed(1) : String(Math.round(gy)));
+    ctx.fillText(lbl + 'm', 2, py - 3);
+  }
+
+  // Nav2 planned path (dashed yellow)
+  if (agvUiState.navPath.length > 1) {
+    ctx.save(); ctx.setLineDash([8, 6]);
+    ctx.strokeStyle = '#d29922'; ctx.lineWidth = 2;
+    ctx.beginPath();
+    agvUiState.navPath.forEach((p, idx) => {
+      idx === 0 ? ctx.moveTo(sx(p.x), sy(p.y)) : ctx.lineTo(sx(p.x), sy(p.y));
+    });
+    ctx.stroke(); ctx.restore();
+  }
+
+  // GPS/ENU track (blue)
+  if (agvUiState.gpsTrack.length > 1) {
+    ctx.strokeStyle = '#58a6ff'; ctx.lineWidth = 2.5;
+    ctx.beginPath();
+    agvUiState.gpsTrack.forEach((p, idx) => {
+      idx === 0 ? ctx.moveTo(sx(p.x), sy(p.y)) : ctx.lineTo(sx(p.x), sy(p.y));
+    });
+    ctx.stroke();
+  }
+
+  // Draft route (orange)
+  if (agvUiState.draftRoute.length > 0) {
+    ctx.strokeStyle = '#f0a30a'; ctx.lineWidth = 2;
+    ctx.beginPath();
+    agvUiState.draftRoute.forEach((p, idx) => {
+      idx === 0 ? ctx.moveTo(sx(p.x), sy(p.y)) : ctx.lineTo(sx(p.x), sy(p.y));
+    });
+    ctx.stroke();
+    agvUiState.draftRoute.forEach((p, idx) => {
+      const [px, py] = [sx(p.x), sy(p.y)];
+      ctx.beginPath(); ctx.arc(px, py, 4, 0, Math.PI * 2);
+      ctx.fillStyle = '#f0a30a'; ctx.fill();
+      ctx.fillStyle = '#0d1117'; ctx.font = '11px Courier New';
+      ctx.fillText(String(idx + 1), px + 6, py - 6);
+    });
+  }
+
+  // AGV pose marker
+  const curX = agvUiState.displayPoseX !== null ? agvUiState.displayPoseX : (agvUiState.navLocX !== null ? agvUiState.navLocX : agvUiState.gpsEnuX);
+  const curY = agvUiState.displayPoseY !== null ? agvUiState.displayPoseY : (agvUiState.navLocY !== null ? agvUiState.navLocY : agvUiState.gpsEnuY);
+  const imuFreshDraw = agvUiState.cameraYawUpdatedAt > 0 && (Date.now() - agvUiState.cameraYawUpdatedAt) < 2000;
+  const rawImuTheta  = imuFreshDraw && agvUiState.cameraImuTheta !== null && agvUiState.cameraImuTheta !== undefined
+    ? normAngle(agvUiState.cameraImuTheta - agvUiState.cameraYawZeroOffset) : null;
+  const curTheta = agvUiState.displayPoseTheta !== null && agvUiState.displayPoseTheta !== undefined
+    ? agvUiState.displayPoseTheta
+    : rawImuTheta !== null ? rawImuTheta
+    : (agvUiState.navLocTheta !== null && agvUiState.navLocTheta !== undefined
+        ? agvUiState.navLocTheta : agvUiState.gpsHeadingTheta);
+  if (curX !== null && curY !== null) {
+    drawAgvMarker(ctx, sx(curX), sy(curY), curTheta);
+  } else if (curTheta !== null && curTheta !== undefined) {
+    drawAgvMarker(ctx, w / 2, h / 2, curTheta);
+    ctx.fillStyle = '#8b949e'; ctx.font = '11px Courier New';
+    ctx.fillText('IMU heading only — 위치 없음', w / 2 - 80, h / 2 + 38);
+  }
+
+  // Goal marker
+  if (agvUiState.lastGoal) {
+    const [gx, gy] = [sx(agvUiState.lastGoal.x), sy(agvUiState.lastGoal.y)];
+    ctx.beginPath(); ctx.arc(gx, gy, 6, 0, Math.PI * 2);
+    ctx.strokeStyle = '#ff7b72'; ctx.lineWidth = 2; ctx.stroke();
+  }
+
+  // HUD: zoom ×N (top-left), grid step (top-right)
+  ctx.fillStyle = '#58a6ff'; ctx.font = '11px Courier New'; ctx.textAlign = 'left';
+  ctx.fillText(`×${agvUiState.mapZoom < 10 ? agvUiState.mapZoom.toFixed(2) : Math.round(agvUiState.mapZoom)}`, PAD, 16);
+  ctx.fillStyle = '#8b949e'; ctx.textAlign = 'right';
+  ctx.fillText(`grid ${gridStep < 1 ? gridStep.toFixed(1) : gridStep}m`, w - PAD, 16);
+
+  // Scale bar (bottom-left)
+  const barPx = gridStep * scale;
+  if (barPx > 20 && barPx < w * 0.35) {
+    ctx.strokeStyle = '#58a6ff'; ctx.lineWidth = 2;
+    const barY = h - 10, barX0 = PAD;
+    ctx.beginPath();
+    ctx.moveTo(barX0, barY); ctx.lineTo(barX0 + barPx, barY);
+    ctx.moveTo(barX0, barY - 4); ctx.lineTo(barX0, barY + 4);
+    ctx.moveTo(barX0 + barPx, barY - 4); ctx.lineTo(barX0 + barPx, barY + 4);
+    ctx.stroke();
+    ctx.fillStyle = '#58a6ff'; ctx.font = '10px Courier New'; ctx.textAlign = 'left';
+    ctx.fillText(`${gridStep < 1 ? gridStep.toFixed(1) : gridStep}m`, barX0 + barPx + 4, barY + 4);
+  }
+  ctx.textAlign = 'left';
+}
+
+function mapZoomIn()  { agvUiState.mapZoom = Math.min(200, agvUiState.mapZoom * 1.5); drawGpsTrackCanvas(); }
+function mapZoomOut() { agvUiState.mapZoom = Math.max(0.05, agvUiState.mapZoom / 1.5); drawGpsTrackCanvas(); }
+function mapAutoFit() { agvUiState.mapZoom = 1.0; agvUiState.mapPanX = 0; agvUiState.mapPanY = 0; drawGpsTrackCanvas(); }
+
+async function missionFetch(path, options = {}) {
+  const response = await fetch(`${SCHEDULER_BASE}${path}`, {
+    ...options,
+    headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
+  });
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  return response.json();
+}
+
+async function autonomyFetch(path, options = {}) {
+  const response = await fetch(`${AUTONOMY_BASE}${path}`, {
+    ...options,
+    headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
+  });
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  return response.json();
+}
+
+function renderAutonomyPanel() {
+  const stateText = agvUiState.autonomyRunning ? agvUiState.autonomyMode : 'IDLE';
+  const tone = agvUiState.autonomyRunning
+    ? (agvUiState.autonomyMode === 'SLAM' ? 'tone-yellow' : 'tone-blue')
+    : 'tone-gray';
+  setToneBadge('auto-stack-state', stateText, tone);
+  el('auto-stack-mode').textContent = agvUiState.autonomyRunning ? agvUiState.autonomyMode : '—';
+  el('auto-db-path').textContent = agvUiState.autonomyDbPath || '~/.ros/rtabmap.db';
+  el('auto-uptime').textContent = `${Math.round(agvUiState.autonomyUptimeSec || 0)} s`;
+  el('auto-exit').textContent = agvUiState.autonomyExitCode === null || agvUiState.autonomyExitCode === undefined
+    ? '—'
+    : String(agvUiState.autonomyExitCode);
+}
+
+async function pollAutonomyStatus() {
+  try {
+    const status = await autonomyFetch('/autonomy/status');
+    agvUiState.autonomyRunning = !!status.running;
+    agvUiState.autonomyMode = status.mode || 'IDLE';
+    agvUiState.autonomyDbPath = status.db_path || '~/.ros/rtabmap.db';
+    agvUiState.autonomyUptimeSec = Number(status.uptime_sec || 0);
+    agvUiState.autonomyExitCode = status.last_exit_code;
+    agvUiState.autonomyLogTail = status.log_tail || [];
+  } catch (err) {
+    agvUiState.autonomyRunning = false;
+    agvUiState.autonomyMode = 'IDLE';
+  }
+  renderAutonomyPanel();
+}
+
+async function autonomyStart(mode) {
+  const dbPath = el('auto-db-input').value.trim() || '~/.ros/rtabmap.db';
+  try {
+    const result = await autonomyFetch(mode === 'SLAM' ? '/autonomy/start_slam' : '/autonomy/start_nav', {
+      method: 'POST',
+      body: JSON.stringify({ db_path: dbPath }),
+    });
+    logMsg(result.msg || `${mode} started`, result.ok ? 'lok' : 'lwarn');
+  } catch (err) {
+    logMsg(`자율주행 스택 시작 실패: ${err.message}`, 'lerr');
+  }
+  pollAutonomyStatus();
+}
+
+function autonomyStartSlam() { autonomyStart('SLAM'); }
+function autonomyStartNav() { autonomyStart('NAV'); }
+
+async function autonomyStop() {
+  try {
+    const result = await autonomyFetch('/autonomy/stop', { method: 'POST', body: '{}' });
+    logMsg(result.msg || 'stopped', 'lwarn');
+  } catch (err) {
+    logMsg(`자율주행 스택 중지 실패: ${err.message}`, 'lerr');
+  }
+  pollAutonomyStatus();
+}
+
+function renderMissionPanel() {
+  const status = agvUiState.missionStatus;
+  setToneBadge('mission-api-state', agvUiState.missionApiOnline ? 'ONLINE' : 'OFFLINE', agvUiState.missionApiOnline ? 'tone-green' : 'tone-red');
+  el('mission-current').textContent = status?.current_task || '—';
+  el('mission-type').textContent = status?.task_type || '—';
+  el('mission-elapsed').textContent = status ? `${status.elapsed_sec || 0} s` : '0 s';
+  el('mission-rf').textContent = status?.row_follow_state || agvUiState.rowFollowState;
+  el('mission-obstacle').textContent = status?.obstacle_action || agvUiState.obstacleAction;
+  const nextBox = el('mission-next');
+  const nextTasks = status?.next_tasks || [];
+  if (nextTasks.length > 0) {
+    nextBox.innerHTML = nextTasks.map(task =>
+      `<div class="list-item"><strong>${task.name}</strong><br><small>${task.time} · ${task.task}</small></div>`
+    ).join('');
+  } else if (agvUiState.missionSchedule.length > 0) {
+    nextBox.innerHTML = agvUiState.missionSchedule.slice(0, 6).map(task =>
+      `<div class="list-item"><strong>${task.name}</strong><br><small>${task.time} · ${task.task}${task.active_today ? '' : ' · 비활성 요일'}</small></div>`
+    ).join('');
+  } else {
+    nextBox.innerHTML = '<div class="list-item"><small>스케줄 데이터 없음</small></div>';
+  }
+}
+
+function renderMissionScheduleSelect() {
+  const select = el('mission-select');
+  if (!select) return;
+  const current = select.value;
+  const options = ['<option value="">-- 미션 선택 --</option>'];
+  agvUiState.missionSchedule.forEach(task => {
+    options.push(`<option value="${task.name}">${task.name} · ${task.time} · ${task.task}</option>`);
+  });
+  select.innerHTML = options.join('');
+  if ([...select.options].some(opt => opt.value === current)) select.value = current;
+}
+
+async function missionPollStatus() {
+  try {
+    const data = await missionFetch('/api/status');
+    agvUiState.missionApiOnline = true;
+    agvUiState.missionStatus = data;
+    if (data.row_follow_state) agvUiState.rowFollowState = data.row_follow_state;
+    if (data.obstacle_action) agvUiState.obstacleAction = data.obstacle_action;
+  } catch (err) {
+    agvUiState.missionApiOnline = false;
+  }
+  renderRowFollow();
+  renderSafetyPanel();
+  renderMissionPanel();
+}
+
+async function missionPollSchedule() {
+  try {
+    const data = await missionFetch('/api/schedule');
+    agvUiState.missionSchedule = Array.isArray(data.schedule) ? data.schedule : [];
+    agvUiState.missionApiOnline = true;
+  } catch (err) {
+    agvUiState.missionApiOnline = false;
+  }
+  renderMissionScheduleSelect();
+  renderMissionPanel();
+  renderSafetyPanel();
+}
+
+function missionRefreshAll() {
+  missionPollStatus();
+  missionPollSchedule();
+}
+
+async function missionRunSelected() {
+  const name = el('mission-select').value;
+  if (!name) {
+    logMsg('실행할 미션을 선택하세요.', 'lwarn');
+    return;
+  }
+  try {
+    const result = await missionFetch(`/api/run/${encodeURIComponent(name)}`, { method: 'POST' });
+    logMsg(`미션 실행: ${result.msg || name}`, result.ok ? 'lok' : 'lwarn');
+  } catch (err) {
+    logMsg(`미션 실행 실패: ${err.message}`, 'lerr');
+  }
+  missionRefreshAll();
+}
+
+async function missionStop() {
+  try {
+    const result = await missionFetch('/api/stop', { method: 'POST' });
+    logMsg(`미션 중단: ${result.msg || 'stopped'}`, 'lwarn');
+  } catch (err) {
+    logMsg(`미션 중단 실패: ${err.message}`, 'lerr');
+  }
+  missionRefreshAll();
 }
 
 // ── 확장 명령 핸들러 ──────────────────────────────────────────────────────────
@@ -2297,6 +3762,7 @@ let c3dActiveView = 'iso';
 
 function c3dInit() {
   c3d.canvas = el('canvas3d');
+  if (!c3d.canvas) return;
   c3d.ctx    = c3d.canvas.getContext('2d');
   c3dResize();
   window.addEventListener('resize', c3dResize);
@@ -2669,6 +4135,49 @@ function logMsg(text, cls = '') {
   log.scrollTop = log.scrollHeight;
 }
 
+// ── Camera (D435i MJPEG stream via bridge.py) ─────────────────────────────────
+
+async function camPollStatus() {
+  try {
+    const r = await fetch(`${HTTP_BASE}/camera/status`);
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const info = await r.json();
+    const badge = el('cam-status-badge');
+    if (badge) {
+      badge.textContent = info.connected ? 'CONNECTED' : 'OFFLINE';
+      badge.className = `state-pill ${info.connected ? 'tone-green' : 'tone-red'}`;
+    }
+    const safeText = (id, v) => { const n = el(id); if (n) n.textContent = v || '—'; };
+    safeText('cam-model',  info.model);
+    safeText('cam-serial', info.serial);
+    safeText('cam-res',    info.resolution);
+    safeText('cam-error',  info.error || (info.connected ? '없음' : '미연결'));
+  } catch(err) {
+    const badge = el('cam-status-badge');
+    if (badge) { badge.textContent = 'ERROR'; badge.className = 'state-pill tone-red'; }
+  }
+}
+
+function camStartStream() {
+  const img = el('cam-img');
+  if (img) img.src = `${HTTP_BASE}/camera/stream`;
+}
+
+async function camImuPoll() {
+  try {
+    const r = await fetch(`${HTTP_BASE}/camera/imu`);
+    const d = await r.json();
+    if (d && d.fresh) {
+      // bridge.py에서 400Hz로 적분한 yaw를 yaw_rel로 매핑 → AGV 마커 회전
+      d.yaw_rel  = d.yaw  !== undefined ? d.yaw  : null;
+      d.yaw_rate = d.wz   !== undefined ? d.wz   : 0;
+      onCameraImu(d);
+    } else {
+      renderImuPanel();
+    }
+  } catch (e) {}
+}
+
 // ── Init ──────────────────────────────────────────────────────────────────────
 window.addEventListener('load', () => {
   // DH 파라미터 초기화 (저장된 값 우선, 없으면 Generic 기본값)
@@ -2677,9 +4186,36 @@ window.addEventListener('load', () => {
   logMsg('HMI ready — COM 포트를 선택 후 Connect', 'linfo');
   c3dInit();
   el('view-agv').classList.add('active');
-  refreshPorts();  // 포트 목록 자동 조회
+  renderRowFollow();
+  renderSafetyPanel();
+  renderNavStatus();
+  renderGpsPanel();
+  renderMissionPanel();
+  renderAutonomyPanel();
+  renderDraftRoute();
+  renderMapAgvStatus();
+  drawGpsTrackCanvas();
+  initMapInteractions();
+  startMapAnimationLoop();
+  refreshPorts().then(() => {
+    const autoPort = el('port-select').value || localStorage.getItem(LAST_PORT_KEY) || '';
+    if (autoPort) connect(autoPort);
+  });
+  missionRefreshAll();
+  pollAutonomyStatus();
+  camStartStream();
+  camPollStatus();
+  camImuPoll();
+  setInterval(missionPollStatus, 2000);
+  setInterval(missionPollSchedule, 30000);
+  setInterval(pollAutonomyStatus, 2000);
+  setInterval(camPollStatus, 5000);
+  setInterval(camImuPoll, 500);
 });
-window.addEventListener('resize', c3dResize);
+window.addEventListener('resize', () => {
+  c3dResize();
+  drawGpsTrackCanvas();
+});
 </script>
 </body>
 </html>

@@ -2,7 +2,9 @@
 # AGV SLAM 맵핑 스택 시작 스크립트 (full_slam.launch.py)
 set -e
 
-WS=/home/bs/Ethercat_N753-6AX_AGV/ros2_ws
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+WS="$SCRIPT_DIR"
+DB="${DB_PATH:-$HOME/.ros/rtabmap.db}"
 
 source /opt/ros/jazzy/setup.bash
 
@@ -34,4 +36,5 @@ sleep 0.5
 
 echo "[start_slam] SLAM 맵핑 시작 (full_slam.launch.py)"
 exec ros2 launch agv_bringup full_slam.launch.py \
-  ws_url:=ws://localhost:8765
+  ws_url:=ws://localhost:8765 \
+  db_path:="$DB"

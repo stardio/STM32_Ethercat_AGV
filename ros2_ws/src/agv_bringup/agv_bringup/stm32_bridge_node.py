@@ -72,15 +72,18 @@ try:
     except ImportError:
         _HAS_NTP = False
     try:
-        from sensor_msgs.msg import NavSatFix
+        from sensor_msgs.msg import NavSatFix, Imu
         _HAS_NAVSATFIX = True
+        _HAS_IMU = True
     except ImportError:
         _HAS_NAVSATFIX = False
+        _HAS_IMU = False
 except ImportError:
     _ROS2_AVAILABLE = False
     _HAS_POSE_COV   = False
     _HAS_NTP        = False
     _HAS_NAVSATFIX  = False
+    _HAS_IMU        = False
     print("[stm32_bridge_node] WARNING: rclpy not found — running in stub mode (no ROS2).")
 
 try:
@@ -171,6 +174,7 @@ class Stm32BridgeNode(Node):
 
         # Odometry integrator
         self._odom = _OdomIntegrator(wheel_base, sl, sr)
+        self._have_odom_pose = False
         self._last_vel_left_hw  = 0
         self._last_vel_right_hw = 0
         self._last_rf_relay_t   = 0.0  # row_follow_status 릴레이 쓰로틀 타임스탬프
@@ -185,6 +189,8 @@ class Stm32BridgeNode(Node):
 
         self._sub_row_status = self.create_subscription(
             String, "/row_follow/status", self._on_row_follow_status, 10)
+        self._sub_obstacle_action = self.create_subscription(
+            String, "/obstacle/action", self._on_obstacle_action, 10)
 
         # Nav2 localization status (RTAB-Map이 맵에서 위치를 인식할 때 발행)
         self._last_loc_time = 0.0
@@ -234,6 +240,15 @@ class Stm32BridgeNode(Node):
                 NavSatFix, "/gps/fix", self._on_gps_fix, 10)
             self._sub_gps_odom = self.create_subscription(
                 Odometry, "/odometry/gps", self._on_gps_odometry, 10)
+
+        # D435i IMU yaw 적분값 (카메라 회전 시 UI AGV 방향 애니메이션용)
+        self._camera_yaw_rel = 0.0
+        self._camera_yaw_rate = 0.0
+        self._camera_imu_last_t: Optional[float] = None
+        self._last_camera_imu_relay_t = 0.0
+        if _HAS_IMU and _ROS2_AVAILABLE:
+            self._sub_camera_imu = self.create_subscription(
+                Imu, "/camera/imu", self._on_camera_imu, 30)
 
         # WebSocket thread
         self._ws_url    = ws_url
@@ -285,6 +300,39 @@ class Stm32BridgeNode(Node):
             "type": "gps_odometry",
             "x":    round(msg.pose.pose.position.x, 3),
             "y":    round(msg.pose.pose.position.y, 3),
+        })), self._ws_loop)
+
+    def _on_camera_imu(self, msg) -> None:
+        stamp = float(msg.header.stamp.sec) + (float(msg.header.stamp.nanosec) * 1e-9)
+        now = stamp if stamp > 0.0 else time.monotonic()
+        wx = float(msg.angular_velocity.x)
+        wy = float(msg.angular_velocity.y)
+        wz = float(msg.angular_velocity.z)
+        ax = float(msg.linear_acceleration.x)
+        ay = float(msg.linear_acceleration.y)
+        az = float(msg.linear_acceleration.z)
+        if self._camera_imu_last_t is not None:
+            dt = now - self._camera_imu_last_t
+            if 0.0 < dt < 0.5:
+                self._camera_yaw_rel += wz * dt
+                self._camera_yaw_rel = math.atan2(math.sin(self._camera_yaw_rel), math.cos(self._camera_yaw_rel))
+        self._camera_imu_last_t = now
+        self._camera_yaw_rate = wz
+
+        relay_now = time.monotonic()
+        if relay_now - self._last_camera_imu_relay_t < 0.1:
+            return
+        self._last_camera_imu_relay_t = relay_now
+        asyncio.run_coroutine_threadsafe(self._ws_send(json.dumps({
+            "type": "camera_imu",
+            "yaw_rel": round(self._camera_yaw_rel, 4),
+            "yaw_rate": round(self._camera_yaw_rate, 4),
+            "wx": round(wx, 3),
+            "wy": round(wy, 3),
+            "wz": round(wz, 3),
+            "ax": round(ax, 3),
+            "ay": round(ay, 3),
+            "az": round(az, 3),
         })), self._ws_loop)
 
     async def _ws_send(self, text: str) -> None:
@@ -361,6 +409,15 @@ class Stm32BridgeNode(Node):
             asyncio.run_coroutine_threadsafe(self._ws_send(ws_msg), self._ws_loop)
         except Exception as exc:
             self.get_logger().warning(f"row_follow_status relay error: {exc}")
+
+    def _on_obstacle_action(self, msg: String) -> None:
+        try:
+            asyncio.run_coroutine_threadsafe(self._ws_send(json.dumps({
+                "type": "obstacle_action",
+                "action": msg.data,
+            })), self._ws_loop)
+        except Exception as exc:
+            self.get_logger().warning(f"obstacle_action relay error: {exc}")
 
     def _on_loc_pose(self, msg) -> None:
         """RTAB-Map localization_pose → WS nav_status 릴레이 (맵 프레임 위치+방향)."""
@@ -458,12 +515,17 @@ class Stm32BridgeNode(Node):
             loc_state = "TRACKING"
         elif elapsed < 30.0:
             loc_state = "UNCERTAIN"
+        elif self._have_odom_pose:
+            loc_state = "ODOM_ONLY"
         else:
             loc_state = "LOST"
         ws_msg = json.dumps({
             "type": "nav_status",
             "loc_state": loc_state,
             "loc_age_s": round(elapsed, 1),
+            "loc_x": round(self._odom.x, 3),
+            "loc_y": round(self._odom.y, 3),
+            "loc_theta": round(self._odom.theta, 4),
         })
         asyncio.run_coroutine_threadsafe(self._ws_send(ws_msg), self._ws_loop)
 
@@ -639,6 +701,7 @@ class Stm32BridgeNode(Node):
         vel_r = msg.get("vel_right_hw", 0)
 
         x, y, theta, _, _ = self._odom.update(pos_l, pos_r)
+        self._have_odom_pose = True
 
         sl = max(self._odom.scale_left,  1.0)
         sr = max(self._odom.scale_right, 1.0)

@@ -2,7 +2,8 @@
 # AGV 자율주행 스택 (RTAB-Map localization + Nav2)
 set -e
 
-WS=/home/bs/Ethercat_N753-6AX_AGV/ros2_ws
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+WS="$SCRIPT_DIR"
 
 source /opt/ros/jazzy/setup.bash
 
@@ -33,7 +34,7 @@ pkill -f "stm32_bridge_node" 2>/dev/null && echo "[start_nav] 이전 stm32_bridg
 sleep 0.5
 
 # 활성화된 맵 확인
-DB=~/.ros/rtabmap.db
+DB="${DB_PATH:-$HOME/.ros/rtabmap.db}"
 if [ ! -f "$DB" ]; then
   echo "[start_nav] 오류: $DB 없음 — 먼저 맵핑 후 맵을 활성화하세요"
   exit 1

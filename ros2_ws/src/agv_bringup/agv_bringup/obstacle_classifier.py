@@ -219,7 +219,7 @@ class ObstacleClassifierNode(Node):
             durability=QoSDurabilityPolicy.VOLATILE,
         )
         self._sub_color = self.create_subscription(
-            Image, '/camera/color/image_raw',
+            Image, '/camera/realsense2_camera/color/image_raw',
             self._on_color, _cam_qos)
         self._sub_depth = self.create_subscription(
             Image, '/camera/realsense2_camera/depth/image_rect_raw',

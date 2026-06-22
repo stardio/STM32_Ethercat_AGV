@@ -8,9 +8,9 @@ Wire frame format (inside SLIP delimiters):
 Packet sizes (payload only):
   AxisStatusPkt_t           = 12 bytes  (int32 pos_centi, int16 vel, int16 torq,
                                           uint16 statusword, uint8 cia402, uint8 flags)
-  ProtoPktStatus_t          = 74 bytes  (6 × AxisStatusPkt_t + 2 bytes sys)
+  ProtoPktStatus_t          = 26 bytes  (2 × AxisStatusPkt_t + 2 bytes sys)
   ProtoAxisParam_t          = 44 bytes  (packed, matches uart_protocol.h)
-  ProtoPktParamReport_t     = 264 bytes (6 × ProtoAxisParam_t)
+  ProtoPktParamReport_t     = 88 bytes  (2 × ProtoAxisParam_t)
   ProtoPktFaultReset_t      =  1 byte   (axis)
   ProtoPktAgvVelocity_t     =  8 bytes
   ProtoPktAgvOdometry_t     = 20 bytes
@@ -24,7 +24,7 @@ import time
 from dataclasses import dataclass
 from typing import Optional, List
 
-AXIS_COUNT = 6
+AXIS_COUNT = 2  # AGV: J1=좌측, J2=우측
 
 # ── Packet type IDs ──────────────────────────────────────────────────────────
 

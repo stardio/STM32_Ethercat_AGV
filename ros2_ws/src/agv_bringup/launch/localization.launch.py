@@ -28,9 +28,13 @@ def generate_launch_description():
         parameters=[{
             'enable_color':          True,
             'enable_depth':          True,
+            'enable_gyro':           True,
+            'enable_accel':          True,
+            'unite_imu_method':      '1',
             'align_depth.enable':    True,
-            'depth_module.profile':  '848x480x30',
-            'rgb_camera.profile':    '848x480x30',
+            'depth_module.profile':  '640x480x15',
+            'rgb_camera.profile':    '640x480x15',
+            'pointcloud.enable':     False,
         }],
         output='screen',
     )
@@ -51,9 +55,9 @@ def generate_launch_description():
             },
         ],
         remappings=[
-            ('rgb/image',        '/camera/color/image_raw'),
-            ('rgb/camera_info',  '/camera/color/camera_info'),
-            ('depth/image',      '/camera/aligned_depth_to_color/image_raw'),
+            ('rgb/image',        '/camera/realsense2_camera/color/image_raw'),
+            ('rgb/camera_info',  '/camera/realsense2_camera/color/camera_info'),
+            ('depth/image',      '/camera/realsense2_camera/aligned_depth_to_color/image_raw'),
             ('odom',             odom_topic),
         ],
         output='screen',

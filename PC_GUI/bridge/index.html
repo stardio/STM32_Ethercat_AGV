@@ -1016,12 +1016,12 @@ body {
         <label style="font-size:11px;color:var(--muted);">Max Linear <b id="agv-lbl-lin" style="color:var(--text);">0.3 m/s</b>
           <input type="range" id="agv-max-linear" min="0.05" max="1.5" step="0.05" value="0.3"
                  style="width:100%;margin-top:1px;"
-                 oninput="el('agv-lbl-lin').textContent=parseFloat(this.value).toFixed(2)+' m/s'">
+                 oninput="el('agv-lbl-lin').textContent=parseFloat(this.value).toFixed(2)+' m/s'; sendNavSpeed();">
         </label>
         <label style="font-size:11px;color:var(--muted);">Max Angular <b id="agv-lbl-ang" style="color:var(--text);">0.5 rad/s</b>
           <input type="range" id="agv-max-angular" min="0.1" max="3.0" step="0.1" value="0.5"
                  style="width:100%;margin-top:1px;"
-                 oninput="el('agv-lbl-ang').textContent=parseFloat(this.value).toFixed(2)+' rad/s'">
+                 oninput="el('agv-lbl-ang').textContent=parseFloat(this.value).toFixed(2)+' rad/s'; sendNavSpeed();">
         </label>
         <label style="font-size:11px;color:var(--muted);">Send Rate <b id="agv-lbl-rate" style="color:var(--text);">50 ms</b>
           <input type="range" id="agv-send-rate" min="20" max="500" step="10" value="50"
@@ -1953,6 +1953,12 @@ function toolPopupOverlayClick(e, id) { if (e.target === el(id)) closeToolPopup(
 let _agvLinear  = 0;   // current commanded linear  [m/s]
 let _agvAngular = 0;   // current commanded angular [rad/s]
 let _agvSendTid = null;
+
+function sendNavSpeed() {
+  const lin = parseFloat(el('agv-max-linear').value);
+  const ang = parseFloat(el('agv-max-angular').value);
+  send({ cmd: 'nav_set_params', max_linear: lin, max_angular: ang });
+}
 
 function agvSend(linear, angular) {
   _agvLinear  = linear;

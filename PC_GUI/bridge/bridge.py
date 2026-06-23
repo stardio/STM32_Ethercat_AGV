@@ -261,8 +261,10 @@ _odom_state: dict = {
     'x': 0.0, 'y': 0.0, 'theta': 0.0,
     'pos_left_prev':  None,   # m
     'pos_right_prev': None,   # m
-    'unit_scale': _nav_defaults['unit_scale'],  # counts/mm
-    'wheel_base': _nav_defaults['wheel_base'],  # m
+    'unit_scale':  _nav_defaults['unit_scale'],  # counts/mm
+    'wheel_base':  _nav_defaults['wheel_base'],  # m
+    'max_linear':  0.30,   # m/s   — GoToGoal 최대 직진 속도 (HMI 슬라이더 동기)
+    'max_angular': 0.50,   # rad/s — GoToGoal 최대 회전 속도 (HMI 슬라이더 동기)
 }
 _goal_state: dict = {'active': False, 'state': 'IDLE', 'x': 0.0, 'y': 0.0}
 _goal_task:  Optional[asyncio.Task] = None
@@ -474,13 +476,15 @@ async def _goto_goal_loop() -> None:
             he = math.atan2(math.sin(target_h - o['theta']),
                             math.cos(target_h - o['theta']))
 
+            max_lin = _odom_state.get('max_linear',  _MAX_LINEAR)
+            max_ang = _odom_state.get('max_angular', _MAX_ANGULAR)
             if abs(he) > _HEAD_TOL:
                 linear  = 0.0
-                angular = max(-_MAX_ANGULAR, min(_MAX_ANGULAR, _KP_ANGULAR * he))
+                angular = max(-max_ang, min(max_ang, _KP_ANGULAR * he))
                 _goal_state['state'] = 'ROTATING'
             else:
-                linear  = min(_MAX_LINEAR, _KP_LINEAR * dist)
-                angular = max(-_MAX_ANGULAR, min(_MAX_ANGULAR, _KP_ANGULAR * he))
+                linear  = min(max_lin, _KP_LINEAR * dist)
+                angular = max(-max_ang, min(max_ang, _KP_ANGULAR * he))
                 _goal_state['state'] = 'DRIVING'
 
             log.info("GoToGoal [%s] odom(%.2f,%.2f,%.1f°) goal(%.2f,%.2f) dist=%.2f lin=%.2f ang=%.2f",
@@ -911,14 +915,16 @@ async def _ws_handler(ws: WebSocketServerProtocol) -> None:
                 log.info("Odometry reset")
                 continue
             if data.get("cmd") == "nav_set_params":
-                if 'unit_scale' in data:
-                    _odom_state['unit_scale'] = float(data['unit_scale'])
-                if 'wheel_base' in data:
-                    _odom_state['wheel_base'] = float(data['wheel_base'])
+                if 'unit_scale'  in data: _odom_state['unit_scale']  = float(data['unit_scale'])
+                if 'wheel_base'  in data: _odom_state['wheel_base']  = float(data['wheel_base'])
+                if 'max_linear'  in data: _odom_state['max_linear']  = float(data['max_linear'])
+                if 'max_angular' in data: _odom_state['max_angular'] = float(data['max_angular'])
                 _save_nav_params()
                 await _broadcast({'type': 'nav_params_saved',
-                                  'unit_scale': _odom_state['unit_scale'],
-                                  'wheel_base':  _odom_state['wheel_base']})
+                                  'unit_scale':  _odom_state['unit_scale'],
+                                  'wheel_base':  _odom_state['wheel_base'],
+                                  'max_linear':  _odom_state['max_linear'],
+                                  'max_angular': _odom_state['max_angular']})
                 continue
 
             if data.get("cmd") == "start_route":

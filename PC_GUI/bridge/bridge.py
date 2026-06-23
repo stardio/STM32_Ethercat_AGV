@@ -266,6 +266,8 @@ _odom_state: dict = {
 }
 _goal_state: dict = {'active': False, 'state': 'IDLE', 'x': 0.0, 'y': 0.0}
 _goal_task:  Optional[asyncio.Task] = None
+_route_state: dict = {'active': False, 'state': 'IDLE', 'done': 0, 'total': 0}
+_route_task:  Optional[asyncio.Task] = None
 
 
 def _camera_loop() -> None:
@@ -545,6 +547,63 @@ async def _cancel_goal() -> None:
                       'y': round(_odom_state['y'], 3),
                       'theta': round(_odom_state['theta'], 3)})
     log.info("GoToGoal CANCELLED")
+
+
+async def _run_route_loop(waypoints: list) -> None:
+    global _route_state
+    try:
+        for i, wp in enumerate(waypoints):
+            if not _route_state['active']:
+                break
+            x, y = float(wp[0]), float(wp[1])
+            _route_state.update({'done': i, 'total': len(waypoints), 'state': 'DRIVING'})
+            await _broadcast({'type': 'route_status', 'state': 'DRIVING',
+                              'done': i, 'total': len(waypoints)})
+            log.info("Route: waypoint %d/%d → (%.2f, %.2f)", i + 1, len(waypoints), x, y)
+            await _set_goal(x, y)
+            # Wait for GoToGoal to finish (ARRIVED) or route cancelled
+            while _route_state['active']:
+                await asyncio.sleep(0.1)
+                if not _goal_state['active'] and _goal_state['state'] == 'ARRIVED':
+                    break
+        if _route_state['active']:
+            _route_state.update({'active': False, 'state': 'DONE',
+                                 'done': len(waypoints), 'total': len(waypoints)})
+            await _broadcast({'type': 'route_status', 'state': 'DONE',
+                              'done': len(waypoints), 'total': len(waypoints)})
+            log.info("Route: all %d waypoints reached", len(waypoints))
+    except asyncio.CancelledError:
+        pass
+    finally:
+        _route_state['active'] = False
+
+
+async def _start_route(waypoints: list) -> None:
+    global _route_state, _route_task
+    await _cancel_goal()
+    if _route_task and not _route_task.done():
+        _route_task.cancel()
+        try: await _route_task
+        except asyncio.CancelledError: pass
+    _route_state.update({'active': True, 'state': 'STARTING',
+                         'done': 0, 'total': len(waypoints)})
+    _route_task = asyncio.ensure_future(_run_route_loop(waypoints))
+    await _broadcast({'type': 'route_status', 'state': 'STARTING',
+                      'done': 0, 'total': len(waypoints)})
+    log.info("Route STARTED: %d waypoints", len(waypoints))
+
+
+async def _stop_route() -> None:
+    global _route_task
+    _route_state['active'] = False
+    if _route_task and not _route_task.done():
+        _route_task.cancel()
+        try: await _route_task
+        except asyncio.CancelledError: pass
+    await _cancel_goal()
+    _route_state['state'] = 'IDLE'
+    await _broadcast({'type': 'route_status', 'state': 'IDLE', 'done': 0, 'total': 0})
+    log.info("Route STOPPED")
 
 
 def _append_autonomy_log(line: str) -> None:
@@ -862,8 +921,17 @@ async def _ws_handler(ws: WebSocketServerProtocol) -> None:
                                   'wheel_base':  _odom_state['wheel_base']})
                 continue
 
+            if data.get("cmd") == "start_route":
+                wps = data.get('waypoints', [])
+                if wps:
+                    await _start_route(wps)
+                continue
+            if data.get("cmd") == "stop_route":
+                await _stop_route()
+                continue
+
             if data.get("type") or data.get("cmd") in {
-                "ros_publish", "request_map_path", "start_route", "stop_route",
+                "ros_publish", "request_map_path",
             }:
                 await _broadcast(data)
                 continue

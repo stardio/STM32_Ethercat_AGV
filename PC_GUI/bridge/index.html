@@ -1678,9 +1678,6 @@ const agvUiState = {
   navLocX: null,
   navLocY: null,
   navLocTheta: null,
-  routeState: 'IDLE',
-  routeDone: 0,
-  routeTotal: 0,
   gpsStatus: null,
   gpsLat: null,
   gpsLon: null,
@@ -1706,6 +1703,9 @@ const agvUiState = {
   autonomyLogTail: [],
   draftRoute: [],
   goalMode: 'goal',
+  routeState: 'IDLE',
+  routeDone:  0,
+  routeTotal: 0,
   navGoalStatus: { state: 'IDLE', distance: 0, active: false, goal_x: 0, goal_y: 0 },
   navOdom: { x: 0, y: 0, theta: 0 },
   odoTrack: [],
@@ -2542,7 +2542,7 @@ function navTone(state) {
 }
 
 function routeTone(state) {
-  if (state === 'NAVIGATING') return 'tone-blue';
+  if (state === 'STARTING' || state === 'DRIVING') return 'tone-blue';
   if (state === 'DONE') return 'tone-green';
   if (state === 'FAILED') return 'tone-red';
   if (state === 'CANCELLED') return 'tone-yellow';
@@ -2643,9 +2643,21 @@ function onObstacleAction(m) {
 
 function onRouteStatus(m) {
   agvUiState.routeState = m.state || 'IDLE';
-  agvUiState.routeDone = Number(m.done || 0);
-  agvUiState.routeTotal = Number(m.total || 0);
+  agvUiState.routeDone  = Number(m.done  ?? 0);
+  agvUiState.routeTotal = Number(m.total ?? 0);
   renderNavStatus();
+  if (m.state === 'STARTING') {
+    logMsg(`경로 시작: 총 ${m.total}개 웨이포인트`, 'lok');
+  } else if (m.state === 'DRIVING') {
+    logMsg(`웨이포인트 ${Number(m.done) + 1}/${m.total} 이동 중...`, 'linfo');
+  } else if (m.state === 'DONE') {
+    logMsg(`경로 완료: ${m.total}개 웨이포인트 모두 도달`, 'lok');
+    agvUiState.draftRoute = [];
+    renderDraftRoute();
+  } else if (m.state === 'IDLE') {
+    logMsg('경로 정지.', 'lwarn');
+  }
+  drawGpsTrackCanvas();
 }
 
 function onNavGoalStatus(m) {
@@ -2793,8 +2805,9 @@ function renderSafetyPanel() {
 
 function renderNavStatus() {
   setToneBadge('nav-loc-state', agvUiState.navLocState, navTone(agvUiState.navLocState));
-  const routeText = agvUiState.routeTotal > 0 && agvUiState.routeState === 'NAVIGATING'
-    ? `${agvUiState.routeState} (${agvUiState.routeDone}/${agvUiState.routeTotal})`
+  const routeRunningState = agvUiState.routeState === 'DRIVING' || agvUiState.routeState === 'STARTING';
+  const routeText = routeRunningState && agvUiState.routeTotal > 0
+    ? `${agvUiState.routeState} (${agvUiState.routeDone + 1}/${agvUiState.routeTotal})`
     : agvUiState.routeState;
   el('nav-route-state').textContent = routeText;
   el('nav-route-state').style.color = routeTone(agvUiState.routeState) === 'tone-green'
@@ -3097,6 +3110,8 @@ function drawGpsTrackCanvas() {
 
   // Draft route (orange)
   if (agvUiState.draftRoute.length > 0) {
+    const routeRunning = agvUiState.routeState === 'DRIVING' || agvUiState.routeState === 'STARTING';
+    const activeIdx = routeRunning ? agvUiState.routeDone : -1;
     ctx.strokeStyle = '#f0a30a'; ctx.lineWidth = 2;
     ctx.beginPath();
     agvUiState.draftRoute.forEach((p, idx) => {
@@ -3105,10 +3120,14 @@ function drawGpsTrackCanvas() {
     ctx.stroke();
     agvUiState.draftRoute.forEach((p, idx) => {
       const [px, py] = [sx(p.x), sy(p.y)];
-      ctx.beginPath(); ctx.arc(px, py, 4, 0, Math.PI * 2);
-      ctx.fillStyle = '#f0a30a'; ctx.fill();
+      const isActive  = idx === activeIdx;
+      const isDone    = routeRunning && idx < activeIdx;
+      ctx.beginPath(); ctx.arc(px, py, isActive ? 7 : 4, 0, Math.PI * 2);
+      ctx.fillStyle = isDone ? '#3fb950' : (isActive ? '#58a6ff' : '#f0a30a');
+      ctx.fill();
+      if (isActive) { ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.5; ctx.stroke(); ctx.lineWidth = 2; }
       ctx.fillStyle = '#0d1117'; ctx.font = '11px Courier New';
-      ctx.fillText(String(idx + 1), px + 6, py - 6);
+      ctx.fillText(String(idx + 1), px + 8, py - 6);
     });
   }
 

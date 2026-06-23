@@ -104,18 +104,28 @@ body {
 .view-tab:hover:not(.active) { border-color: var(--accent); }
 
 /* ── VIEW CONTAINERS ────────────────────────────────────────────────── */
-/* 4-col grid: status | controls | joystick | camera  (row2: mission spans 1-3) */
+/* 5-col grid: status | controls | joystick | camera | map */
 #view-agv {
   display: none;
   flex: 1; min-height: 0; overflow: hidden;
   padding: 8px; gap: 8px;
-  grid-template-columns: 200px 1fr 190px 280px;
+  grid-template-columns: 200px 1fr 190px 240px minmax(380px, 1fr);
   grid-template-rows: 1fr auto;
   grid-template-areas:
-    "col1 col2 col3 cam"
-    "mis  mis  mis  cam";
+    "col1 col2 col3 cam  map"
+    "mis  mis  mis  cam  map";
 }
 #view-agv.active { display: grid; }
+
+/* 맵 패널 */
+#map-main-panel {
+  grid-area: map;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-height: 0;
+  overflow: hidden;
+}
 
 /* ── GPS 배지 */
 .gps-badge { display:inline-block; padding:1px 8px; border-radius:10px; font-size:12px; font-weight:700; }
@@ -827,13 +837,15 @@ body {
 .list-item small { color: var(--muted); }
 #gps-track-canvas {
   width: 100%;
-  aspect-ratio: 2 / 1;
+  flex: 1;
+  min-height: 0;
   display: block;
   background:
     radial-gradient(circle at top left, rgba(88,166,255,0.10), transparent 40%),
     linear-gradient(180deg, #10161e 0%, #0d1117 100%);
   border: 1px solid var(--border);
   border-radius: 8px;
+  cursor: crosshair;
 }
 .canvas-legend {
   display: flex;
@@ -925,7 +937,6 @@ body {
   <button class="tbtn" onclick="refreshPorts()" title="포트 목록 새로고침" style="padding:4px 8px;">⟳</button>
   <button class="tbtn" onclick="toggleConn()">Connect</button>
   <button class="tbtn" onclick="openScalePopup()" style="border-color:#d29922;color:#d29922;">스케일 마법사</button>
-  <button class="tbtn" onclick="openMapPopup()" style="border-color:#d29922;color:#d29922;">맵/경로</button>
   <button class="tbtn" onclick="openParams()" style="border-color:#58a6ff;color:#58a6ff;">⚙ 파라미터</button>
   <span id="conn-badge" class="offline">● OFFLINE</span>
 </div>
@@ -1033,7 +1044,6 @@ body {
         <span style="color:var(--muted);">정확도</span><span id="gps-sigma" style="font-family:monospace;">— m</span>
         <span style="color:var(--muted);">Track</span><span id="gps-track-count" style="font-family:monospace;">0</span>
       </div>
-      <button class="mini-btn blue" onclick="openMapPopup()" style="margin-top:5px;font-size:11px;padding:3px 8px;">GPS 지도 열기</button>
     </div>
 
     <div class="panel" style="padding:7px 12px;flex-shrink:0;">
@@ -1049,8 +1059,14 @@ body {
       </div>
       <div style="display:flex;gap:3px;margin-top:5px;flex-wrap:wrap;">
         <button class="mini-btn blue" onclick="requestMapPath()" style="font-size:11px;padding:3px 6px;">경로 갱신</button>
-        <button class="mini-btn yellow" onclick="resetOdom()" style="font-size:11px;padding:3px 6px;">오덤 리셋</button>
+        <button class="mini-btn green" onclick="resetOdom()" style="font-size:11px;padding:3px 6px;" title="현재 위치를 원점(0,0)으로 설정. Goal 설정 전에 먼저 누르세요.">📍 현위치 원점</button>
         <button class="mini-btn yellow" onclick="navCancel()" style="font-size:11px;padding:3px 6px;">Goal 취소</button>
+        <button class="mini-btn orange" onclick="startScaleCalib()" style="font-size:11px;padding:3px 6px;" title="1m 직선 주행 후 클릭 → unit_scale 자동 보정">⚙ 스케일 보정</button>
+      </div>
+      <div id="scale-calib-bar" style="display:none;font-size:11px;color:var(--muted);margin-top:4px;padding:3px 6px;background:var(--border);border-radius:4px;">
+        ① 오도 리셋 → ② 정확히 1m 직선 주행 → ③ 정지 → ④
+        <button class="mini-btn green" onclick="applyScaleCalib()" style="font-size:10px;padding:1px 5px;">✔ 지금 적용</button>
+        <span style="color:var(--muted);">현재 odom x=</span><span id="calib-odom-x" style="font-family:monospace;color:#3fb950;">0.00</span>m
       </div>
     </div>
 
@@ -1188,6 +1204,51 @@ body {
 
   </div><!-- /mis -->
 
+  <!-- map: 경로/오도 지도 (우측 상시 표시, 양쪽 행 span) -->
+  <div id="map-main-panel">
+    <div class="panel" style="padding:7px 10px;flex:1;display:flex;flex-direction:column;gap:4px;min-height:0;overflow:hidden;">
+      <div style="display:flex;align-items:center;gap:6px;flex-shrink:0;">
+        <span class="ph" style="font-size:11px;margin-bottom:0;padding-bottom:0;border-bottom:none;">경로 지도</span>
+        <span style="color:var(--muted);font-size:10px;">● GPS ENU</span>
+        <span style="color:var(--yellow);font-size:10px;">-- Nav2</span>
+        <span style="color:var(--green);font-size:10px;">▲ AGV</span>
+        <span style="color:#3fb950;font-size:10px;">— Odom</span>
+        <span id="map-agv-status" style="margin-left:auto;font-size:10px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"></span>
+      </div>
+      <canvas id="gps-track-canvas" width="960" height="720"></canvas>
+      <div style="display:flex;gap:4px;flex-wrap:wrap;flex-shrink:0;">
+        <button class="mini-btn" onclick="mapZoomIn()" style="font-size:13px;padding:2px 8px;">＋</button>
+        <button class="mini-btn" onclick="mapZoomOut()" style="font-size:13px;padding:2px 8px;">－</button>
+        <button class="mini-btn blue" onclick="mapAutoFit()">Auto-fit</button>
+        <button class="mini-btn green" onclick="resetOdom()" style="font-size:11px;padding:3px 6px;" title="현재 위치를 원점(0,0)으로 설정">📍 현위치 원점</button>
+        <button class="mini-btn green" onclick="setGoalMode('goal')">단일 Goal</button>
+        <button class="mini-btn yellow" onclick="setGoalMode('route')">웨이포인트+</button>
+        <button class="mini-btn blue" onclick="runDraftRoute()">경로 실행</button>
+        <button class="mini-btn red" onclick="stopRoute()">취소</button>
+      </div>
+      <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;font-size:11px;flex-wrap:wrap;">
+        <span style="color:var(--muted);">Goal:</span>
+        <span id="nav-goal-state" style="font-weight:700;color:#8b949e;min-width:60px;">IDLE</span>
+        <span style="color:var(--muted);">거리:</span>
+        <span id="nav-goal-dist" style="font-family:monospace;min-width:45px;">—</span>
+        <span style="color:var(--muted);">odom:</span>
+        <span id="odom-live" style="font-family:monospace;color:#3fb950;font-size:11px;">x=0.00 y=0.00 θ=0°</span>
+        <button class="mini-btn red" onclick="navCancel()" style="margin-left:auto;font-size:10px;padding:2px 5px;">✕ Goal 취소</button>
+      </div>
+      <div style="display:flex;gap:4px;flex-wrap:wrap;flex-shrink:0;">
+        <button class="mini-btn blue" onclick="resetCameraImuHeading()" style="font-size:10px;padding:2px 6px;">IMU heading↺</button>
+        <button class="mini-btn blue" onclick="requestMapPath()" style="font-size:10px;padding:2px 6px;">Nav2 Path</button>
+        <button class="mini-btn yellow" onclick="navCancel()" style="font-size:10px;padding:2px 6px;">Goal 취소</button>
+        <button class="mini-btn yellow" onclick="clearDraftRoute()" style="font-size:10px;padding:2px 6px;">초안지우기</button>
+        <button class="mini-btn red" onclick="clearGpsTrack()" style="font-size:10px;padding:2px 6px;">GPS Track ×</button>
+      </div>
+      <div style="font-size:10px;color:var(--muted);flex-shrink:0;">
+        ① <b>📍 현위치 원점</b> → ② 맵 클릭(Goal 설정) → 자동 이동
+      </div>
+      <div id="draft-route-list" class="route-list" style="flex-shrink:0;font-size:10px;max-height:50px;overflow-y:auto;"></div>
+    </div>
+  </div><!-- /map -->
+
 </div><!-- /view-agv -->
 
 <div id="scale-overlay" class="tool-overlay" onclick="toolPopupOverlayClick(event, 'scale-overlay')">
@@ -1246,50 +1307,92 @@ body {
           </div>
         </div>
       </div>
-    </div>
-  </div>
-</div>
 
-<div id="map-overlay" class="tool-overlay" onclick="toolPopupOverlayClick(event, 'map-overlay')">
-  <div class="tool-modal">
-    <div class="tool-header">
-      <h2>GPS 2D 경로 지도</h2>
-      <button class="tool-close" onclick="closeToolPopup('map-overlay')">닫기</button>
-    </div>
-    <div class="tool-body">
-      <canvas id="gps-track-canvas" width="960" height="480"></canvas>
-      <div class="canvas-legend">
-        <span class="legend-chip" style="color:var(--accent);"><span class="legend-line"></span> GPS ENU Track</span>
-        <span class="legend-chip" style="color:var(--yellow);"><span class="legend-line" style="border-top-style:dashed;"></span> Nav2 Map Path</span>
-        <span class="legend-chip" style="color:var(--green);">▲ AGV Pose</span>
+      <!-- ── 현재 적용중인 값 표시 ── -->
+      <div id="nav-params-current" style="margin-top:12px;padding:7px 12px;background:var(--bg2);border-radius:6px;border-left:3px solid var(--accent);font-size:12px;display:flex;align-items:center;gap:16px;">
+        <span style="color:var(--muted);">현재 bridge.py 적용값:</span>
+        <span>unit_scale <b id="cur-unit-scale" style="color:#3fb950;font-family:monospace;">—</b> counts/mm</span>
+        <span>wheel_base <b id="cur-wheel-base" style="color:#3fb950;font-family:monospace;">—</b> m</span>
+        <span id="cur-params-source" style="color:var(--muted);font-size:11px;"></span>
       </div>
-      <div id="map-agv-status" class="map-help" style="margin-top:6px;">AGV pose: waiting for localization or GPS movement</div>
-      <div class="inline-actions">
-        <button class="mini-btn" onclick="mapZoomIn()" style="font-size:14px;padding:2px 10px;">＋</button>
-        <button class="mini-btn" onclick="mapZoomOut()" style="font-size:14px;padding:2px 10px;">－</button>
-        <button class="mini-btn blue" onclick="mapAutoFit()">Auto-fit</button>
-        <button class="mini-btn green" onclick="setGoalMode('goal')">단일 Goal</button>
-        <button class="mini-btn yellow" onclick="setGoalMode('route')">웨이포인트 추가</button>
-        <button class="mini-btn blue" onclick="runDraftRoute()">경로 실행</button>
-        <button class="mini-btn red" onclick="stopRoute()">경로 취소</button>
-        <button class="mini-btn blue" onclick="resetCameraImuHeading()">IMU heading 리셋</button>
-        <button class="mini-btn blue" onclick="requestMapPath()">Nav2 Path 요청</button>
-        <button class="mini-btn yellow" onclick="navCancel()">현재 Goal 취소</button>
-        <button class="mini-btn yellow" onclick="clearDraftRoute()">초안 지우기</button>
-        <button class="mini-btn red" onclick="clearGpsTrack()">GPS Track 지우기</button>
+
+      <!-- ── 스펙 입력 자동 계산 ── -->
+      <hr style="border:none;border-top:1px solid var(--border);margin:16px 0 12px;">
+      <div style="font-size:13px;font-weight:700;color:var(--accent);margin-bottom:10px;">⚙ 엔코더 스펙 입력 → unit_scale 자동 계산</div>
+      <div style="display:flex;flex-wrap:wrap;gap:18px;align-items:flex-end;">
+
+        <!-- 엔코더 피드백 펄스 -->
+        <div>
+          <div style="font-size:11px;color:var(--muted);margin-bottom:4px;">엔코더 피드백 펄스</div>
+          <div style="font-size:10px;color:var(--muted);margin-bottom:4px;">(counts/rev, 서보드라이브 PDO 기준)</div>
+          <div style="display:flex;align-items:center;gap:4px;">
+            <input id="spec-cpr" type="number" value="10000" min="1" step="100"
+                   oninput="calcScaleSpec()"
+                   style="width:100px;padding:5px 8px;background:var(--bg2);color:var(--text);border:1px solid var(--border);border-radius:4px;font-size:14px;">
+            <span style="font-size:12px;color:var(--muted);">counts/rev</span>
+          </div>
+        </div>
+
+        <!-- 감속비 -->
+        <div>
+          <div style="font-size:11px;color:var(--muted);margin-bottom:4px;">감속비</div>
+          <div style="font-size:10px;color:var(--muted);margin-bottom:4px;">(모터 1회전 당 바퀴 회전수의 역수)</div>
+          <div style="display:flex;align-items:center;gap:4px;">
+            <input id="spec-gear" type="number" value="1" min="0.01" step="0.1"
+                   oninput="calcScaleSpec()"
+                   style="width:80px;padding:5px 8px;background:var(--bg2);color:var(--text);border:1px solid var(--border);border-radius:4px;font-size:14px;">
+            <span style="font-size:12px;color:var(--muted);">: 1</span>
+          </div>
+        </div>
+
+        <!-- 바퀴 직경 -->
+        <div>
+          <div style="font-size:11px;color:var(--muted);margin-bottom:4px;">바퀴 직경</div>
+          <div style="font-size:10px;color:var(--muted);margin-bottom:4px;">(타이어 외경, 지면 접촉 기준)</div>
+          <div style="display:flex;align-items:center;gap:4px;">
+            <input id="spec-dia" type="number" value="300" min="10" step="1"
+                   oninput="calcScaleSpec()"
+                   style="width:80px;padding:5px 8px;background:var(--bg2);color:var(--text);border:1px solid var(--border);border-radius:4px;font-size:14px;">
+            <span style="font-size:12px;color:var(--muted);">mm</span>
+          </div>
+        </div>
+
+        <!-- 계산 결과 -->
+        <div style="min-width:180px;">
+          <div style="font-size:11px;color:var(--muted);margin-bottom:4px;">계산 공식</div>
+          <div style="font-size:10px;color:var(--muted);background:var(--bg2);padding:4px 8px;border-radius:4px;font-family:monospace;margin-bottom:6px;">
+            unit_scale = CPR × 감속비 ÷ (π × 직경)
+          </div>
+          <div style="display:flex;align-items:baseline;gap:6px;">
+            <span style="font-size:22px;font-weight:800;color:#3fb950;" id="spec-result">—</span>
+            <span style="font-size:12px;color:var(--muted);">counts/mm</span>
+          </div>
+          <div style="font-size:11px;color:var(--muted);margin-top:2px;">
+            둘레 = π × <span id="spec-dia-show">300</span>mm = <span id="spec-circ">942.5</span>mm
+          </div>
+        </div>
+
+        <!-- 적용 버튼 -->
+        <div style="display:flex;flex-direction:column;gap:6px;">
+          <button class="tbtn" id="spec-btn-apply" onclick="applyScaleSpec()" disabled
+                  style="padding:6px 14px;border-color:var(--green);color:var(--green);font-weight:700;">
+            ✔ J1+J2 적용<br><span style="font-size:10px;font-weight:400;">(STM32 + bridge.py)</span>
+          </button>
+          <button class="tbtn" id="spec-btn-save" onclick="saveScaleSpec()" disabled
+                  style="padding:5px 14px;border-color:var(--accent);color:var(--accent);">
+            💾 플래시 저장
+          </button>
+          <div id="spec-msg" style="font-size:11px;min-height:14px;"></div>
+        </div>
+
       </div>
-      <div style="display:flex;align-items:center;gap:12px;padding:5px 2px;font-size:13px;">
-        <span style="color:var(--muted);">Goal 상태:</span>
-        <span id="nav-goal-state" style="font-weight:700;color:#8b949e;">IDLE</span>
-        <span style="color:var(--muted);">거리:</span>
-        <span id="nav-goal-dist" style="font-family:monospace;">—</span>
-        <button class="mini-btn red" onclick="navCancel()" style="margin-left:auto;">✕ Goal 취소</button>
+      <!-- 적용 후 확인 정보 -->
+      <div id="spec-applied-info" style="display:none;margin-top:10px;padding:8px 12px;background:var(--bg2);border-radius:6px;font-size:12px;border-left:3px solid #3fb950;">
+        <b style="color:#3fb950;">적용됨:</b>
+        <span id="spec-applied-detail" style="color:var(--muted);"></span>
+        <br><span style="color:var(--muted);">bridge.py odom에도 반영됨 — GoToGoal 재테스트하세요.</span>
       </div>
-      <div class="map-help">
-        스크롤: 확대/축소 (마우스 위치 기준) &nbsp;|&nbsp; 드래그: 이동 &nbsp;|&nbsp; Auto-fit: 초기화<br>
-        클릭: 단일 Goal 전송 &nbsp;|&nbsp; <b>단일 Goal 모드</b>: bridge.py P제어 (Nav2 불필요)
-      </div>
-      <div id="draft-route-list" class="route-list">route draft: empty</div>
+
     </div>
   </div>
 </div>
@@ -1314,14 +1417,6 @@ body {
   <div id="pm-body">
     <div class="pm-group">
       <div class="pm-group-title">기계 파라미터</div>
-      <div class="pm-row">
-        <div>
-          <div class="pm-label">스케일 (unit_scale)</div>
-          <div class="pm-hint">감속비 × 엔코더분해능 ÷ 360</div>
-        </div>
-        <input class="pm-inp" id="p-scale" type="number" min="1" step="1">
-        <span class="pm-unit">cnt/°</span>
-      </div>
       <div class="pm-row">
         <div>
           <div class="pm-label">이송 속도</div>
@@ -1613,6 +1708,7 @@ const agvUiState = {
   goalMode: 'goal',
   navGoalStatus: { state: 'IDLE', distance: 0, active: false, goal_x: 0, goal_y: 0 },
   navOdom: { x: 0, y: 0, theta: 0 },
+  odoTrack: [],
   lastGoal: null,
   mapViewport: { cX: 0, cY: 0, scale: 50, w: 960, h: 480 },
   mapZoom: 1.0,
@@ -1641,8 +1737,10 @@ function lerp(a, b, t) {
 }
 
 function resolveAgvPoseTarget() {
-  const x = agvUiState.navLocX !== null ? agvUiState.navLocX : agvUiState.gpsEnuX;
-  const y = agvUiState.navLocY !== null ? agvUiState.navLocY : agvUiState.gpsEnuY;
+  // AGV 마커는 항상 wheel odom 기준. SLAM localization이 있으면 그것 우선.
+  // GPS ENU는 트랙 선으로만 표시 — 마커 위치에는 사용 안 함.
+  const x = agvUiState.navLocX !== null ? agvUiState.navLocX : agvUiState.navOdom.x;
+  const y = agvUiState.navLocY !== null ? agvUiState.navLocY : agvUiState.navOdom.y;
   let theta = null;
   let source = 'WAITING';
   const imuFresh = agvUiState.cameraYawUpdatedAt > 0 && (Date.now() - agvUiState.cameraYawUpdatedAt) < 1500;
@@ -1845,11 +1943,8 @@ function switchView(name) {
   setTimeout(c3dResize, 30);
 }
 
-function openScalePopup() { el('scale-overlay').classList.add('open'); }
-function openMapPopup() {
-  el('map-overlay').classList.add('open');
-  setTimeout(drawGpsTrackCanvas, 30);
-}
+function openScalePopup() { el('scale-overlay').classList.add('open'); calcScaleSpec(); }
+function openMapPopup() { /* 맵이 메인 패널로 이동됨 — 더 이상 팝업 없음 */ }
 function closeToolPopup(id) { el(id).classList.remove('open'); }
 function toolPopupOverlayClick(e, id) { if (e.target === el(id)) closeToolPopup(id); }
 
@@ -2019,7 +2114,19 @@ function agvUpdateStatus(msg) {
     el('agv-vel-right').textContent = msg.vel_right_hw;
     usUpdateLivePos(msg.pos_left_hw, msg.pos_right_hw);
     if (msg.odom_x !== undefined) {
+      if (_odomResetPending) return;   // 리셋 ack 전 패킷 무시
       agvUiState.navOdom = { x: msg.odom_x, y: msg.odom_y, theta: msg.odom_theta };
+      const odomEl = el('odom-live');
+      if (odomEl) odomEl.textContent = `x=${msg.odom_x.toFixed(2)} y=${msg.odom_y.toFixed(2)} θ=${(msg.odom_theta*180/Math.PI).toFixed(1)}°`;
+      const calibX = el('calib-odom-x');
+      if (calibX && _calibActive) calibX.textContent = Math.abs(msg.odom_x).toFixed(3);
+      const track = agvUiState.odoTrack;
+      const last  = track[track.length - 1];
+      if (!last || Math.hypot(msg.odom_x - last.x, msg.odom_y - last.y) > 0.05) {
+        track.push({ x: msg.odom_x, y: msg.odom_y });
+        if (track.length > 2000) track.splice(0, 500);
+      }
+      drawGpsTrackCanvas();  // navOdom 업데이트마다 즉시 반영
     }
   }
 }
@@ -2117,7 +2224,10 @@ function usApply() {
   if (_usScaleLeft === null || _usScaleRight === null) return;
   ws.send(JSON.stringify({ cmd: 'set_param', axis: 0, param_id: 1, value: _usScaleLeft  }));
   ws.send(JSON.stringify({ cmd: 'set_param', axis: 1, param_id: 1, value: _usScaleRight }));
-  el('us-msg').textContent = `적용됨 — J1: ${_usScaleLeft}, J2: ${_usScaleRight} counts/mm. [플래시 저장]으로 영구 저장하세요.`;
+  const avg = (_usScaleLeft + _usScaleRight) / 2;
+  send({ cmd: 'nav_set_params', unit_scale: avg });
+  agvUiState._unitScale = avg;
+  el('us-msg').textContent = `적용됨 — J1: ${_usScaleLeft}, J2: ${_usScaleRight} counts/mm (평균 ${avg.toFixed(2)}). [플래시 저장]으로 영구 저장하세요.`;
   el('us-msg').style.color = 'var(--green)';
   el('us-btn-save').disabled = false;
 }
@@ -2146,6 +2256,102 @@ function usReadFromFlash() {
   el('us-msg').style.color = 'var(--muted)';
   el('us-btn-read').disabled = true;
   send({ cmd: 'param_read_req' });
+}
+
+// ── 스펙 입력 자동 계산 ──────────────────────────────────────────────────────
+
+let _specScaleValue = null;  // 마지막으로 계산된 unit_scale
+
+function calcScaleSpec() {
+  const cpr  = parseFloat(el('spec-cpr').value)  || 0;
+  const gear = parseFloat(el('spec-gear').value) || 0;
+  const dia  = parseFloat(el('spec-dia').value)  || 0;
+
+  // 입력값 localStorage에 저장 (F5 새로고침 유지)
+  try {
+    localStorage.setItem('spec_cpr',  el('spec-cpr').value);
+    localStorage.setItem('spec_gear', el('spec-gear').value);
+    localStorage.setItem('spec_dia',  el('spec-dia').value);
+  } catch(_) {}
+
+  const circumMm = Math.PI * dia;
+  const resultEl = el('spec-result');
+  const circEl   = el('spec-circ');
+  const diaShowEl = el('spec-dia-show');
+  if (diaShowEl) diaShowEl.textContent = dia.toFixed(0);
+  if (circEl)   circEl.textContent = circumMm.toFixed(1);
+
+  if (cpr <= 0 || gear <= 0 || dia <= 0) {
+    if (resultEl) resultEl.textContent = '—';
+    el('spec-btn-apply').disabled = true;
+    _specScaleValue = null;
+    return;
+  }
+
+  const scale = (cpr * gear) / circumMm;
+  _specScaleValue = scale;
+
+  if (resultEl) resultEl.textContent = scale.toFixed(4);
+  el('spec-btn-apply').disabled = false;
+  el('spec-msg').textContent = '';
+}
+
+function loadSpecFromStorage() {
+  try {
+    const cpr  = localStorage.getItem('spec_cpr');
+    const gear = localStorage.getItem('spec_gear');
+    const dia  = localStorage.getItem('spec_dia');
+    if (cpr  !== null) el('spec-cpr').value  = cpr;
+    if (gear !== null) el('spec-gear').value = gear;
+    if (dia  !== null) el('spec-dia').value  = dia;
+    if (cpr || gear || dia) calcScaleSpec();
+  } catch(_) {}
+}
+
+function applyScaleSpec() {
+  if (_specScaleValue === null) return;
+  const s = _specScaleValue;
+  const sInt = Math.round(s);  // STM32 param은 정수
+
+  // STM32 J1, J2 파라미터 동시 전송
+  ws.send(JSON.stringify({ cmd: 'set_param', axis: 0, param_id: 1, value: sInt }));
+  ws.send(JSON.stringify({ cmd: 'set_param', axis: 1, param_id: 1, value: sInt }));
+
+  // bridge.py odom unit_scale 갱신
+  send({ cmd: 'nav_set_params', unit_scale: s });
+  agvUiState._unitScale = s;
+
+  const cpr  = el('spec-cpr').value;
+  const gear = el('spec-gear').value;
+  const dia  = el('spec-dia').value;
+  const detail = `unit_scale = ${s.toFixed(4)} counts/mm  (CPR=${cpr} × 감속비=${gear}:1 ÷ π×${dia}mm)`;
+
+  el('spec-btn-save').disabled = false;
+  el('spec-msg').textContent = '✔ 적용됨 — 플래시 저장을 눌러 영구 저장하세요.';
+  el('spec-msg').style.color = 'var(--green)';
+
+  const info = el('spec-applied-info');
+  if (info) {
+    info.style.display = 'block';
+    el('spec-applied-detail').textContent = detail;
+  }
+  logMsg(`[스케일] ${detail}`, 'lok');
+}
+
+function saveScaleSpec() {
+  ws.send(JSON.stringify({ cmd: 'save_flash' }));
+  el('spec-msg').textContent = '💾 플래시 저장 요청 전송됨.';
+  el('spec-msg').style.color = 'var(--accent)';
+  el('spec-btn-save').disabled = true;
+}
+
+function updateNavParamsDisplay(unitScale, wheelBase, source) {
+  const scaleEl = el('cur-unit-scale');
+  const wbEl    = el('cur-wheel-base');
+  const srcEl   = el('cur-params-source');
+  if (scaleEl) scaleEl.textContent = Number(unitScale).toFixed(4);
+  if (wbEl)    wbEl.textContent    = Number(wheelBase).toFixed(3);
+  if (srcEl)   srcEl.textContent   = `(${source})`;
 }
 
 // Called from onParams when a param_report arrives — populate wizard current-value display
@@ -2266,7 +2472,26 @@ function onMsg(m) {
     case 'gps_fix':          onGpsFix(m); break;
     case 'gps_odometry':     onGpsOdometry(m); break;
     case 'camera_imu':       onCameraImu(m); break;
-    case 'odom_reset_ack':   logMsg('오덤 리셋 완료', 'lok'); break;
+    case 'odom_reset_ack':
+      _odomResetPending = false;
+      agvUiState.navOdom  = { x: 0, y: 0, theta: 0 };
+      agvUiState.odoTrack = [];
+      agvUiState.lastGoal = null;
+      agvUiState.mapZoom  = 1.0;
+      agvUiState.mapPanX  = 0;
+      agvUiState.mapPanY  = 0;
+      { const oel = el('odom-live'); if (oel) oel.textContent = 'x=0.00 y=0.00 θ=0°'; }
+      drawGpsTrackCanvas();   // navOdom={0,0} → AGV가 원점에 그려짐
+      logMsg('원점(0,0) 설정 완료. 맵을 클릭해 목표 지점을 설정하세요.', 'lok');
+      break;
+    case 'nav_params_saved':
+      agvUiState._unitScale = m.unit_scale;
+      updateNavParamsDisplay(m.unit_scale, m.wheel_base, '저장됨');
+      logMsg(`파라미터 저장됨 — unit_scale: ${Number(m.unit_scale).toFixed(4)} counts/mm, wheel_base: ${Number(m.wheel_base).toFixed(3)} m (bridge.py 재시작 후에도 유지)`, 'lok'); break;
+    case 'nav_params':
+      agvUiState._unitScale = m.unit_scale;
+      updateNavParamsDisplay(m.unit_scale, m.wheel_base, 'nav_params.json 로드');
+      break;
     case 'nav_goal_status':  onNavGoalStatus(m); break;
     case 'connected':
       setBadge(true, m.port, m.baud);
@@ -2353,8 +2578,38 @@ function requestMapPath() {
   send({ cmd: 'request_map_path' });
 }
 
+let _odomResetPending = false;
+
 function resetOdom() {
-  send({ cmd: 'reset_odom' });
+  _odomResetPending = true;          // odom 패킷 차단
+  send({ cmd: 'reset_odom' });       // bridge.py 리셋 요청 (ack 오면 화면 업데이트)
+  logMsg('원점 리셋 요청 전송...', 'linfo');
+}
+
+let _calibActive = false;
+function startScaleCalib() {
+  resetOdom();
+  _calibActive = true;
+  const bar = el('scale-calib-bar');
+  if (bar) bar.style.display = 'block';
+  logMsg('스케일 보정: 오도 리셋됨. 정확히 1m 직선 주행 후 [✔ 지금 적용] 을 누르세요.', 'linfo');
+}
+
+function applyScaleCalib() {
+  const measuredX = Math.abs(agvUiState.navOdom.x);
+  if (measuredX < 0.01) {
+    logMsg('오도 x가 너무 작습니다. 먼저 1m 이상 직진하세요.', 'lwarn');
+    return;
+  }
+  const currentScale = agvUiState._unitScale ?? 4.0;
+  const newScale = currentScale * measuredX / 1.0;
+  agvUiState._unitScale = newScale;
+  send({ cmd: 'nav_set_params', unit_scale: newScale });
+  logMsg(`unit_scale 보정: ${currentScale.toFixed(3)} → ${newScale.toFixed(3)} counts/mm (측정 odom: ${measuredX.toFixed(3)}m / 실제: 1.000m)`, 'lok');
+  _calibActive = false;
+  const bar = el('scale-calib-bar');
+  if (bar) bar.style.display = 'none';
+  resetOdom();
 }
 
 function navCancel() {
@@ -2416,6 +2671,14 @@ function onNavGoalStatus(m) {
     stateEl.style.color = colors[m.state] || '#8b949e';
   }
   if (distEl) distEl.textContent = m.state === 'IDLE' ? '—' : `${Number(m.distance ?? 0).toFixed(2)} m`;
+  // 실시간 odom 좌표 표시 (진단용)
+  if (m.x !== undefined) {
+    const odomEl = el('odom-live');
+    if (odomEl) {
+      const tDeg = (Number(m.theta ?? 0) * 180 / Math.PI).toFixed(1);
+      odomEl.textContent = `x=${Number(m.x).toFixed(2)} y=${Number(m.y).toFixed(2)} θ=${tDeg}°`;
+    }
+  }
   drawGpsTrackCanvas();
 }
 
@@ -2586,9 +2849,11 @@ function stopRoute() {
 }
 
 function sendGoalPose(x, y) {
+  // x, y 는 mapToWorld() 가 반환한 odom 좌표계 값 — 바로 사용한다.
+  const dist = Math.hypot(x - agvUiState.navOdom.x, y - agvUiState.navOdom.y);
   agvUiState.lastGoal = { x, y, active: true };
   send({ cmd: 'nav_goal_set', x, y });
-  logMsg(`Goal 전송: x=${x.toFixed(2)} y=${y.toFixed(2)}`, 'lok');
+  logMsg(`Goal 설정: odom(${x.toFixed(2)}, ${y.toFixed(2)}) 거리 ${dist.toFixed(2)}m`, 'lok');
   drawGpsTrackCanvas();
 }
 
@@ -2714,12 +2979,17 @@ function drawGpsTrackCanvas() {
   ctx.fillStyle = '#0d1117';
   ctx.fillRect(0, 0, w, h);
 
-  // Collect all data points for auto-fit bounds
+  // Auto-fit bounds: odom 좌표계만 사용 (GPS 트랙은 다른 좌표계일 수 있어 제외)
   const pts = [];
-  agvUiState.gpsTrack.forEach(p => pts.push(p));
   agvUiState.navPath.forEach(p => pts.push(p));
+  agvUiState.odoTrack.forEach(p => pts.push(p));
   if (agvUiState.navLocX !== null && agvUiState.navLocY !== null)
     pts.push({ x: agvUiState.navLocX, y: agvUiState.navLocY });
+  agvUiState.draftRoute.forEach(p => pts.push(p));
+  if (agvUiState.lastGoal) pts.push({ x: agvUiState.lastGoal.x, y: agvUiState.lastGoal.y });
+  // AGV 현재 위치 + 원점 항상 포함 (화면에서 사라지지 않도록)
+  pts.push({ x: agvUiState.navOdom.x, y: agvUiState.navOdom.y });
+  pts.push({ x: 0, y: 0 });
 
   let minX = -5, maxX = 5, minY = -5, maxY = 5;
   if (pts.length > 0) {
@@ -2807,6 +3077,24 @@ function drawGpsTrackCanvas() {
     ctx.stroke();
   }
 
+  // Encoder odom track (green) — visible when no GPS
+  if (agvUiState.odoTrack.length > 1) {
+    ctx.strokeStyle = '#3fb950'; ctx.lineWidth = 2;
+    ctx.beginPath();
+    agvUiState.odoTrack.forEach((p, idx) => {
+      idx === 0 ? ctx.moveTo(sx(p.x), sy(p.y)) : ctx.lineTo(sx(p.x), sy(p.y));
+    });
+    ctx.stroke();
+  }
+  // Odom origin marker (green cross at 0,0)
+  {
+    const ox = sx(0), oy = sy(0);
+    ctx.strokeStyle = '#3fb95066'; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(ox - 10, oy); ctx.lineTo(ox + 10, oy);
+    ctx.moveTo(ox, oy - 10); ctx.lineTo(ox, oy + 10);
+    ctx.stroke();
+  }
+
   // Draft route (orange)
   if (agvUiState.draftRoute.length > 0) {
     ctx.strokeStyle = '#f0a30a'; ctx.lineWidth = 2;
@@ -2824,17 +3112,10 @@ function drawGpsTrackCanvas() {
     });
   }
 
-  // AGV pose marker
-  const curX = agvUiState.displayPoseX !== null ? agvUiState.displayPoseX : (agvUiState.navLocX !== null ? agvUiState.navLocX : agvUiState.gpsEnuX);
-  const curY = agvUiState.displayPoseY !== null ? agvUiState.displayPoseY : (agvUiState.navLocY !== null ? agvUiState.navLocY : agvUiState.gpsEnuY);
-  const imuFreshDraw = agvUiState.cameraYawUpdatedAt > 0 && (Date.now() - agvUiState.cameraYawUpdatedAt) < 2000;
-  const rawImuTheta  = imuFreshDraw && agvUiState.cameraImuTheta !== null && agvUiState.cameraImuTheta !== undefined
-    ? normAngle(agvUiState.cameraImuTheta - agvUiState.cameraYawZeroOffset) : null;
-  const curTheta = agvUiState.displayPoseTheta !== null && agvUiState.displayPoseTheta !== undefined
-    ? agvUiState.displayPoseTheta
-    : rawImuTheta !== null ? rawImuTheta
-    : (agvUiState.navLocTheta !== null && agvUiState.navLocTheta !== undefined
-        ? agvUiState.navLocTheta : agvUiState.gpsHeadingTheta);
+  // AGV 마커: navOdom 직접 사용 (애니메이션 중간 변수 없음)
+  const curX = agvUiState.navOdom.x;
+  const curY = agvUiState.navOdom.y;
+  const curTheta = agvUiState.navOdom.theta;
   if (curX !== null && curY !== null) {
     drawAgvMarker(ctx, sx(curX), sy(curY), curTheta);
   } else if (curTheta !== null && curTheta !== undefined) {
@@ -2850,18 +3131,14 @@ function drawGpsTrackCanvas() {
     const ns = agvUiState.navGoalStatus;
     const stateColor = { ROTATING:'#f0a30a', DRIVING:'#3fb950', ARRIVED:'#58a6ff' }[ns?.state] || '#ff7b72';
 
-    // dashed line: AGV → Goal
-    const agvX = agvUiState.navOdom.x !== 0 || agvUiState.navOdom.y !== 0
-      ? agvUiState.navOdom.x : (agvUiState.navLocX ?? agvUiState.gpsEnuX ?? null);
-    const agvY = agvUiState.navOdom.x !== 0 || agvUiState.navOdom.y !== 0
-      ? agvUiState.navOdom.y : (agvUiState.navLocY ?? agvUiState.gpsEnuY ?? null);
-    if (agvX !== null && agvY !== null) {
+    // dashed line: AGV → Goal (uses same curX/curY as AGV marker above)
+    if (curX !== null && curY !== null) {
       ctx.save();
       ctx.setLineDash([8, 5]);
       ctx.strokeStyle = `${stateColor}99`;
       ctx.lineWidth = 1.5;
       ctx.beginPath();
-      ctx.moveTo(sx(agvX), sy(agvY));
+      ctx.moveTo(sx(curX), sy(curY));
       ctx.lineTo(gx, gy);
       ctx.stroke();
       ctx.restore();
@@ -4123,7 +4400,6 @@ function pmPopulate() {
   if (!ax) return;
   const tabColors = ['var(--cx)', 'var(--cy)', 'var(--cz)'];
   el('pm-body').style.borderTop = `2px solid ${tabColors[pmAxisIdx]}`;
-  pmSet('p-scale', ax.unit_scale);
   pmSet('p-vel',   ax.profile_velocity);
   pmSet('p-acc',   ax.profile_accel_ms);
   pmSet('p-dec',   ax.profile_decel_ms);
@@ -4152,7 +4428,6 @@ function pmApply() {
     changes.push(`${inputId}→${val}`);
     inp.dataset.orig = inp.value; inp.classList.remove('dirty');
   }
-  chk('p-scale', PARAM.UNIT_SCALE);
   chk('p-vel',   PARAM.PROFILE_VEL);
   chk('p-acc',   PARAM.PROFILE_ACCEL_MS);
   chk('p-dec',   PARAM.PROFILE_DECEL_MS);
@@ -4259,6 +4534,19 @@ window.addEventListener('load', () => {
   // DH 파라미터 초기화 (저장된 값 우선, 없으면 Generic 기본값)
   if (!dhLoadFromStorage()) dhInitDefaults();
 
+  loadSpecFromStorage();
+  // 캔버스 버퍼를 패널 실제 크기에 동기화
+  const _mapCanvas = el('gps-track-canvas');
+  if (_mapCanvas && window.ResizeObserver) {
+    new ResizeObserver(() => {
+      const r = _mapCanvas.getBoundingClientRect();
+      if (r.width > 10 && r.height > 10) {
+        _mapCanvas.width  = Math.round(r.width);
+        _mapCanvas.height = Math.round(r.height);
+        drawGpsTrackCanvas();
+      }
+    }).observe(_mapCanvas);
+  }
   logMsg('HMI ready — COM 포트를 선택 후 Connect', 'linfo');
   c3dInit();
   el('view-agv').classList.add('active');

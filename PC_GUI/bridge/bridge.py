@@ -229,12 +229,40 @@ _cam_imu:   dict = {"ax": 0.0, "ay": 0.0, "az": 0.0,
 # ── Go-To-Goal controller (경로 B — Nav2 없이 encoder 오도메트리 직접 제어) ────
 _loop: Optional[asyncio.AbstractEventLoop] = None   # set in _run()
 
+_NAV_PARAMS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'nav_params.json')
+
+def _load_nav_params() -> dict:
+    """nav_params.json에서 unit_scale / wheel_base 불러오기."""
+    defaults = {'unit_scale': 4.0, 'wheel_base': 0.60}
+    try:
+        with open(_NAV_PARAMS_FILE, 'r') as f:
+            data = json.load(f)
+        defaults.update({k: float(v) for k, v in data.items() if k in defaults})
+        log.info("Nav params loaded: scale=%.4f wb=%.3f", defaults['unit_scale'], defaults['wheel_base'])
+    except FileNotFoundError:
+        log.info("nav_params.json 없음 — 기본값 사용 (scale=4.0, wb=0.60)")
+    except Exception as exc:
+        log.warning("nav_params.json 읽기 실패: %s — 기본값 사용", exc)
+    return defaults
+
+def _save_nav_params() -> None:
+    """unit_scale / wheel_base를 nav_params.json에 저장."""
+    try:
+        with open(_NAV_PARAMS_FILE, 'w') as f:
+            json.dump({'unit_scale': _odom_state['unit_scale'],
+                       'wheel_base': _odom_state['wheel_base']}, f, indent=2)
+        log.info("Nav params saved → %s  (scale=%.4f wb=%.3f)",
+                 _NAV_PARAMS_FILE, _odom_state['unit_scale'], _odom_state['wheel_base'])
+    except Exception as exc:
+        log.warning("nav_params.json 저장 실패: %s  경로: %s", exc, _NAV_PARAMS_FILE)
+
+_nav_defaults = _load_nav_params()
 _odom_state: dict = {
     'x': 0.0, 'y': 0.0, 'theta': 0.0,
     'pos_left_prev':  None,   # m
     'pos_right_prev': None,   # m
-    'unit_scale': 4.0,        # counts/mm — robot_config.h 기본값
-    'wheel_base': 0.60,       # m
+    'unit_scale': _nav_defaults['unit_scale'],  # counts/mm
+    'wheel_base': _nav_defaults['wheel_base'],  # m
 }
 _goal_state: dict = {'active': False, 'state': 'IDLE', 'x': 0.0, 'y': 0.0}
 _goal_task:  Optional[asyncio.Task] = None
@@ -410,12 +438,12 @@ async def _send_agv_velocity(linear: float, angular: float) -> None:
 
 # ── Go-To-Goal P controller ───────────────────────────────────────────────────
 
-_GOAL_TOL    = 0.25    # m  — 도달 판정 반경
-_HEAD_TOL    = 0.20    # rad — 이 이하면 주행 시작
-_MAX_LINEAR  = 0.40    # m/s
-_MAX_ANGULAR = 0.80    # rad/s
-_KP_LINEAR   = 0.80
-_KP_ANGULAR  = 1.50
+_GOAL_TOL    = 0.30    # m  — 도달 판정 반경
+_HEAD_TOL    = 0.15    # rad — 이 이하면 주행 시작
+_MAX_LINEAR  = 0.30    # m/s
+_MAX_ANGULAR = 0.50    # rad/s
+_KP_LINEAR   = 0.60
+_KP_ANGULAR  = 0.80
 
 
 async def _goto_goal_loop() -> None:
@@ -453,8 +481,11 @@ async def _goto_goal_loop() -> None:
                 angular = max(-_MAX_ANGULAR, min(_MAX_ANGULAR, _KP_ANGULAR * he))
                 _goal_state['state'] = 'DRIVING'
 
-            log.debug("GoToGoal cmd: state=%s lin=%.3f ang=%.3f dist=%.2f",
-                      _goal_state['state'], linear, angular, dist)
+            log.info("GoToGoal [%s] odom(%.2f,%.2f,%.1f°) goal(%.2f,%.2f) dist=%.2f lin=%.2f ang=%.2f",
+                     _goal_state['state'],
+                     o['x'], o['y'], math.degrees(o['theta']),
+                     _goal_state['x'], _goal_state['y'],
+                     dist, linear, angular)
             await _send_agv_velocity(linear, angular)
             await _broadcast({'type': 'nav_goal_status',
                               'state': _goal_state['state'],
@@ -770,6 +801,27 @@ async def _ws_handler(ws: WebSocketServerProtocol) -> None:
         except websockets.exceptions.ConnectionClosed:
             _clients.discard(ws)
             return
+    # Push nav params (unit_scale / wheel_base) so UI shows correct values after F5
+    try:
+        await ws.send(json.dumps({
+            'type': 'nav_params',
+            'unit_scale': _odom_state['unit_scale'],
+            'wheel_base':  _odom_state['wheel_base'],
+        }, separators=(",", ":")))
+    except websockets.exceptions.ConnectionClosed:
+        _clients.discard(ws)
+        return
+    # Push current odom so UI shows real AGV position immediately (not 0,0) after F5
+    try:
+        await ws.send(json.dumps({
+            'type':       'agv_odometry',
+            'odom_x':     round(_odom_state['x'],     4),
+            'odom_y':     round(_odom_state['y'],     4),
+            'odom_theta': round(_odom_state['theta'], 4),
+        }, separators=(",", ":")))
+    except websockets.exceptions.ConnectionClosed:
+        _clients.discard(ws)
+        return
 
     try:
         async for raw_msg in ws:
@@ -804,8 +856,10 @@ async def _ws_handler(ws: WebSocketServerProtocol) -> None:
                     _odom_state['unit_scale'] = float(data['unit_scale'])
                 if 'wheel_base' in data:
                     _odom_state['wheel_base'] = float(data['wheel_base'])
-                log.info("Nav params updated: scale=%.2f wb=%.3f",
-                         _odom_state['unit_scale'], _odom_state['wheel_base'])
+                _save_nav_params()
+                await _broadcast({'type': 'nav_params_saved',
+                                  'unit_scale': _odom_state['unit_scale'],
+                                  'wheel_base':  _odom_state['wheel_base']})
                 continue
 
             if data.get("type") or data.get("cmd") in {

@@ -442,8 +442,10 @@ async def _send_agv_velocity(linear: float, angular: float) -> None:
 
 # ── Go-To-Goal P controller ───────────────────────────────────────────────────
 
-_GOAL_TOL    = 0.30    # m  — 도달 판정 반경
+_GOAL_TOL    = 0.30    # m   — 도달 판정 반경
 _HEAD_TOL    = 0.15    # rad — 이 이하면 주행 시작
+_HEAD_DECEL  = 0.50    # rad — 이 이하부터 회전 감속 시작 (각속도 비례 감소)
+_HEAD_RECORR = 0.25    # rad — 주행 중 이 초과 시 제자리 재회전 (히스테리시스)
 _MAX_LINEAR  = 0.30    # m/s
 _MAX_ANGULAR = 0.50    # rad/s
 _KP_LINEAR   = 0.60
@@ -478,13 +480,22 @@ async def _goto_goal_loop() -> None:
 
             max_lin = _odom_state.get('max_linear',  _MAX_LINEAR)
             max_ang = _odom_state.get('max_angular', _MAX_ANGULAR)
-            if abs(he) > _HEAD_TOL:
+
+            # 회전 감속: HEAD_DECEL 이하에서 max_ang를 비례 감소
+            ang_scale   = min(1.0, abs(he) / _HEAD_DECEL) if abs(he) < _HEAD_DECEL else 1.0
+            eff_max_ang = max_ang * ang_scale
+
+            # 히스테리시스: DRIVING 중 HEAD_RECORR 초과 시 재회전
+            driving = (_goal_state['state'] == 'DRIVING')
+            do_rotate = abs(he) > (_HEAD_RECORR if driving else _HEAD_TOL)
+
+            if do_rotate:
                 linear  = 0.0
-                angular = max(-max_ang, min(max_ang, _KP_ANGULAR * he))
+                angular = max(-eff_max_ang, min(eff_max_ang, _KP_ANGULAR * he))
                 _goal_state['state'] = 'ROTATING'
             else:
                 linear  = min(max_lin, _KP_LINEAR * dist)
-                angular = max(-max_ang, min(max_ang, _KP_ANGULAR * he))
+                angular = max(-eff_max_ang, min(eff_max_ang, _KP_ANGULAR * he))
                 _goal_state['state'] = 'DRIVING'
 
             log.info("GoToGoal [%s] odom(%.2f,%.2f,%.1f°) goal(%.2f,%.2f) dist=%.2f lin=%.2f ang=%.2f",

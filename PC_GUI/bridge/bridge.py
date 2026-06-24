@@ -1177,7 +1177,6 @@ class _HttpHandler(http.server.SimpleHTTPRequestHandler):
             if not name:
                 self._send_json({'ok': False, 'msg': 'name required'}, 400)
                 return
-            payload = self._read_json()
             wps = payload.get('waypoints', [])
             if not wps:
                 self._send_json({'ok': False, 'msg': 'waypoints empty'}, 400)

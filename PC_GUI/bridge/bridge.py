@@ -914,6 +914,10 @@ async def _ws_handler(ws: WebSocketServerProtocol) -> None:
 
             # Go-To-Goal direct controller commands
             if data.get("cmd") == "nav_goal_set":
+                if _route_state['active']:
+                    await _broadcast({'type': 'log', 'msg':
+                        '[경로 실행 중] 단일 Goal 명령 무시 — 먼저 취소 버튼을 누르세요.'})
+                    continue
                 await _set_goal(float(data.get('x', 0.0)), float(data.get('y', 0.0)))
                 continue
             if data.get("cmd") == "nav_goal_cancel":

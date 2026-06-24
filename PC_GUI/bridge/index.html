@@ -2942,8 +2942,17 @@ function initMapInteractions() {
     if (_dragMoved) return;
     const { px, py } = canvasPos(e);
     const world = mapToWorld(px, py);
-    if (agvUiState.goalMode === 'route' || e.shiftKey) addDraftWaypoint(world.x, world.y);
-    else sendGoalPose(world.x, world.y);
+    if (agvUiState.goalMode === 'route' || e.shiftKey) {
+      addDraftWaypoint(world.x, world.y);
+    } else {
+      // 경로 실행 중 단일 Goal 클릭 차단
+      const routeRunning = agvUiState.routeState === 'DRIVING' || agvUiState.routeState === 'STARTING';
+      if (routeRunning) {
+        logMsg('경로 실행 중입니다. 취소 후 단일 Goal을 사용하세요.', 'lwarn');
+        return;
+      }
+      sendGoalPose(world.x, world.y);
+    }
   });
 
   canvas.addEventListener('wheel', e => {
@@ -2974,7 +2983,7 @@ function initMapInteractions() {
     if (!_dragging) return;
     const dx = e.clientX - _dragStartClientX;
     const dy = e.clientY - _dragStartClientY;
-    if (Math.abs(dx) > 3 || Math.abs(dy) > 3) _dragMoved = true;
+    if (Math.abs(dx) > 6 || Math.abs(dy) > 6) _dragMoved = true;
     if (!_dragMoved) return;
     const view = agvUiState.mapViewport;
     if (!view || !view.scale) return;

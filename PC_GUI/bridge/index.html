@@ -1249,13 +1249,16 @@ body {
 
       <!-- 경로 저장/불러오기 패널 -->
       <div style="flex-shrink:0;border-top:1px solid var(--border);padding-top:5px;">
-        <div style="display:flex;gap:4px;align-items:center;margin-bottom:4px;">
-          <span style="font-size:10px;color:var(--muted);white-space:nowrap;">경로 저장:</span>
-          <input id="route-save-name" type="text" placeholder="경로 이름 입력"
-            style="flex:1;background:var(--input-bg);color:var(--text);border:1px solid var(--border);border-radius:3px;padding:2px 5px;font-size:10px;min-width:0;">
+        <div style="display:flex;gap:4px;align-items:center;margin-bottom:3px;">
+          <span style="font-size:10px;color:var(--muted);white-space:nowrap;">경로 저장</span>
+          <span id="route-wp-count" style="font-size:10px;color:var(--yellow);white-space:nowrap;">(초안 0pts)</span>
+          <input id="route-save-name" type="text" placeholder="이름 입력 후 저장"
+            style="flex:1;background:var(--input-bg);color:var(--text);border:1px solid var(--border);border-radius:3px;padding:2px 5px;font-size:10px;min-width:0;"
+            onkeydown="if(event.key==='Enter') saveRoute()">
           <button class="mini-btn blue" onclick="saveRoute()" style="font-size:10px;padding:2px 7px;white-space:nowrap;">저장</button>
         </div>
-        <div id="saved-routes-list" style="font-size:10px;max-height:72px;overflow-y:auto;display:flex;flex-direction:column;gap:2px;"></div>
+        <div id="route-save-msg" style="font-size:10px;min-height:14px;margin-bottom:2px;"></div>
+        <div id="saved-routes-list" style="font-size:10px;max-height:80px;overflow-y:auto;display:flex;flex-direction:column;gap:2px;"></div>
       </div>
     </div>
   </div><!-- /map -->
@@ -2871,6 +2874,7 @@ function setGoalMode(mode) {
 
 function clearDraftRoute() {
   agvUiState.draftRoute = [];
+  updateRouteWpCount();
   renderDraftRoute();
   drawGpsTrackCanvas();
 }
@@ -2894,6 +2898,7 @@ function addDraftWaypoint(x, y) {
   const baseY = prev ? prev.y : (agvUiState.navLocY ?? agvUiState.gpsEnuY ?? y);
   const theta = Math.atan2(y - baseY, x - baseX);
   agvUiState.draftRoute.push({ x, y, theta });
+  updateRouteWpCount();
   renderDraftRoute();
   drawGpsTrackCanvas();
 }
@@ -2925,11 +2930,32 @@ function renderDraftRoute() {
 
 // ── 경로 저장/불러오기 ──────────────────────────────────────────────────────
 
+function _routeSaveMsg(msg, color) {
+  const el2 = el('route-save-msg');
+  if (el2) { el2.textContent = msg; el2.style.color = color || 'var(--muted)'; }
+}
+
+function updateRouteWpCount() {
+  const cnt = agvUiState.draftRoute.length;
+  const el2 = el('route-wp-count');
+  if (el2) {
+    el2.textContent = `(초안 ${cnt}pts)`;
+    el2.style.color = cnt > 0 ? 'var(--green)' : 'var(--yellow)';
+  }
+}
+
 async function saveRoute() {
   const name = (el('route-save-name').value || '').trim();
-  if (!name) { logMsg('저장할 경로 이름을 입력하세요.', 'lwarn'); return; }
-  if (agvUiState.draftRoute.length === 0) { logMsg('저장할 웨이포인트가 없습니다.', 'lwarn'); return; }
+  if (!name) {
+    _routeSaveMsg('이름을 입력하세요.', 'var(--yellow)');
+    return;
+  }
+  if (agvUiState.draftRoute.length === 0) {
+    _routeSaveMsg('웨이포인트+ 모드에서 맵을 클릭해 경로를 먼저 추가하세요.', 'var(--yellow)');
+    return;
+  }
   const wps = agvUiState.draftRoute.map(p => [p.x, p.y, p.theta]);
+  _routeSaveMsg('저장 중...', 'var(--muted)');
   try {
     const res = await fetch(`/routes/${encodeURIComponent(name)}`, {
       method: 'POST',
@@ -2938,13 +2964,16 @@ async function saveRoute() {
     });
     const j = await res.json();
     if (j.ok) {
+      _routeSaveMsg(`"${name}" 저장 완료 (${wps.length}pts)`, 'var(--green)');
       logMsg(`경로 "${name}" 저장 완료 (${wps.length}개 웨이포인트)`, 'lok');
       el('route-save-name').value = '';
       await loadRoutesList();
     } else {
-      logMsg(`저장 실패: ${j.msg}`, 'lerr');
+      _routeSaveMsg(`저장 실패: ${j.msg}`, 'var(--red)');
     }
-  } catch (e) { logMsg(`저장 오류: ${e}`, 'lerr'); }
+  } catch (e) {
+    _routeSaveMsg(`저장 오류: bridge.py 실행 중인지 확인하세요.`, 'var(--red)');
+  }
 }
 
 async function loadRoutesList() {
@@ -2952,34 +2981,44 @@ async function loadRoutesList() {
   if (!box) return;
   try {
     const res = await fetch('/routes');
-    const j   = await res.json();
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const j      = await res.json();
     const routes = j.routes || {};
     const names  = Object.keys(routes);
     if (names.length === 0) {
-      box.innerHTML = '<span style="color:var(--muted);">저장된 경로 없음</span>';
+      box.innerHTML = '<span style="color:var(--muted);">저장된 경로 없음 — 웨이포인트+ 후 저장하세요</span>';
       return;
     }
     box.innerHTML = names.map(n =>
       `<div style="display:flex;align-items:center;gap:4px;background:#1c2330;border-radius:3px;padding:2px 5px;">
         <span style="flex:1;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${n}">${n}</span>
         <span style="color:var(--muted);white-space:nowrap;">${routes[n]}pts</span>
-        <button class="mini-btn blue" onclick="loadRoute('${n.replace(/'/g,"\\'")}')" style="font-size:9px;padding:1px 5px;">불러오기</button>
-        <button class="mini-btn red"  onclick="deleteRoute('${n.replace(/'/g,"\\'")}')" style="font-size:9px;padding:1px 4px;">×</button>
+        <button class="mini-btn blue" onclick="loadRoute('${n.replace(/\\/g,'\\\\').replace(/'/g,"\\'")}')" style="font-size:9px;padding:1px 5px;">불러오기</button>
+        <button class="mini-btn red"  onclick="deleteRoute('${n.replace(/\\/g,'\\\\').replace(/'/g,"\\'")}')" style="font-size:9px;padding:1px 4px;">×</button>
       </div>`
     ).join('');
-  } catch (e) { if (box) box.innerHTML = '<span style="color:var(--muted);">목록 로드 실패</span>'; }
+  } catch (e) {
+    if (box) box.innerHTML = '<span style="color:var(--muted);">목록 로드 실패 (bridge.py 확인)</span>';
+  }
 }
 
 async function loadRoute(name) {
   try {
     const res = await fetch(`/routes/${encodeURIComponent(name)}`);
     const j   = await res.json();
-    if (!j.waypoints) { logMsg(`경로 "${name}" 없음`, 'lerr'); return; }
+    if (!j.waypoints || j.waypoints.length === 0) {
+      _routeSaveMsg(`"${name}" 경로가 비어있습니다.`, 'var(--yellow)');
+      return;
+    }
     agvUiState.draftRoute = j.waypoints.map(wp => ({ x: wp[0], y: wp[1], theta: wp[2] ?? 0 }));
+    updateRouteWpCount();
     renderDraftRoute();
     drawGpsTrackCanvas();
+    _routeSaveMsg(`"${name}" 불러옴 — 경로 실행 버튼을 누르세요.`, 'var(--green)');
     logMsg(`경로 "${name}" 불러옴 (${j.waypoints.length}개 웨이포인트)`, 'lok');
-  } catch (e) { logMsg(`불러오기 오류: ${e}`, 'lerr'); }
+  } catch (e) {
+    _routeSaveMsg(`불러오기 오류: ${e}`, 'var(--red)');
+  }
 }
 
 async function deleteRoute(name) {
@@ -2991,9 +3030,11 @@ async function deleteRoute(name) {
       logMsg(`경로 "${name}" 삭제됨`, 'lok');
       await loadRoutesList();
     } else {
-      logMsg(`삭제 실패: ${j.msg}`, 'lerr');
+      _routeSaveMsg(`삭제 실패: ${j.msg}`, 'var(--red)');
     }
-  } catch (e) { logMsg(`삭제 오류: ${e}`, 'lerr'); }
+  } catch (e) {
+    _routeSaveMsg(`삭제 오류: ${e}`, 'var(--red)');
+  }
 }
 
 function mapToWorld(canvasX, canvasY) {

@@ -585,29 +585,69 @@ async def _cancel_goal() -> None:
     log.info("GoToGoal CANCELLED")
 
 
+_ROUTE_WP_RADIUS = 0.40   # m — 중간 웨이포인트 전환 반경 (정지 없이 다음으로)
+
+
 async def _run_route_loop(waypoints: list) -> None:
+    """연속 경로 추종: 중간 포인트는 반경 내 진입 시 즉시 다음 전환, 마지막만 정지."""
     global _route_state
+    total = len(waypoints)
+    sub_state = 'ROTATING'
     try:
         for i, wp in enumerate(waypoints):
             if not _route_state['active']:
                 break
-            x, y = float(wp[0]), float(wp[1])
-            _route_state.update({'done': i, 'total': len(waypoints), 'state': 'DRIVING'})
+            x, y  = float(wp[0]), float(wp[1])
+            is_last = (i == total - 1)
+            switch_r = _GOAL_TOL if is_last else _ROUTE_WP_RADIUS
+            _route_state.update({'done': i, 'total': total, 'state': 'DRIVING'})
             await _broadcast({'type': 'route_status', 'state': 'DRIVING',
-                              'done': i, 'total': len(waypoints)})
-            log.info("Route: waypoint %d/%d → (%.2f, %.2f)", i + 1, len(waypoints), x, y)
-            await _set_goal(x, y)
-            # Wait for GoToGoal to finish (ARRIVED) or route cancelled
+                              'done': i, 'total': total})
+            log.info("Route: waypoint %d/%d → (%.2f, %.2f)%s",
+                     i + 1, total, x, y, ' [LAST]' if is_last else '')
+
             while _route_state['active']:
-                await asyncio.sleep(0.1)
-                if not _goal_state['active'] and _goal_state['state'] == 'ARRIVED':
-                    break
+                await asyncio.sleep(0.05)   # 20 Hz
+                o    = _odom_state
+                dx   = x - o['x']
+                dy   = y - o['y']
+                dist = math.hypot(dx, dy)
+
+                if dist < switch_r:
+                    if is_last:
+                        await _send_agv_velocity(0.0, 0.0)
+                    break   # 다음 웨이포인트로 (정지 없이)
+
+                target_h = math.atan2(dy, dx)
+                he = math.atan2(math.sin(target_h - o['theta']),
+                                math.cos(target_h - o['theta']))
+
+                max_lin = _odom_state.get('max_linear',  _MAX_LINEAR)
+                max_ang = _odom_state.get('max_angular', _MAX_ANGULAR)
+                ang_scale   = min(1.0, abs(he) / _HEAD_DECEL) if abs(he) < _HEAD_DECEL else 1.0
+                eff_max_ang = max_ang * ang_scale
+
+                do_rotate = abs(he) > (_HEAD_RECORR if sub_state == 'DRIVING' else _HEAD_TOL)
+                if do_rotate:
+                    linear, angular = 0.0, max(-eff_max_ang, min(eff_max_ang, _KP_ANGULAR * he))
+                    sub_state = 'ROTATING'
+                else:
+                    linear  = min(max_lin, _KP_LINEAR * dist)
+                    angular = max(-eff_max_ang, min(eff_max_ang, _KP_ANGULAR * he))
+                    sub_state = 'DRIVING'
+
+                await _send_agv_velocity(linear, angular)
+                await _broadcast({'type': 'nav_goal_status',
+                                  'state': sub_state, 'distance': round(dist, 3),
+                                  'goal_x': x, 'goal_y': y,
+                                  'x': round(o['x'], 3), 'y': round(o['y'], 3),
+                                  'theta': round(o['theta'], 3)})
+
         if _route_state['active']:
-            _route_state.update({'active': False, 'state': 'DONE',
-                                 'done': len(waypoints), 'total': len(waypoints)})
+            _route_state.update({'active': False, 'state': 'DONE', 'done': total, 'total': total})
             await _broadcast({'type': 'route_status', 'state': 'DONE',
-                              'done': len(waypoints), 'total': len(waypoints)})
-            log.info("Route: all %d waypoints reached", len(waypoints))
+                              'done': total, 'total': total})
+            log.info("Route: all %d waypoints reached", total)
     except asyncio.CancelledError:
         pass
     finally:

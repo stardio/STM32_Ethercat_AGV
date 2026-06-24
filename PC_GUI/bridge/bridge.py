@@ -230,6 +230,27 @@ _cam_imu:   dict = {"ax": 0.0, "ay": 0.0, "az": 0.0,
 _loop: Optional[asyncio.AbstractEventLoop] = None   # set in _run()
 
 _NAV_PARAMS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'nav_params.json')
+_ROUTES_FILE     = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'routes.json')
+_routes_lock     = threading.Lock()
+
+
+def _load_all_routes() -> dict:
+    try:
+        with open(_ROUTES_FILE, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    except FileNotFoundError:
+        return {}
+    except Exception as exc:
+        log.warning("routes.json 읽기 실패: %s", exc)
+        return {}
+
+
+def _save_all_routes(routes: dict) -> None:
+    try:
+        with open(_ROUTES_FILE, 'w', encoding='utf-8') as f:
+            json.dump(routes, f, ensure_ascii=False, indent=2)
+    except Exception as exc:
+        log.warning("routes.json 저장 실패: %s", exc)
 
 def _load_nav_params() -> dict:
     """nav_params.json에서 unit_scale / wheel_base 불러오기."""
@@ -1033,10 +1054,28 @@ class _HttpHandler(http.server.SimpleHTTPRequestHandler):
         self.send_header('Expires', '0')
         super().end_headers()
 
+    def do_DELETE(self):
+        if self.path.startswith('/routes/'):
+            name = self.path[len('/routes/'):]
+            if not name:
+                self._send_json({'ok': False, 'msg': 'name required'}, 400)
+                return
+            with _routes_lock:
+                routes = _load_all_routes()
+                if name not in routes:
+                    self._send_json({'ok': False, 'msg': 'not found'}, 404)
+                    return
+                del routes[name]
+                _save_all_routes(routes)
+            log.info("Route deleted: '%s'", name)
+            self._send_json({'ok': True, 'name': name})
+            return
+        self._send_json({'ok': False, 'msg': 'not found'}, 404)
+
     def do_OPTIONS(self):
         self.send_response(204)
         self.send_header('Access-Control-Allow-Origin', '*')
-        self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+        self.send_header('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS')
         self.send_header('Access-Control-Allow-Headers', 'Content-Type')
         self.end_headers()
 
@@ -1087,6 +1126,24 @@ class _HttpHandler(http.server.SimpleHTTPRequestHandler):
                 'theta':   _odom_state['theta'],
             })
             return
+        if path == '/routes':
+            with _routes_lock:
+                routes = _load_all_routes()
+            summary = {name: len(wps) for name, wps in routes.items()}
+            self._send_json({'routes': summary})
+            return
+        if path.startswith('/routes/'):
+            name = path[len('/routes/'):]
+            if not name:
+                self._send_json({'ok': False, 'msg': 'name required'}, 400)
+                return
+            with _routes_lock:
+                routes = _load_all_routes()
+            if name not in routes:
+                self._send_json({'ok': False, 'msg': 'not found'}, 404)
+                return
+            self._send_json({'name': name, 'waypoints': routes[name]})
+            return
         super().do_GET()
 
     def do_POST(self):
@@ -1114,6 +1171,23 @@ class _HttpHandler(http.server.SimpleHTTPRequestHandler):
             if _loop:
                 asyncio.run_coroutine_threadsafe(_cancel_goal(), _loop)
             self._send_json({'ok': True})
+            return
+        if self.path.startswith('/routes/'):
+            name = self.path[len('/routes/'):]
+            if not name:
+                self._send_json({'ok': False, 'msg': 'name required'}, 400)
+                return
+            payload = self._read_json()
+            wps = payload.get('waypoints', [])
+            if not wps:
+                self._send_json({'ok': False, 'msg': 'waypoints empty'}, 400)
+                return
+            with _routes_lock:
+                routes = _load_all_routes()
+                routes[name] = wps
+                _save_all_routes(routes)
+            log.info("Route saved: '%s' (%d waypoints)", name, len(wps))
+            self._send_json({'ok': True, 'name': name, 'count': len(wps)})
             return
         self._send_json({'ok': False, 'msg': 'not found'}, 404)
 
